@@ -13,13 +13,18 @@ geNomad is mandatory; additional tool outputs are passed via repeated
 import argparse
 import csv
 import math
+import re
 import sys
 from pathlib import Path
 
 ID_COLUMNS = ("contig_id", "contig", "seq_name", "sequence", "qseqid", "id", "name", "ID")
 SCORE_COLUMNS = ("plasmid_score", "plasme_score", "plasx_score", "score", "probability", "prob")
 CLASS_COLUMNS = ("classification", "prediction", "label", "class", "verdict")
-POSITIVE_TOKENS = {"plasmid", "1", "true", "yes", "positive", "plas"}
+POSITIVE_LABELS = {"plasmid", "1", "true", "yes", "positive", "plas"}
+NEGATIVE_LABELS = {
+    "chromosome", "chromosomal", "0", "false", "no", "negative",
+    "non plasmid", "not plasmid",
+}
 
 
 def read_fasta(path):
@@ -56,6 +61,18 @@ def pick_column(fieldnames, candidates):
     return None
 
 
+def parse_classification(value, tool_id, path, line_number):
+    """Parse one complete classification label without substring guessing."""
+    normalized = re.sub(r"[\s_-]+", " ", (value or "").strip().lower())
+    if normalized in POSITIVE_LABELS:
+        return True
+    if normalized in NEGATIVE_LABELS:
+        return False
+    raise ValueError(
+        f"Unsupported classification label {value!r} from {tool_id} at {path}:{line_number}"
+    )
+
+
 def parse_generic_predictions(path, tool_id):
     """Return {contig_id: (score, is_plasmid)} from a tabular prediction file."""
     rows = sniff_table(path)
@@ -66,7 +83,7 @@ def parse_generic_predictions(path, tool_id):
     score_col = pick_column(fields, SCORE_COLUMNS)
     class_col = pick_column(fields, CLASS_COLUMNS)
     out = {}
-    for row in rows:
+    for line_number, row in enumerate(rows, 2):
         cid = (row.get(id_col) or "").strip()
         if not cid:
             continue
@@ -75,8 +92,7 @@ def parse_generic_predictions(path, tool_id):
         except ValueError:
             score = 1.0
         if class_col:
-            value = (row.get(class_col) or "").strip().lower()
-            is_plasmid = any(tok in value for tok in POSITIVE_TOKENS)
+            is_plasmid = parse_classification(row.get(class_col), tool_id, path, line_number)
         else:
             # Files like Platon's TSV only list plasmid-positive contigs.
             is_plasmid = True
@@ -158,16 +174,19 @@ def main():
     # contig -> length/gc from the source assembly
     contig_info = {cid: (len(seq), gc_content(seq)) for cid, seq in read_fasta(args.assembly)}
 
-    calls = {"genomad": parse_genomad(args.genomad_summary)}
-    for extra in args.extra:
-        tool = identify_extra(extra)
-        if tool is None:
-            print(f"warning: unrecognized extra prediction file {extra}", file=sys.stderr)
-            continue
-        if tool == "scapp":
-            calls[tool] = parse_scapp(extra)
-        else:
-            calls[tool] = parse_generic_predictions(extra, tool)
+    try:
+        calls = {"genomad": parse_genomad(args.genomad_summary)}
+        for extra in args.extra:
+            tool = identify_extra(extra)
+            if tool is None:
+                print(f"warning: unrecognized extra prediction file {extra}", file=sys.stderr)
+                continue
+            if tool == "scapp":
+                calls[tool] = parse_scapp(extra)
+            else:
+                calls[tool] = parse_generic_predictions(extra, tool)
+    except ValueError as exc:
+        ap.error(str(exc))
 
     weights = parse_weights(args.weights)
     active = list(calls.keys())
