@@ -1,0 +1,6 @@
+name: autoplasm-plasmidhostfinder
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - plasmidhostfinder>=0.1

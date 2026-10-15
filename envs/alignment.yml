@@ -1,0 +1,8 @@
+name: autoplasm-alignment
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bowtie2>=2.5
+  - minimap2>=2.26
+  - samtools>=1.18

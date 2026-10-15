@@ -1,0 +1,6 @@
+name: autoplasm-copla
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - copla>=1.0

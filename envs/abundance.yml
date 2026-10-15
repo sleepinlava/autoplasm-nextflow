@@ -1,0 +1,7 @@
+name: autoplasm-abundance
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - coverm>=0.7
+  - samtools>=1.18

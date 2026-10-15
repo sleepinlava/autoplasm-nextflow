@@ -1,0 +1,8 @@
+name: autoplasm-assembly-hifi
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # hifiasm-meta is not reliably resolvable on all channels; hifiasm>=0.19.5
+  # ships the same metagenomics-capable binary used by ABI as fallback.
+  - hifiasm>=0.19.5

@@ -1,0 +1,6 @@
+name: autoplasm-genomad
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - genomad>=1.8

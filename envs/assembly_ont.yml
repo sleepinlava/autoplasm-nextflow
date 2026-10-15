@@ -1,0 +1,7 @@
+name: autoplasm-assembly-ont
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - flye>=2.9
+  - medaka>=1.11

@@ -1,0 +1,6 @@
+name: autoplasm-minced
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - minced>=0.4.2

@@ -1,0 +1,6 @@
+name: autoplasm-network
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - fastspar>=1.0

@@ -1,0 +1,6 @@
+name: autoplasm-recycler
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - recycler>=0.62

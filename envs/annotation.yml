@@ -1,0 +1,9 @@
+name: autoplasm-annotation
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bakta>=1.9
+  - prodigal>=2.6.3
+  - abricate>=1.0.1
+  - isescan>=1.7.2

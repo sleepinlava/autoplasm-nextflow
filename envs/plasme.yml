@@ -1,0 +1,6 @@
+name: autoplasm-plasme
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - plasme>=1.1

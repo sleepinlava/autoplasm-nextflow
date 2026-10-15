@@ -1,0 +1,8 @@
+name: autoplasm-qc-short
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - fastp>=0.23
+  - fastqc>=0.12
+  - multiqc>=1.20

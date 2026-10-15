@@ -1,0 +1,6 @@
+name: autoplasm-hifiadapterfilt
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - hifiadapterfilt>=3.0

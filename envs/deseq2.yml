@@ -1,0 +1,7 @@
+name: autoplasm-deseq2
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base>=4.3
+  - bioconductor-deseq2>=1.40

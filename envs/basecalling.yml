@@ -1,0 +1,9 @@
+name: autoplasm-basecalling
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - samtools>=1.18
+# NOTE: Dorado is not distributed via conda. Install it from
+# https://github.com/nanoporetech/dorado and make sure it is on PATH
+# when POD5 basecalling is requested.

@@ -1,0 +1,9 @@
+name: autoplasm-comparative
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - mmseqs2>=15.6
+  - blast>=2.14
+  - mummer>=3.23
+  - clinker>=0.0.28

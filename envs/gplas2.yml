@@ -1,0 +1,6 @@
+name: autoplasm-gplas2
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - gplas2>=1.0

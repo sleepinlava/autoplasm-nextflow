@@ -1,0 +1,10 @@
+name: autoplasm-assembly-hybrid
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # hybridSPAdes is part of SPAdes.
+  - spades>=3.15
+# NOTE: OPERA-MS is no longer available from current bioconda channels.
+# Install OPERA-MS.pl manually and put it on PATH to use the opera_ms
+# hybrid assembler (see README).

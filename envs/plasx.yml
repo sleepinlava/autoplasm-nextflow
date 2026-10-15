@@ -1,0 +1,6 @@
+name: autoplasm-plasx
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - plasx>=0.2

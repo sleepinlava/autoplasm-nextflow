@@ -1,0 +1,6 @@
+name: autoplasm-plasmaag
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - plasmaag>=0.1

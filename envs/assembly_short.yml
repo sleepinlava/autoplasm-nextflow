@@ -1,0 +1,7 @@
+name: autoplasm-assembly-short
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - megahit>=1.2.9
+  - spades>=3.15
