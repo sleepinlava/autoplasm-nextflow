@@ -54,6 +54,12 @@ nextflow run . \
 列：`sample_id, group, read1, read2, long_reads, assembly, pod5, bam,
 host_reference, notes`，按平台需要填写。
 
+`sample_id` 必须全表唯一，并符合 `[A-Za-z0-9][A-Za-z0-9_.-]*`。点号、连字符和双下划线均可保留，例如 `A__B.v1`；空值、空白、斜线和其他字符会在流程启动时按样本表行号报错。此约束用于保证输出文件名和 shell 参数具有唯一、明确的样本身份。
+
+丰度合并由流程按每个 CoverM 文件的元数据显式传入样本 ID。独立调用
+`bin/merge_abundance.py` 时也应使用与 `--tables` 顺序对应的 `--sample-ids`；
+为兼容旧调用保留的文件名推断无法无歧义处理点号和后缀相似的样本名。
+
 ## 主要参数（默认值镜像 config_default.yaml）
 
 - 工具开关：`--plasmid_detection_tools`（默认 `['genomad']`）、
@@ -73,6 +79,10 @@ host_reference, notes`，按平台需要填写。
 - 宿主-质粒关联默认关闭：`--host_plasmid_linking true` 开启，
   `--host_linking_methods 'co_abundance,sequence,long_read'`、
   `--host_linking_optional_methods crispr`。
+
+当前 CRISPR 宿主-质粒关联尚未实现。开启宿主关联并把 `crispr` 加入可选方法时，流程会提前明确失败；关闭该方法不影响其他关联类型。Hybrid 的 MetaPhlAn 宿主 profile 使用短读长，每个样本只生成一份 profile。
+
+FastQC 报告以样本、阶段和 read 端命名，例如 `S1.raw.R1_fastqc.zip` 与 `S1.clean.R2_fastqc.html`。FASTQ 输入本身不重写；FastQC 内部记录的输入名也带有相同身份，例如 `S1.raw.R1.fastq.gz`。MultiQC 汇总 raw/clean FastQC ZIP 与 fastp JSON，不重复暂存 HTML。
 
 ## 数据库准备
 
@@ -109,14 +119,23 @@ ABI 不自动下载数据库，本流程同样要求预先准备并通过参数�
 
 ## 验证状态
 
-- 本仓库在编写机上以 Nextflow 25.04.6（Java 21）完成 **`-preview` 语法与
-  数据流验证**：五个平台（illumina/ont/pacbio_hifi/hybrid/assembly）以及
-  "全部可选工具开启"的 illumina 最大分支（49 个进程）均通过。
-- `nextflow config` 配置解析通过。
-- `bin/` 下全部 Python 脚本通过 `py_compile`，DESeq2 R 脚本通过 `Rscript
-  parse`；各内部 handler 脚本（共识、结构、合并、多样性、差异丰度、网络
-  矩阵、三类宿主关联、目录准备、报告）均用合成数据做了功能冒烟测试。
-- **未做真实数据端到端运行**（需要真实读段与数据库）。
+- 本轮 Python 回归使用标准库 `unittest`，运行命令为
+  `python3 -m unittest discover -s tests -p 'test_*.py' -v`。
+- 本次工作区该命令运行 **38 项通过**。当前执行环境没有 Nextflow、FastQC、
+  MultiQC 或 samtools；因此 `python3 tests/run_module_regressions.py --suite all`
+  按设计以非零状态报告各集成套件“未运行”，没有将其计为通过。
+- 本次检查环境为 Python 3.15.0、Java 27，`NXF_SYNTAX_PARSER` 未设置；
+  由于没有 Nextflow，无法确认 Nextflow 26 严格语法下的解析与执行结果。
+- Nextflow 模块回归命令为 `python3 tests/run_module_regressions.py --suite all`；
+  它要求 Nextflow 26，并对 catalog、sequence、sample ID、co-abundance、
+  host routing、可选 MAG、long-read 来源、CRISPR 拒绝保护和真实 FastQC/MultiQC
+  分别运行模块测试。
+  缺少依赖时会以非零状态报告“未运行”，不会把缺失工具计为通过。
+- 先前提交 `ecb200e` 曾在 Nextflow 25.04.6（Java 21）运行 `-preview` 和配置
+  解析；这些是本轮改动前的历史检查，不能替代当前 Nextflow 26 模块验证。
+- 本轮没有真实数据库端到端运行。DAS Tool 的输入/输出接口、其他脚本读取
+  publish 目录时的旧结果风险，以及按 contig 名直接做跨样本关联的生物学
+  可比性，仍需独立处理。
 
 ## 与 ABI 实现的差异（已知简化）
 
