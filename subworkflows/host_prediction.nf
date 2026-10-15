@@ -7,6 +7,19 @@ include { METAPHLAN } from '../modules/host/metaphlan'
 include { KRAKEN2 } from '../modules/host/kraken2'
 include { PLASMIDHOSTFINDER } from '../modules/host/plasmidhostfinder'
 
+workflow HOST_PROFILE_READS {
+    take:
+    ch_short_reads
+    ch_long_reads
+
+    main:
+    ch_short_in = ch_short_reads.map { meta, r1, r2 -> tuple(meta, [r1, r2]) }
+    ch_reads = ch_short_in.mix(ch_long_reads)
+
+    emit:
+    reads = ch_reads
+}
+
 workflow HOST_PREDICTION {
     take:
     ch_short_reads  // tuple(meta, r1, r2); empty when unavailable
@@ -18,10 +31,9 @@ workflow HOST_PREDICTION {
     main:
     ch_host_profile = Channel.empty()
     if (params.host_prediction_tools.contains('metaphlan') && !is_assembly) {
-        ch_short_in = ch_short_reads.map { meta, r1, r2 -> tuple(meta, [r1, r2]) }
-        ch_long_in  = ch_long_reads
+        HOST_PROFILE_READS(ch_short_reads, ch_long_reads)
         METAPHLAN(
-            ch_short_in.mix(ch_long_in),
+            HOST_PROFILE_READS.out.reads,
             Channel.value(file(params.metaphlan_db, checkIfExists: true))
         )
         ch_host_profile = METAPHLAN.out.profile

@@ -83,7 +83,7 @@ workflow ONT {
     HOST_PREDICTION(Channel.empty(), ch_final_long, ch_plasmids, false, false)
     MAG_HOST(ch_assembly, CONTIG_COVERAGE.out.bam, CONTIG_COVERAGE.out.table)
     HOST_LINKING(
-        ch_plasmids, ch_assembly, CONTIG_COVERAGE.out.bam,
+        ch_plasmids, ch_assembly, CONTIG_COVERAGE.out.long_bam,
         PLASMID_ABUNDANCE.out.long_abundance, HOST_PREDICTION.out.host_profile,
         MAG_HOST.out.mag_bins, MAG_HOST.out.taxonomy, true
     )

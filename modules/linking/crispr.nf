@@ -1,7 +1,6 @@
 /*
- * CRISPR spacer matching host-plasmid linking (DAG node:
- * host_plasmid_link_crispr; tool: minced; optional via
- * params.host_linking_optional_methods).
+ * CRISPR spacer matching is not implemented yet. Keep the process boundary so
+ * direct callers receive an explicit failure instead of a fabricated result.
  */
 process LINK_CRISPR {
     tag { meta.id }
@@ -19,9 +18,7 @@ process LINK_CRISPR {
 
     script:
     """
-    # Extract spacers from host genomes, then match them against plasmid contigs
-    minced -spacers ${meta.id}.host_crispr.gff ${host_genomes}/*.fa* > ${meta.id}.host_spacers.txt 2>/dev/null || true
-    minced -spacers ${meta.id}.crispr_spacers.fa ${plasmid_contigs} > ${meta.id}.plasmid_crispr.txt 2>/dev/null || true
-    touch ${meta.id}.crispr_links.tsv
+    echo "ERROR: CRISPR host-plasmid linking is not implemented; disable crispr" >&2
+    exit 2
     """
 }

@@ -3,9 +3,8 @@
  * catalog preparation (internal handler) + MMseqs2 cross-sample clustering
  * (default), plus optional per-sample BLASTn / MUMmer / clinker.
  *
- * The catalog step globs the published 04_plasmid_detection directory, like
- * the ABI handler does (avoids staging name collisions of per-sample
- * plasmid_contigs.fasta files).
+ * The catalog step receives the consensus FASTA files through their channel,
+ * so task dependencies do not rely on asynchronous publication.
  */
 include { PLASMID_CATALOG_PREPARE } from '../modules/comparative/catalog_prepare'
 include { MMSEQS2 } from '../modules/comparative/mmseqs2'
@@ -21,7 +20,11 @@ workflow COMPARATIVE {
     main:
     ch_catalog = Channel.empty()
     if (params.comparative_tools.contains('mmseqs2')) {
-        PLASMID_CATALOG_PREPARE(ch_plasmids.map { meta, f -> meta.id }.collect())
+        ch_catalog_files = ch_plasmids
+            .map { meta, fasta -> fasta }
+            .collect()
+            .filter { files -> !files.isEmpty() }
+        PLASMID_CATALOG_PREPARE(ch_catalog_files)
         MMSEQS2(PLASMID_CATALOG_PREPARE.out.combined)
     }
     if (params.comparative_optional_tools.contains('blast')) {

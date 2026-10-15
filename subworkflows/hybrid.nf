@@ -12,6 +12,7 @@ include { FASTQC; FASTQC as FASTQC_CLEAN } from '../modules/qc/fastqc'
 include { NANOPLOT } from '../modules/qc/nanoplot'
 include { FILTLONG } from '../modules/qc/filtlong'
 include { MULTIQC; MULTIQC as MULTIQC_ONT } from '../modules/qc/multiqc'
+include { SHORT_READ_MULTIQC_INPUTS } from './short_read_multiqc_inputs'
 include { BOWTIE2_HOST_REMOVAL } from '../modules/host_removal/bowtie2_host'
 include { MINIMAP2_HOST_REMOVAL } from '../modules/host_removal/minimap2_host'
 include { OPERA_MS } from '../modules/assembly/opera_ms'
@@ -100,10 +101,10 @@ workflow HYBRID {
     PLASMID_ABUNDANCE(ch_plasmids, ch_final_short, ch_final_long, 'map-ont', true)
 
     // ---------------- host prediction / MAG / linking ----------------
-    HOST_PREDICTION(ch_final_short, ch_final_long, ch_plasmids, false, false)
+    HOST_PREDICTION(ch_final_short, Channel.empty(), ch_plasmids, false, false)
     MAG_HOST(ch_assembly, CONTIG_COVERAGE.out.bam, CONTIG_COVERAGE.out.table)
     HOST_LINKING(
-        ch_plasmids, ch_assembly, CONTIG_COVERAGE.out.bam,
+        ch_plasmids, ch_assembly, CONTIG_COVERAGE.out.long_bam,
         PLASMID_ABUNDANCE.out.short_abundance, HOST_PREDICTION.out.host_profile,
         MAG_HOST.out.mag_bins, MAG_HOST.out.taxonomy, true
     )
@@ -111,7 +112,14 @@ workflow HYBRID {
     COMPARATIVE(ch_plasmids, PLASMID_DOWNSTREAM.out.bakta_dir)
 
     if (params.run_multiqc) {
-        MULTIQC(FASTP.out.json.map { meta, f -> f }.collect(), 'multiqc_illumina')
+        ch_fastqc_raw = Channel.empty()
+        ch_fastqc_clean = Channel.empty()
+        if (params.run_fastqc) {
+            ch_fastqc_raw = FASTQC.out.results
+            ch_fastqc_clean = FASTQC_CLEAN.out.results
+        }
+        SHORT_READ_MULTIQC_INPUTS(FASTP.out.json, ch_fastqc_raw, ch_fastqc_clean, params.run_fastqc)
+        MULTIQC(SHORT_READ_MULTIQC_INPUTS.out.files, 'multiqc_illumina')
         MULTIQC_ONT(NANOPLOT.out.html.collect(), 'multiqc_ont')
     }
 

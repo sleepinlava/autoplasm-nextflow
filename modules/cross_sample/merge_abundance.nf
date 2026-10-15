@@ -11,7 +11,7 @@ process MERGE_ABUNDANCE {
     publishDir "${params.outdir}/tables", mode: params.publish_dir_mode
 
     input:
-    path coverm_tables
+    tuple val(sample_ids), path(coverm_tables)
     val label_name
     val id_column
 
@@ -19,8 +19,12 @@ process MERGE_ABUNDANCE {
     path "${label_name}.tsv", emit: table
 
     script:
-    def files = (coverm_tables in List ? coverm_tables : [coverm_tables]).collect { it.toString() }.join(' ')
+    def files = (coverm_tables in List ? coverm_tables : [coverm_tables])
+        .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ')
+    def ids = (sample_ids in List ? sample_ids : [sample_ids])
+        .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ')
     """
-    merge_abundance.py --tables ${files} --id-column ${id_column} --out ${label_name}.tsv
+    merge_abundance.py --tables ${files} --sample-ids ${ids} \\
+        --id-column '${id_column}' --out '${label_name}.tsv'
     """
 }

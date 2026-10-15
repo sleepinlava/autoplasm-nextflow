@@ -14,8 +14,9 @@ include { PACBIO_HIFI } from './subworkflows/pacbio_hifi'
 include { HYBRID } from './subworkflows/hybrid'
 include { ASSEMBLY } from './subworkflows/assembly'
 include { CROSS_SAMPLE } from './subworkflows/cross_sample'
+include { SAMPLE_ID_VALIDATION } from './subworkflows/sample_id_validation'
 
-// Resolve outdir to an absolute path (the report/catalog steps glob it)
+// Resolve outdir to an absolute path for published outputs and report inputs.
 params.outdir = new File(params.outdir).getAbsolutePath()
 
 def paramError(msg) {
@@ -52,6 +53,9 @@ def cell(header, row, name) {
 }
 
 def validateParams() {
+    if (params.host_plasmid_linking && params.host_linking_optional_methods.contains('crispr')) {
+        paramError("CRISPR host-plasmid linking is not implemented; remove 'crispr' from --host_linking_optional_methods")
+    }
     def platforms = ['illumina', 'ont', 'pacbio_hifi', 'hybrid', 'assembly']
     if (!platforms.contains(params.platform)) {
         paramError("--platform must be one of ${platforms}")
@@ -129,14 +133,19 @@ workflow {
     // ---------------- samplesheet ----------------
     def sheet = new File(params.samplesheet).readLines()
     def header = sheet[0].split('\t') as List
-    def rows = sheet.drop(1).findAll { it.trim() }.collect { it.split('\t', -1) as List }
+    def rowsWithLines = []
+    sheet.drop(1).eachWithIndex { line, index ->
+        if (line.trim()) rowsWithLines << tuple(index + 2, line.split('\t', -1) as List)
+    }
+    def rows = rowsWithLines.collect { entry -> entry[1] }
     if (col(header, 'sample_id') < 0) paramError("samplesheet needs a sample_id column")
     if (rows.isEmpty()) paramError("samplesheet has no data rows")
+    SAMPLE_ID_VALIDATION(Channel.fromList(rowsWithLines), header)
     def groupIdx = col(header, 'group')
     def n_samples = rows.size()
     def n_groups = groupIdx >= 0 ? rows.collect { it[groupIdx] }.unique().size() : 1
 
-    ch_rows = Channel.fromList(rows)
+    ch_rows = SAMPLE_ID_VALIDATION.out.rows
 
     ch_done = Channel.empty()
     ch_plasmids = Channel.empty()

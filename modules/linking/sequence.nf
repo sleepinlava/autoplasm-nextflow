@@ -1,8 +1,9 @@
 /*
  * Sequence similarity host-plasmid linking (k-mer/GC composition; DAG node:
  * host_plasmid_link_sequence; internal handler in ABI, implemented here by
- * bin/sequence_similarity_link.py). Requires MAG bins; GTDB-Tk taxonomy is
- * attached when available. Missing optional inputs arrive as empty lists.
+ * bin/sequence_similarity_link.py). Reads the actual staged MAG directory;
+ * GTDB-Tk taxonomy is attached when available. Missing optional inputs arrive
+ * as empty lists.
  */
 process LINK_SEQUENCE {
     tag { meta.id }
@@ -18,14 +19,23 @@ process LINK_SEQUENCE {
     tuple val(meta), path("${meta.id}.sequence_links.tsv"), emit: links
 
     script:
-    def tax_arg = host_taxonomy ? "--taxonomy ${host_taxonomy}" : ''
-    def bins_arg = mag_bins ? "--host-genomes mag_bins" : ''
+    def binPaths = (mag_bins in List ? mag_bins : (mag_bins ? [mag_bins] : []))
+    if (binPaths.size() > 1) {
+        throw new IllegalArgumentException("LINK_SEQUENCE expects one MAG directory for ${meta.id}, got ${binPaths}")
+    }
+    def taxPaths = (host_taxonomy in List ? host_taxonomy : (host_taxonomy ? [host_taxonomy] : []))
+    if (taxPaths.size() > 1) {
+        throw new IllegalArgumentException("LINK_SEQUENCE expects one taxonomy file for ${meta.id}, got ${taxPaths}")
+    }
+    def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+    def taxArg = taxPaths ? "--taxonomy ${shellQuote(taxPaths[0])}" : ''
+    def binsArg = binPaths ? "--host-genomes ${shellQuote(binPaths[0])}" : ''
     """
     sequence_similarity_link.py \\
-        --plasmid-contigs ${plasmid_contigs} \\
-        ${bins_arg} ${tax_arg} \\
-        --sample-id ${meta.id} \\
+        --plasmid-contigs ${shellQuote(plasmid_contigs)} \\
+        ${binsArg} ${taxArg} \\
+        --sample-id ${shellQuote(meta.id)} \\
         --min-similarity ${params.link_min_similarity} \\
-        --out ${meta.id}.sequence_links.tsv
+        --out ${shellQuote("${meta.id}.sequence_links.tsv")}
     """
 }

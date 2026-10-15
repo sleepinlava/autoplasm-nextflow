@@ -24,9 +24,16 @@ workflow CROSS_SAMPLE {
     ch_metadata = Channel.value(file(params.samplesheet, checkIfExists: true))
 
     if (params.platform != 'assembly') {
+        ch_contig_inputs = ch_contig_tables.toList().map { entries ->
+            tuple(entries.collect { entry -> entry[0].id }, entries.collect { entry -> entry[1] })
+        }
+        ch_plasmid_inputs = ch_plasmid_tables.toList().map { entries ->
+            tuple(entries.collect { entry -> entry[0].id }, entries.collect { entry -> entry[1] })
+        }
+
         // merged contig coverage (diversity / differential input)
         MERGE_ABUNDANCE(
-            ch_contig_tables.map { meta, f -> f }.collect(),
+            ch_contig_inputs,
             'contig_abundance',
             'contig_id'
         )
@@ -34,7 +41,7 @@ workflow CROSS_SAMPLE {
 
         // merged plasmid abundance (DESeq2 / network input; plasmid_id column)
         MERGE_ABUNDANCE_PLASMID(
-            ch_plasmid_tables.map { meta, f -> f }.collect(),
+            ch_plasmid_inputs,
             'plasmid_abundance',
             'plasmid_id'
         )

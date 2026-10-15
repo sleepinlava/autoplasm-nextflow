@@ -8,6 +8,7 @@
 include { FASTP } from '../modules/qc/fastp'
 include { FASTQC; FASTQC as FASTQC_CLEAN } from '../modules/qc/fastqc'
 include { MULTIQC } from '../modules/qc/multiqc'
+include { SHORT_READ_MULTIQC_INPUTS } from './short_read_multiqc_inputs'
 include { BOWTIE2_HOST_REMOVAL } from '../modules/host_removal/bowtie2_host'
 include { MEGAHIT } from '../modules/assembly/megahit'
 include { METASPADES } from '../modules/assembly/metaspades'
@@ -90,7 +91,7 @@ workflow ILLUMINA {
 
     // ---------------- host-plasmid linking (07) ----------------
     HOST_LINKING(
-        ch_plasmids, ch_assembly, CONTIG_COVERAGE.out.bam,
+        ch_plasmids, ch_assembly, Channel.empty(),
         PLASMID_ABUNDANCE.out.short_abundance, HOST_PREDICTION.out.host_profile,
         MAG_HOST.out.mag_bins, MAG_HOST.out.taxonomy, false
     )
@@ -100,14 +101,14 @@ workflow ILLUMINA {
 
     // ---------------- MultiQC ----------------
     if (params.run_multiqc) {
-        ch_qc_files = FASTP.out.json.map { meta, f -> f }
-            .mix(FASTP.out.html.map { meta, f -> f })
+        ch_fastqc_raw = Channel.empty()
+        ch_fastqc_clean = Channel.empty()
         if (params.run_fastqc) {
-            ch_qc_files = ch_qc_files
-                .mix(FASTQC.out.results.map { meta, z, h -> [z, h] }.flatten())
-                .mix(FASTQC_CLEAN.out.results.map { meta, z, h -> [z, h] }.flatten())
+            ch_fastqc_raw = FASTQC.out.results
+            ch_fastqc_clean = FASTQC_CLEAN.out.results
         }
-        MULTIQC(ch_qc_files.collect(), 'multiqc_illumina')
+        SHORT_READ_MULTIQC_INPUTS(FASTP.out.json, ch_fastqc_raw, ch_fastqc_clean, params.run_fastqc)
+        MULTIQC(SHORT_READ_MULTIQC_INPUTS.out.files, 'multiqc_illumina')
     }
 
     emit:

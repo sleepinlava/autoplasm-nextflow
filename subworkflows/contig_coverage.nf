@@ -37,6 +37,7 @@ workflow CONTIG_COVERAGE {
     ch_table = COVERM_CONTIG(ch_bam).table
 
     emit:
-    bam   = ch_bam
-    table = ch_table
+    bam      = ch_bam
+    long_bam = ch_long_bam
+    table    = ch_table
 }
