@@ -1,0 +1,22 @@
+/*
+ * clinker synteny visualization across Bakta GenBank outputs (DAG node:
+ * comparative_clinker; optional via params.comparative_optional_tools).
+ */
+process CLINKER {
+    tag { meta.id }
+    label 'process_low'
+    conda "${projectDir}/envs/comparative.yml"
+
+    publishDir "${params.outdir}/09_comparative_genomics/${meta.id}/clinker", mode: params.publish_dir_mode
+
+    input:
+    tuple val(meta), path(bakta_dir)
+
+    output:
+    tuple val(meta), path("${meta.id}.clinker.html"), emit: html
+
+    script:
+    """
+    clinker ${bakta_dir}/*.gbff -p ${meta.id}.clinker.html
+    """
+}
