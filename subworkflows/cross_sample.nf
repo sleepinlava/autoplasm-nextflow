@@ -3,7 +3,7 @@
  * differential abundance (11), FastSpar co-occurrence network (12), and the
  * final report. Sample-count gates mirror config_default.yaml thresholds.
  */
-include { MERGE_ABUNDANCE } from '../modules/cross_sample/merge_abundance'
+include { MERGE_ABUNDANCE; MERGE_ABUNDANCE as MERGE_ABUNDANCE_PLASMID } from '../modules/cross_sample/merge_abundance'
 include { DIVERSITY } from '../modules/cross_sample/diversity'
 include { DIFFERENTIAL_ABUNDANCE } from '../modules/cross_sample/differential'
 include { DESEQ2 } from '../modules/cross_sample/deseq2'
@@ -33,12 +33,12 @@ workflow CROSS_SAMPLE {
         ch_contig_merged = MERGE_ABUNDANCE.out.table
 
         // merged plasmid abundance (DESeq2 / network input; plasmid_id column)
-        MERGE_ABUNDANCE(
+        MERGE_ABUNDANCE_PLASMID(
             ch_plasmid_tables.map { meta, f -> f }.collect(),
             'plasmid_abundance',
             'plasmid_id'
         )
-        ch_plasmid_merged = MERGE_ABUNDANCE.out.table
+        ch_plasmid_merged = MERGE_ABUNDANCE_PLASMID.out.table
 
         if (params.run_diversity && n_samples >= params.min_diversity_samples) {
             DIVERSITY(ch_contig_merged, ch_metadata)

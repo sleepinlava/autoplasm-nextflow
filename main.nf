@@ -92,6 +92,16 @@ def validateParams() {
 }
 
 workflow {
+    // Accept comma-separated strings from the CLI for all list params
+    def asList = { v -> v instanceof List ? v : (v ? v.toString().split(',').collect { it.trim() } : []) }
+    ['polishing_tools', 'plasmid_detection_tools', 'plasmid_binning_tools',
+     'typing_tools', 'typing_optional_tools', 'host_prediction_tools',
+     'mag_tools', 'host_linking_methods', 'host_linking_optional_methods',
+     'annotation_tools', 'annotation_optional_tools',
+     'comparative_tools', 'comparative_optional_tools'].each { k ->
+        params[k] = asList(params[k])
+    }
+
     validateParams()
 
     // ---------------- samplesheet ----------------

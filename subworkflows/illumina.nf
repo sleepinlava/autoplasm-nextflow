@@ -6,7 +6,7 @@
  * comparative genomics.
  */
 include { FASTP } from '../modules/qc/fastp'
-include { FASTQC } from '../modules/qc/fastqc'
+include { FASTQC; FASTQC as FASTQC_CLEAN } from '../modules/qc/fastqc'
 include { MULTIQC } from '../modules/qc/multiqc'
 include { BOWTIE2_HOST_REMOVAL } from '../modules/host_removal/bowtie2_host'
 include { MEGAHIT } from '../modules/assembly/megahit'
@@ -32,7 +32,7 @@ workflow ILLUMINA {
 
     if (params.run_fastqc) {
         FASTQC(ch_samples.map { meta, r1, r2 -> tuple(meta, 'raw', r1, r2) })
-        FASTQC(ch_clean.map { meta, r1, r2 -> tuple(meta, 'clean', r1, r2) })
+        FASTQC_CLEAN(ch_clean.map { meta, r1, r2 -> tuple(meta, 'clean', r1, r2) })
     }
 
     // ---------------- host removal (optional, per-sample reference) ----------------
@@ -103,7 +103,9 @@ workflow ILLUMINA {
         ch_qc_files = FASTP.out.json.map { meta, f -> f }
             .mix(FASTP.out.html.map { meta, f -> f })
         if (params.run_fastqc) {
-            ch_qc_files = ch_qc_files.mix(FASTQC.out.results.map { meta, z, h -> [z, h] }.flatten())
+            ch_qc_files = ch_qc_files
+                .mix(FASTQC.out.results.map { meta, z, h -> [z, h] }.flatten())
+                .mix(FASTQC_CLEAN.out.results.map { meta, z, h -> [z, h] }.flatten())
         }
         MULTIQC(ch_qc_files.collect(), 'multiqc_illumina')
     }

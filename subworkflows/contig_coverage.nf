@@ -6,7 +6,7 @@
  */
 include { BOWTIE2_CONTIG_COVERAGE } from '../modules/coverage/bowtie2_contig'
 include { MINIMAP2_CONTIG_COVERAGE } from '../modules/coverage/minimap2_contig'
-include { SAMTOOLS_SORT; SAMTOOLS_MERGE } from '../modules/coverage/samtools_sort'
+include { SAMTOOLS_SORT; SAMTOOLS_SORT as SAMTOOLS_SORT_LONG; SAMTOOLS_MERGE } from '../modules/coverage/samtools_sort'
 include { COVERM_CONTIG } from '../modules/coverage/coverm_contig'
 
 workflow CONTIG_COVERAGE {
@@ -21,7 +21,7 @@ workflow CONTIG_COVERAGE {
         BOWTIE2_CONTIG_COVERAGE(ch_assembly.join(ch_short_reads)).alignment
             .map { meta, sam -> tuple(meta, sam, "02_assembly/coverage/${meta.id}", "${meta.id}.contig_alignment.short.bam") }
     ).bam
-    ch_long_bam = SAMTOOLS_SORT(
+    ch_long_bam = SAMTOOLS_SORT_LONG(
         MINIMAP2_CONTIG_COVERAGE(ch_assembly.join(ch_long_reads), long_preset).alignment
             .map { meta, sam -> tuple(meta, sam, "02_assembly/coverage/${meta.id}", "${meta.id}.contig_alignment.long.bam") }
     ).bam

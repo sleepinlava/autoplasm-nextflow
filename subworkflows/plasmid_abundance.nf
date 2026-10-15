@@ -6,8 +6,8 @@
  */
 include { BOWTIE2_ABUNDANCE } from '../modules/abundance/bowtie2_abundance'
 include { MINIMAP2_ABUNDANCE } from '../modules/abundance/minimap2_abundance'
-include { SAMTOOLS_SORT } from '../modules/coverage/samtools_sort'
-include { COVERM_ABUNDANCE } from '../modules/abundance/coverm_abundance'
+include { SAMTOOLS_SORT; SAMTOOLS_SORT as SAMTOOLS_SORT_LONG } from '../modules/coverage/samtools_sort'
+include { COVERM_ABUNDANCE; COVERM_ABUNDANCE as COVERM_ABUNDANCE_LONG } from '../modules/abundance/coverm_abundance'
 
 workflow PLASMID_ABUNDANCE {
     take:
@@ -37,7 +37,7 @@ workflow PLASMID_ABUNDANCE {
         ch_short_sam.map { meta, sam, sub, lbl ->
             tuple(meta, sam, "10_abundance/${meta.id}/${sub}", "${meta.id}${lbl}.bam") }
     ).bam
-    ch_long_bam = SAMTOOLS_SORT(
+    ch_long_bam = SAMTOOLS_SORT_LONG(
         ch_long_sam.map { meta, sam, sub, lbl ->
             tuple(meta, sam, "10_abundance/${meta.id}/${sub}", "${meta.id}${lbl}.bam") }
     ).bam
@@ -45,7 +45,7 @@ workflow PLASMID_ABUNDANCE {
     ch_short_abund = COVERM_ABUNDANCE(
         ch_short_bam.map { meta, bam -> tuple(meta, bam, short_sub, short_lbl) }
     ).abundance
-    ch_long_abund = COVERM_ABUNDANCE(
+    ch_long_abund = COVERM_ABUNDANCE_LONG(
         ch_long_bam.map { meta, bam -> tuple(meta, bam, long_sub, long_lbl) }
     ).abundance
 

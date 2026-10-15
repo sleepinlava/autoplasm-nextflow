@@ -8,10 +8,10 @@
 include { DORADO_BASECALL } from '../modules/basecalling/dorado'
 include { SAMTOOLS_FASTQ } from '../modules/basecalling/samtools_fastq'
 include { FASTP } from '../modules/qc/fastp'
-include { FASTQC } from '../modules/qc/fastqc'
+include { FASTQC; FASTQC as FASTQC_CLEAN } from '../modules/qc/fastqc'
 include { NANOPLOT } from '../modules/qc/nanoplot'
 include { FILTLONG } from '../modules/qc/filtlong'
-include { MULTIQC } from '../modules/qc/multiqc'
+include { MULTIQC; MULTIQC as MULTIQC_ONT } from '../modules/qc/multiqc'
 include { BOWTIE2_HOST_REMOVAL } from '../modules/host_removal/bowtie2_host'
 include { MINIMAP2_HOST_REMOVAL } from '../modules/host_removal/minimap2_host'
 include { OPERA_MS } from '../modules/assembly/opera_ms'
@@ -36,7 +36,7 @@ workflow HYBRID {
     FASTP(ch_short)
     if (params.run_fastqc) {
         FASTQC(ch_short.map { meta, r1, r2 -> tuple(meta, 'raw', r1, r2) })
-        FASTQC(FASTP.out.reads.map { meta, r1, r2 -> tuple(meta, 'clean', r1, r2) })
+        FASTQC_CLEAN(FASTP.out.reads.map { meta, r1, r2 -> tuple(meta, 'clean', r1, r2) })
     }
     ch_br = FASTP.out.reads.branch { meta, r1, r2 ->
         host: meta.host_reference != null
@@ -112,7 +112,7 @@ workflow HYBRID {
 
     if (params.run_multiqc) {
         MULTIQC(FASTP.out.json.map { meta, f -> f }.collect(), 'multiqc_illumina')
-        MULTIQC(NANOPLOT.out.html.collect(), 'multiqc_ont')
+        MULTIQC_ONT(NANOPLOT.out.html.collect(), 'multiqc_ont')
     }
 
     emit:
