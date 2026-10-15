@@ -7,17 +7,17 @@ process ISESCAN {
     label 'process_medium'
     conda "${projectDir}/envs/annotation.yml"
 
-    publishDir "${params.outdir}/08_annotation/${meta.id}/isescan", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/08_annotation/isescan", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs)
 
     output:
-    tuple val(meta), path("isescan_out"), emit: results
+    tuple val(meta), path("${meta.id}.isescan_out", type: 'dir'), emit: results
 
     script:
     """
-    isescan.py --seqfile ${plasmid_contigs} --output isescan_out \\
+    isescan.py --seqfile ${plasmid_contigs} --output ${meta.id}.isescan_out \\
         --nthread ${task.cpus}
     """
 }

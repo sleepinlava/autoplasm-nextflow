@@ -7,7 +7,7 @@ process AMRFINDERPLUS {
     label 'process_low'
     conda "${projectDir}/envs/amrfinderplus.yml"
 
-    publishDir "${params.outdir}/08_annotation/${meta.id}/amrfinderplus", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/08_annotation/amrfinderplus", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs)

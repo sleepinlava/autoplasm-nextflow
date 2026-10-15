@@ -7,7 +7,7 @@ process PLASX {
     label 'process_medium'
     conda "${projectDir}/envs/plasx.yml"
 
-    publishDir "${params.outdir}/04_plasmid_detection/${meta.id}/plasx", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/04_plasmid_detection/plasx", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(assembly)

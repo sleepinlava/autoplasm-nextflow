@@ -7,7 +7,7 @@ process HIFIADAPTERFILT {
     label 'process_medium'
     conda "${projectDir}/envs/hifiadapterfilt.yml"
 
-    publishDir "${params.outdir}/01_qc/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/01_qc/hifiadapterfilt", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(long_reads)

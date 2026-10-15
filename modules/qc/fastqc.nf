@@ -7,7 +7,7 @@ process FASTQC {
     label 'process_low'
     conda "${projectDir}/envs/qc_short.yml"
 
-    publishDir "${params.outdir}/01_qc/${meta.id}/fastqc_${stage}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/01_qc/fastqc", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), val(stage), path(read1), path(read2)

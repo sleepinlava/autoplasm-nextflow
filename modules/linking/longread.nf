@@ -9,7 +9,7 @@ process LINK_LONGREAD {
     label 'process_low'
     conda "${projectDir}/envs/abundance.yml"
 
-    publishDir "${params.outdir}/07_host_prediction/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/07_host_prediction/linking/longread", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs), path(assembly), path(bam)

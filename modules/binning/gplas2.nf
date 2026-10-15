@@ -7,7 +7,7 @@ process GPLAS2 {
     label 'process_medium'
     conda "${projectDir}/envs/gplas2.yml"
 
-    publishDir "${params.outdir}/05_plasmid_binning/${meta.id}/gplas2", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/05_plasmid_binning/gplas2", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs), path(assembly_graph)

@@ -7,17 +7,17 @@ process PLASMAAG {
     label 'process_high'
     conda "${projectDir}/envs/plasmaag.yml"
 
-    publishDir "${params.outdir}/05_plasmid_binning/${meta.id}/plasmaag", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/05_plasmid_binning/plasmaag", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs), path(reads_contigs_table)
 
     output:
-    tuple val(meta), path("plasmaag_out"), emit: bins
+    tuple val(meta), path("${meta.id}.plasmaag_out", type: 'dir'), emit: bins
 
     script:
     """
     plasmaag --reads_and_contigs ${reads_contigs_table} \\
-        --output plasmaag_out --threads ${task.cpus}
+        --output ${meta.id}.plasmaag_out --threads ${task.cpus}
     """
 }

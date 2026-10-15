@@ -7,7 +7,7 @@ process PLASMIDHOSTFINDER {
     label 'process_low'
     conda "${projectDir}/envs/plasmidhostfinder.yml"
 
-    publishDir "${params.outdir}/07_host_prediction/${meta.id}/plasmidhostfinder", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/07_host_prediction/plasmidhostfinder", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs)

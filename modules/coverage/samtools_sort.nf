@@ -1,25 +1,24 @@
 /*
- * samtools sort of a SAM alignment to BAM (DAG nodes: contig_coverage_samtools,
- * abundance_samtools, abundance_samtools_short/long). The output subdirectory
- * and file name travel with the tuple so the same module serves the contig
- * coverage and the plasmid abundance chains.
+ * samtools sort of a contig-coverage SAM alignment to BAM (DAG node:
+ * contig_coverage_samtools). label_suffix distinguishes the short-read and
+ * long-read mapper chains on hybrid ('.short' / '.long').
  */
 process SAMTOOLS_SORT {
     tag { meta.id }
     label 'process_medium'
     conda "${projectDir}/envs/abundance.yml"
 
-    publishDir "${params.outdir}/${out_dir}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/02_assembly/coverage/samtools", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(alignment), val(out_dir), val(out_name)
+    tuple val(meta), path(alignment), val(label_suffix)
 
     output:
-    tuple val(meta), path("${out_name}"), emit: bam
+    tuple val(meta), path("${meta.id}.contig_alignment${label_suffix}.bam"), emit: bam
 
     script:
     """
-    samtools sort -@ ${task.cpus} -o ${out_name} ${alignment}
+    samtools sort -@ ${task.cpus} -o ${meta.id}.contig_alignment${label_suffix}.bam ${alignment}
     """
 }
 
@@ -32,17 +31,17 @@ process SAMTOOLS_MERGE {
     label 'process_low'
     conda "${projectDir}/envs/abundance.yml"
 
-    publishDir "${params.outdir}/${out_dir}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/02_assembly/coverage/samtools", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(bams), val(out_dir), val(out_name)
+    tuple val(meta), path(bams)
 
     output:
-    tuple val(meta), path("${out_name}"), emit: bam
+    tuple val(meta), path("${meta.id}.contig_alignment.bam"), emit: bam
 
     script:
-    def inputs = (bams instanceof List ? bams : [bams]).collect { it.toString() }.join(' ')
+    def inputs = (bams in List ? bams : [bams]).collect { it.toString() }.join(' ')
     """
-    samtools merge -@ ${task.cpus} -o ${out_name} ${inputs}
+    samtools merge -@ ${task.cpus} -o ${meta.id}.contig_alignment.bam ${inputs}
     """
 }

@@ -7,17 +7,17 @@ process SCAPP_BIN {
     label 'process_medium'
     conda "${projectDir}/envs/scapp.yml"
 
-    publishDir "${params.outdir}/05_plasmid_binning/${meta.id}/scapp", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/05_plasmid_binning/scapp", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(assembly_graph), path(read1), path(read2)
 
     output:
-    tuple val(meta), path("scapp_bin_out"), emit: output_dir
+    tuple val(meta), path("${meta.id}.scapp_bin_out", type: 'dir'), emit: output_dir
 
     script:
     """
-    scapp -g ${assembly_graph} -o scapp_bin_out -k 77 -p ${task.cpus} \\
+    scapp -g ${assembly_graph} -o ${meta.id}.scapp_bin_out -k 77 -p ${task.cpus} \\
         -r1 ${read1} -r2 ${read2}
     """
 }

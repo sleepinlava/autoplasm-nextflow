@@ -7,17 +7,17 @@ process INTEGRONFINDER {
     label 'process_medium'
     conda "${projectDir}/envs/integronfinder.yml"
 
-    publishDir "${params.outdir}/08_annotation/${meta.id}/integronfinder", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/08_annotation/integronfinder", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs)
 
     output:
-    tuple val(meta), path("integronfinder_out"), emit: results
+    tuple val(meta), path("${meta.id}.integronfinder_out", type: 'dir'), emit: results
 
     script:
     """
-    integron_finder --outdir integronfinder_out --cpu ${task.cpus} \\
+    integron_finder --outdir ${meta.id}.integronfinder_out --cpu ${task.cpus} \\
         ${plasmid_contigs}
     """
 }

@@ -19,7 +19,7 @@ process MERGE_ABUNDANCE {
     path "${label_name}.tsv", emit: table
 
     script:
-    def files = (coverm_tables instanceof List ? coverm_tables : [coverm_tables]).collect { it.toString() }.join(' ')
+    def files = (coverm_tables in List ? coverm_tables : [coverm_tables]).collect { it.toString() }.join(' ')
     """
     merge_abundance.py --tables ${files} --id-column ${id_column} --out ${label_name}.tsv
     """

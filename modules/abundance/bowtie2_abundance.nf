@@ -1,21 +1,21 @@
 /*
  * Bowtie2 mapping of short reads to plasmid contigs for abundance estimation
  * (DAG nodes: abundance_bowtie2 and abundance_bowtie2_short for hybrid).
- * sub_dir/label_suffix travel with the tuple ('' for the primary chain,
- * 'short'/'.short' for the hybrid short-read chain).
+ * label_suffix is '' for the primary chain and '.short' for the hybrid
+ * short-read chain.
  */
 process BOWTIE2_ABUNDANCE {
     tag { "${meta.id}${label_suffix}" }
     label 'process_medium'
     conda "${projectDir}/envs/alignment.yml"
 
-    publishDir "${params.outdir}/10_abundance/${meta.id}/${sub_dir}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/10_abundance/bowtie2", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(plasmid_contigs), path(read1), path(read2), val(sub_dir), val(label_suffix)
+    tuple val(meta), path(plasmid_contigs), path(read1), path(read2), val(label_suffix)
 
     output:
-    tuple val(meta), path("${meta.id}${label_suffix}.sam"), val(sub_dir), val(label_suffix), emit: alignment
+    tuple val(meta), path("${meta.id}${label_suffix}.sam"), val(label_suffix), emit: alignment
 
     script:
     """

@@ -8,7 +8,7 @@ process HIFIASM_META {
     label 'process_highmem'
     conda "${projectDir}/envs/assembly_hifi.yml"
 
-    publishDir "${params.outdir}/02_assembly/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/02_assembly/hifiasm_meta", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(long_reads)

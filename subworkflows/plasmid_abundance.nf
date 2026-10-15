@@ -6,7 +6,7 @@
  */
 include { BOWTIE2_ABUNDANCE } from '../modules/abundance/bowtie2_abundance'
 include { MINIMAP2_ABUNDANCE } from '../modules/abundance/minimap2_abundance'
-include { SAMTOOLS_SORT; SAMTOOLS_SORT as SAMTOOLS_SORT_LONG } from '../modules/coverage/samtools_sort'
+include { SAMTOOLS_SORT_ABUND; SAMTOOLS_SORT_ABUND as SAMTOOLS_SORT_ABUND_LONG } from '../modules/abundance/samtools_abundance'
 include { COVERM_ABUNDANCE; COVERM_ABUNDANCE as COVERM_ABUNDANCE_LONG } from '../modules/abundance/coverm_abundance'
 
 workflow PLASMID_ABUNDANCE {
@@ -18,36 +18,24 @@ workflow PLASMID_ABUNDANCE {
     hybrid         // val: boolean — emit short/long labelled outputs
 
     main:
-    def short_sub  = hybrid ? 'short' : ''
     def short_lbl  = hybrid ? '.short' : ''
-    def long_sub   = hybrid ? 'long' : ''
     def long_lbl   = hybrid ? '.long' : ''
 
     ch_short_sam = BOWTIE2_ABUNDANCE(
         ch_plasmids.join(ch_short_reads)
-            .map { meta, contigs, r1, r2 -> tuple(meta, contigs, r1, r2, short_sub, short_lbl) }
+            .map { meta, contigs, r1, r2 -> tuple(meta, contigs, r1, r2, short_lbl) }
     ).alignment
     ch_long_sam = MINIMAP2_ABUNDANCE(
         ch_plasmids.join(ch_long_reads)
-            .map { meta, contigs, lr -> tuple(meta, contigs, lr, long_sub, long_lbl) },
+            .map { meta, contigs, lr -> tuple(meta, contigs, lr, long_lbl) },
         long_preset
     ).alignment
 
-    ch_short_bam = SAMTOOLS_SORT(
-        ch_short_sam.map { meta, sam, sub, lbl ->
-            tuple(meta, sam, "10_abundance/${meta.id}/${sub}", "${meta.id}${lbl}.bam") }
-    ).bam
-    ch_long_bam = SAMTOOLS_SORT_LONG(
-        ch_long_sam.map { meta, sam, sub, lbl ->
-            tuple(meta, sam, "10_abundance/${meta.id}/${sub}", "${meta.id}${lbl}.bam") }
-    ).bam
+    ch_short_bam = SAMTOOLS_SORT_ABUND(ch_short_sam).bam
+    ch_long_bam = SAMTOOLS_SORT_ABUND_LONG(ch_long_sam).bam
 
-    ch_short_abund = COVERM_ABUNDANCE(
-        ch_short_bam.map { meta, bam -> tuple(meta, bam, short_sub, short_lbl) }
-    ).abundance
-    ch_long_abund = COVERM_ABUNDANCE_LONG(
-        ch_long_bam.map { meta, bam -> tuple(meta, bam, long_sub, long_lbl) }
-    ).abundance
+    ch_short_abund = COVERM_ABUNDANCE(ch_short_bam).abundance
+    ch_long_abund = COVERM_ABUNDANCE_LONG(ch_long_bam).abundance
 
     emit:
     short_abundance = ch_short_abund  // tuple(meta, tsv); empty on long-only platforms

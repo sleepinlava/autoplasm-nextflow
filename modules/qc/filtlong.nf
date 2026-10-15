@@ -7,7 +7,7 @@ process FILTLONG {
     label 'process_medium'
     conda "${projectDir}/envs/qc_long.yml"
 
-    publishDir "${params.outdir}/01_qc/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/01_qc/filtlong", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(long_reads)

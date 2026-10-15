@@ -7,7 +7,7 @@ process PLATON {
     label 'process_medium'
     conda "${projectDir}/envs/platon.yml"
 
-    publishDir "${params.outdir}/04_plasmid_detection/${meta.id}/platon", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/04_plasmid_detection/platon", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(assembly)

@@ -8,7 +8,7 @@ process PLASMID_STRUCTURE {
     label 'process_single'
     conda "${projectDir}/envs/python.yml"
 
-    publishDir "${params.outdir}/04_plasmid_detection/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/04_plasmid_detection/structure", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs)

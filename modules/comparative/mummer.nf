@@ -8,7 +8,7 @@ process MUMMER {
     label 'process_medium'
     conda "${projectDir}/envs/comparative.yml"
 
-    publishDir "${params.outdir}/09_comparative_genomics/${meta.id}/mummer", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/09_comparative_genomics/mummer", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs)

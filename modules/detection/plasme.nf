@@ -7,7 +7,7 @@ process PLASME {
     label 'process_medium'
     conda "${projectDir}/envs/plasme.yml"
 
-    publishDir "${params.outdir}/04_plasmid_detection/${meta.id}/plasme", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/04_plasmid_detection/plasme", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(assembly)

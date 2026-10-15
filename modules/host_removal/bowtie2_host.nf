@@ -7,7 +7,7 @@ process BOWTIE2_HOST_REMOVAL {
     label 'process_medium'
     conda "${projectDir}/envs/alignment.yml"
 
-    publishDir "${params.outdir}/01_qc/host_removal/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/01_qc/host_removal/bowtie2", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(read1), path(read2), path(host_reference)

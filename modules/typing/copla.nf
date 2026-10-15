@@ -7,7 +7,7 @@ process COPLA {
     label 'process_medium'
     conda "${projectDir}/envs/copla.yml"
 
-    publishDir "${params.outdir}/06_plasmid_typing/${meta.id}/copla", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/06_plasmid_typing/copla", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs)

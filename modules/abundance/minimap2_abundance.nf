@@ -7,14 +7,14 @@ process MINIMAP2_ABUNDANCE {
     label 'process_medium'
     conda "${projectDir}/envs/alignment.yml"
 
-    publishDir "${params.outdir}/10_abundance/${meta.id}/${sub_dir}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/10_abundance/minimap2", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(plasmid_contigs), path(long_reads), val(sub_dir), val(label_suffix)
+    tuple val(meta), path(plasmid_contigs), path(long_reads), val(label_suffix)
     val preset
 
     output:
-    tuple val(meta), path("${meta.id}${label_suffix}.sam"), val(sub_dir), val(label_suffix), emit: alignment
+    tuple val(meta), path("${meta.id}${label_suffix}.sam"), val(label_suffix), emit: alignment
 
     script:
     """

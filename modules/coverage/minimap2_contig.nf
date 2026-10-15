@@ -7,7 +7,7 @@ process MINIMAP2_CONTIG_COVERAGE {
     label 'process_medium'
     conda "${projectDir}/envs/alignment.yml"
 
-    publishDir "${params.outdir}/02_assembly/coverage/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/02_assembly/coverage/minimap2", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(assembly), path(long_reads)

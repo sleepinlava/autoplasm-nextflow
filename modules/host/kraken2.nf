@@ -7,7 +7,7 @@ process KRAKEN2 {
     label 'process_medium'
     conda "${projectDir}/envs/host_prediction.yml"
 
-    publishDir "${params.outdir}/07_host_prediction/${meta.id}/kraken2", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/07_host_prediction/kraken2", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(read1), path(read2)

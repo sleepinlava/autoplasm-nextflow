@@ -8,7 +8,7 @@ process LINK_CRISPR {
     label 'process_medium'
     conda "${projectDir}/envs/minced.yml"
 
-    publishDir "${params.outdir}/07_host_prediction/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/07_host_prediction/linking/crispr", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs), path(host_genomes)

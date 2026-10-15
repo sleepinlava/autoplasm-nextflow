@@ -7,7 +7,7 @@ process MINIMAP2_HOST_REMOVAL {
     label 'process_medium'
     conda "${projectDir}/envs/alignment.yml"
 
-    publishDir "${params.outdir}/01_qc/host_removal/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/01_qc/host_removal/minimap2", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(long_reads), path(host_reference)

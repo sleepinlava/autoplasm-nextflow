@@ -6,7 +6,7 @@ process CHECKM2 {
     label 'process_high'
     conda "${projectDir}/envs/checkm2.yml"
 
-    publishDir "${params.outdir}/07_host_prediction/mag/${meta.id}/checkm2", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/07_host_prediction/mag/checkm2", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(mag_bins)

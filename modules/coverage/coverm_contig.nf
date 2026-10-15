@@ -8,7 +8,7 @@ process COVERM_CONTIG {
     label 'process_medium'
     conda "${projectDir}/envs/abundance.yml"
 
-    publishDir "${params.outdir}/02_assembly/coverage/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/02_assembly/coverage/coverm", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(bam)

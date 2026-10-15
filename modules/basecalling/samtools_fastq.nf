@@ -6,7 +6,7 @@ process SAMTOOLS_FASTQ {
     label 'process_low'
     conda "${projectDir}/envs/basecalling.yml"
 
-    publishDir "${params.outdir}/00_input_validation/basecalling/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/00_input_validation/basecalling/samtools_fastq", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(bam)

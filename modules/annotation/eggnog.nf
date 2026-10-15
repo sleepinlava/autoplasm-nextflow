@@ -8,19 +8,19 @@ process EGGNOG_MAPPER {
     label 'process_medium'
     conda "${projectDir}/envs/eggnog.yml"
 
-    publishDir "${params.outdir}/08_annotation/${meta.id}/eggnog", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/08_annotation/eggnog", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs)
     path eggnog_db
 
     output:
-    tuple val(meta), path("eggnog_out"), emit: output_dir
+    tuple val(meta), path("${meta.id}.eggnog_out", type: 'dir'), emit: output_dir
 
     script:
     """
-    mkdir -p eggnog_out
-    emapper.py -i ${plasmid_contigs} --output eggnog_out/${meta.id}.eggnog \\
+    mkdir -p ${meta.id}.eggnog_out
+    emapper.py -i ${plasmid_contigs} --output ${meta.id}.eggnog_out/${meta.id}.eggnog \\
         --cpu ${task.cpus} --data_dir ${eggnog_db}
     """
 }

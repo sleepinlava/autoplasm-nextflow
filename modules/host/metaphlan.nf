@@ -8,7 +8,7 @@ process METAPHLAN {
     label 'process_medium'
     conda "${projectDir}/envs/host_prediction.yml"
 
-    publishDir "${params.outdir}/07_host_prediction/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/07_host_prediction/metaphlan", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(reads)
@@ -18,7 +18,7 @@ process METAPHLAN {
     tuple val(meta), path("${meta.id}.metaphlan.tsv"), emit: profile
 
     script:
-    def input_arg = reads instanceof List ? reads.collect { it.toString() }.join(',') : reads.toString()
+    def input_arg = reads in List ? reads.collect { it.toString() }.join(',') : reads.toString()
     """
     metaphlan ${input_arg} --input_type fastq \\
         --nproc ${task.cpus} \\

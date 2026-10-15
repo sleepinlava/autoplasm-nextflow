@@ -7,7 +7,7 @@ process MOB_TYPER {
     label 'process_low'
     conda "${projectDir}/envs/typing.yml"
 
-    publishDir "${params.outdir}/06_plasmid_typing/${meta.id}/mob_typer", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/06_plasmid_typing/mob_typer", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs)

@@ -7,10 +7,10 @@ process COVERM_ABUNDANCE {
     label 'process_medium'
     conda "${projectDir}/envs/abundance.yml"
 
-    publishDir "${params.outdir}/10_abundance/${meta.id}/${sub_dir}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/10_abundance/coverm", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(bam), val(sub_dir), val(label_suffix)
+    tuple val(meta), path(bam), val(label_suffix)
 
     output:
     tuple val(meta), path("${meta.id}${label_suffix}.coverm.tsv"), emit: abundance

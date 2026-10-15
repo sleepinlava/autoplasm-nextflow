@@ -28,6 +28,29 @@ def optFile(s) {
     return (s != null && s.toString().trim()) ? file(s.toString().trim()) : null
 }
 
+// Accept comma-separated strings from the CLI for list params
+def asList(v) {
+    return (v in List) ? v : (v ? v.toString().split(',').collect { it.trim() } : [])
+}
+
+def col(header, name) {
+    return header.indexOf(name)
+}
+
+def metaOf(header, row) {
+    def meta = [id: row[col(header, 'sample_id')]]
+    def groupIdx = col(header, 'group')
+    meta.group = groupIdx >= 0 ? (row[groupIdx] ?: '') : ''
+    def hrIdx = col(header, 'host_reference')
+    def hr = (hrIdx >= 0 && row[hrIdx]) ? row[hrIdx].trim() : null
+    meta.host_reference = hr ?: params.host_reference
+    return meta
+}
+
+def cell(header, row, name) {
+    return col(header, name) >= 0 ? optFile(row[col(header, name)]) : null
+}
+
 def validateParams() {
     def platforms = ['illumina', 'ont', 'pacbio_hifi', 'hybrid', 'assembly']
     if (!platforms.contains(params.platform)) {
@@ -78,7 +101,7 @@ def validateParams() {
     if (params.comparative_optional_tools.contains('clinker') && !params.annotation_tools.contains('bakta')) {
         paramError("comparative_optional_tools 'clinker' requires annotation_tools 'bakta'")
     }
-    for (entry in required) {
+    required.each { entry ->
         if (!entry[1]) {
             paramError("an enabled tool requires --${entry[0]}")
         }
@@ -93,7 +116,6 @@ def validateParams() {
 
 workflow {
     // Accept comma-separated strings from the CLI for all list params
-    def asList = { v -> v instanceof List ? v : (v ? v.toString().split(',').collect { it.trim() } : []) }
     ['polishing_tools', 'plasmid_detection_tools', 'plasmid_binning_tools',
      'typing_tools', 'typing_optional_tools', 'host_prediction_tools',
      'mag_tools', 'host_linking_methods', 'host_linking_optional_methods',
@@ -107,25 +129,14 @@ workflow {
     // ---------------- samplesheet ----------------
     def sheet = new File(params.samplesheet).readLines()
     def header = sheet[0].split('\t') as List
-    def col = { name -> header.indexOf(name) }
     def rows = sheet.drop(1).findAll { it.trim() }.collect { it.split('\t', -1) as List }
-    if (col('sample_id') < 0) paramError("samplesheet needs a sample_id column")
+    if (col(header, 'sample_id') < 0) paramError("samplesheet needs a sample_id column")
     if (rows.isEmpty()) paramError("samplesheet has no data rows")
-    def groupIdx = col('group')
+    def groupIdx = col(header, 'group')
     def n_samples = rows.size()
     def n_groups = groupIdx >= 0 ? rows.collect { it[groupIdx] }.unique().size() : 1
 
-    def metaOf = { row ->
-        def meta = [id: row[col('sample_id')]]
-        meta.group = groupIdx >= 0 ? (row[groupIdx] ?: '') : ''
-        def hrIdx = col('host_reference')
-        def hr = hrIdx >= 0 ? (row[hrIdx]?.trim()) : null
-        meta.host_reference = hr ?: params.host_reference
-        return meta
-    }
-    def cell = { row, name -> col(name) >= 0 ? optFile(row[col(name)]) : null }
-
-    ch_rows = Channel.of(*rows)
+    ch_rows = Channel.fromList(rows)
 
     ch_done = Channel.empty()
     ch_plasmids = Channel.empty()
@@ -134,8 +145,8 @@ workflow {
 
     if (params.platform == 'illumina') {
         ch_samples = ch_rows.map { row ->
-            def meta = metaOf(row)
-            def r1 = cell(row, 'read1'); def r2 = cell(row, 'read2')
+            def meta = metaOf(header, row)
+            def r1 = cell(header, row, 'read1'); def r2 = cell(header, row, 'read2')
             if (r1 == null || r2 == null) paramError("sample ${meta.id}: illumina requires read1/read2")
             tuple(meta, r1, r2)
         }
@@ -146,8 +157,8 @@ workflow {
         ch_done = ILLUMINA.out.done
     } else if (params.platform == 'ont') {
         ch_samples = ch_rows.map { row ->
-            def meta = metaOf(row)
-            def pod5 = cell(row, 'pod5'); def bam = cell(row, 'bam'); def lr = cell(row, 'long_reads')
+            def meta = metaOf(header, row)
+            def pod5 = cell(header, row, 'pod5'); def bam = cell(header, row, 'bam'); def lr = cell(header, row, 'long_reads')
             if (pod5 == null && bam == null && lr == null) paramError("sample ${meta.id}: ont requires pod5, bam or long_reads")
             tuple(meta, pod5, bam, lr)
         }
@@ -158,8 +169,8 @@ workflow {
         ch_done = ONT.out.done
     } else if (params.platform == 'pacbio_hifi') {
         ch_samples = ch_rows.map { row ->
-            def meta = metaOf(row)
-            def bam = cell(row, 'bam'); def lr = cell(row, 'long_reads')
+            def meta = metaOf(header, row)
+            def bam = cell(header, row, 'bam'); def lr = cell(header, row, 'long_reads')
             if (bam == null && lr == null) paramError("sample ${meta.id}: pacbio_hifi requires bam or long_reads")
             tuple(meta, bam, lr)
         }
@@ -170,9 +181,9 @@ workflow {
         ch_done = PACBIO_HIFI.out.done
     } else if (params.platform == 'hybrid') {
         ch_samples = ch_rows.map { row ->
-            def meta = metaOf(row)
-            def r1 = cell(row, 'read1'); def r2 = cell(row, 'read2')
-            def pod5 = cell(row, 'pod5'); def bam = cell(row, 'bam'); def lr = cell(row, 'long_reads')
+            def meta = metaOf(header, row)
+            def r1 = cell(header, row, 'read1'); def r2 = cell(header, row, 'read2')
+            def pod5 = cell(header, row, 'pod5'); def bam = cell(header, row, 'bam'); def lr = cell(header, row, 'long_reads')
             if (r1 == null || r2 == null) paramError("sample ${meta.id}: hybrid requires read1/read2")
             if (pod5 == null && bam == null && lr == null) paramError("sample ${meta.id}: hybrid requires pod5, bam or long_reads")
             tuple(meta, r1, r2, pod5, bam, lr)
@@ -184,8 +195,8 @@ workflow {
         ch_done = HYBRID.out.done
     } else if (params.platform == 'assembly') {
         ch_samples = ch_rows.map { row ->
-            def meta = metaOf(row)
-            def asm = cell(row, 'assembly')
+            def meta = metaOf(header, row)
+            def asm = cell(header, row, 'assembly')
             if (asm == null) paramError("sample ${meta.id}: assembly platform requires the assembly column")
             tuple(meta, asm)
         }

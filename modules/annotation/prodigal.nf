@@ -7,7 +7,7 @@ process PRODIGAL {
     label 'process_low'
     conda "${projectDir}/envs/annotation.yml"
 
-    publishDir "${params.outdir}/08_annotation/${meta.id}/prodigal", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/08_annotation/prodigal", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(plasmid_contigs)

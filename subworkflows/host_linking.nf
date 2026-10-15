@@ -38,8 +38,8 @@ workflow HOST_LINKING {
                 .join(ch_taxonomy, remainder: true)
                 .map { meta, contigs, bins, tax ->
                     tuple(meta, contigs,
-                          bins ?: file('NO_BINS'),
-                          tax ?: file('NO_TAXONOMY'))
+                          bins ?: [],
+                          tax ?: [])
                 }
             LINK_SEQUENCE(ch_seq_in)
             ch_links = ch_links.mix(LINK_SEQUENCE.out.links.map { meta, f -> f })

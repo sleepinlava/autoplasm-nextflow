@@ -19,11 +19,11 @@ workflow CONTIG_COVERAGE {
     main:
     ch_short_bam = SAMTOOLS_SORT(
         BOWTIE2_CONTIG_COVERAGE(ch_assembly.join(ch_short_reads)).alignment
-            .map { meta, sam -> tuple(meta, sam, "02_assembly/coverage/${meta.id}", "${meta.id}.contig_alignment.short.bam") }
+            .map { meta, sam -> tuple(meta, sam, '.short') }
     ).bam
     ch_long_bam = SAMTOOLS_SORT_LONG(
         MINIMAP2_CONTIG_COVERAGE(ch_assembly.join(ch_long_reads), long_preset).alignment
-            .map { meta, sam -> tuple(meta, sam, "02_assembly/coverage/${meta.id}", "${meta.id}.contig_alignment.long.bam") }
+            .map { meta, sam -> tuple(meta, sam, '.long') }
     ).bam
 
     // Per-sample: merge when both mappers ran (hybrid), else pass through
@@ -32,11 +32,7 @@ workflow CONTIG_COVERAGE {
             def bams = [short_bam, long_bam].findAll { it != null }
             tuple(meta, bams)
         }
-    ch_bam = SAMTOOLS_MERGE(
-        ch_per_sample.map { meta, bams ->
-            tuple(meta, bams, "02_assembly/coverage/${meta.id}", "${meta.id}.contig_alignment.bam")
-        }
-    ).bam
+    ch_bam = SAMTOOLS_MERGE(ch_per_sample).bam
 
     ch_table = COVERM_CONTIG(ch_bam).table
 

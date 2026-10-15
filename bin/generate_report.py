@@ -57,16 +57,18 @@ def main():
     outdir = Path(args.outdir)
     det_dir = outdir / "04_plasmid_detection"
     samples = {}
-    if det_dir.is_dir():
-        for sample_dir in sorted(p for p in det_dir.iterdir() if p.is_dir()):
-            sid = sample_dir.name
-            entry = {"contigs": count_fasta_records(sample_dir / "plasmid_contigs.fasta"),
+    consensus_dir = det_dir / "consensus"
+    structure_dir = det_dir / "structure"
+    if consensus_dir.is_dir():
+        for fasta in sorted(consensus_dir.glob("*.plasmid_contigs.fasta")):
+            sid = fasta.name.split(".plasmid_contigs.fasta")[0]
+            entry = {"contigs": count_fasta_records(fasta),
                      "total": 0, "plasmids": 0, "tools": [], "circular": 0}
-            cons = next(sample_dir.glob("*.plasmid_consensus.tsv"), None)
-            if cons:
+            cons = consensus_dir / f"{sid}.plasmid_consensus.tsv"
+            if cons.is_file():
                 entry["total"], entry["plasmids"], entry["tools"] = summarize_consensus(cons)
-            struct = next(sample_dir.glob("*.plasmid_structure.tsv"), None)
-            if struct:
+            struct = structure_dir / f"{sid}.plasmid_structure.tsv"
+            if struct.is_file():
                 entry["circular"] = summarize_structure(struct)
             samples[sid] = entry
 

@@ -6,7 +6,7 @@ process DORADO_BASECALL {
     tag { meta.id }
     label 'process_medium'
 
-    publishDir "${params.outdir}/00_input_validation/basecalling/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/00_input_validation/basecalling/dorado", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(pod5)

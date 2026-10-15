@@ -7,20 +7,20 @@ process METAFLYE {
     label 'process_highmem'
     conda "${projectDir}/envs/assembly_ont.yml"
 
-    publishDir "${params.outdir}/02_assembly/${meta.id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/02_assembly/metaflye", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(long_reads)
 
     output:
-    tuple val(meta), path("assembly.fasta"), emit: assembly
-    tuple val(meta), path("assembly_graph.gfa"), emit: graph
-    tuple val(meta), path("flye_out"), emit: output_dir
+    tuple val(meta), path("${meta.id}.metaflye.assembly.fasta"), emit: assembly
+    tuple val(meta), path("${meta.id}.assembly_graph.gfa"), emit: graph
+    tuple val(meta), path("${meta.id}.flye_out"), emit: output_dir
 
     script:
     """
-    flye --meta --nano-raw ${long_reads} --out-dir flye_out --threads ${task.cpus}
-    cp flye_out/assembly.fasta assembly.fasta
-    cp flye_out/assembly_graph.gfa assembly_graph.gfa
+    flye --meta --nano-raw ${long_reads} --out-dir ${meta.id}.flye_out --threads ${task.cpus}
+    cp ${meta.id}.flye_out/assembly.fasta ${meta.id}.metaflye.assembly.fasta
+    cp ${meta.id}.flye_out/assembly_graph.gfa ${meta.id}.assembly_graph.gfa
     """
 }

@@ -7,7 +7,7 @@ process CLINKER {
     label 'process_low'
     conda "${projectDir}/envs/comparative.yml"
 
-    publishDir "${params.outdir}/09_comparative_genomics/${meta.id}/clinker", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/09_comparative_genomics/clinker", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(bakta_dir)

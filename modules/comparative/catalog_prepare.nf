@@ -23,7 +23,7 @@ process PLASMID_CATALOG_PREPARE {
     script:
     """
     plasmid_catalog_prepare.py \\
-        --contigs ${params.outdir}/04_plasmid_detection/*/plasmid_contigs.fasta \\
+        --contigs ${params.outdir}/04_plasmid_detection/consensus/*.plasmid_contigs.fasta \\
         --out plasmid_catalog_input.fasta
     """
 }
