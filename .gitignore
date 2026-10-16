@@ -5,3 +5,16 @@ data/
 .DS_Store
 __pycache__/
 *.pyc
+
+# doc
+docs/review-fix-plan.md
+docs/计划书.md
+docs/review-executability-repro.py
+docs/review-executability-round2.md
+docs/review-fix-plan-detailed.md
+
+# lazygit
+lazygit
+
+# log
+*.log
