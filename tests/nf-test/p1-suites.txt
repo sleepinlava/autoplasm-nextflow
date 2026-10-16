@@ -1,0 +1,4 @@
+modules/nf-core/fastp/tests/main.nf.test
+modules/nf-core/fastqc/tests/main.nf.test
+modules/nf-core/samtools/sort/tests/main.nf.test
+modules/nf-core/megahit/tests/main.nf.test
