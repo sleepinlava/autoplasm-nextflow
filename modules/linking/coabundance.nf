@@ -21,12 +21,12 @@ process LINK_COABUNDANCE {
     script:
     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
     def profileFiles = (host_profiles in List ? host_profiles : (host_profiles ? [host_profiles] : []))
-        .collect { shellQuote(it) }.join(' ')
+        .collect { shellQuote.call(it) }.join(' ')
     def sampleIds = (host_sample_ids in List ? host_sample_ids : (host_sample_ids ? [host_sample_ids] : []))
-        .collect { shellQuote(it) }.join(' ')
+        .collect { shellQuote.call(it) }.join(' ')
     """
     coabundance_link.py \\
-        --plasmid-abundance ${shellQuote(plasmid_abundance_merged)} \\
+        --plasmid-abundance ${shellQuote.call(plasmid_abundance_merged)} \\
         --host-profiles ${profileFiles} \\
         --host-sample-ids ${sampleIds} \\
         --method ${params.link_correlation_method} \\

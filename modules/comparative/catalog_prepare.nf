@@ -24,7 +24,7 @@ process PLASMID_CATALOG_PREPARE {
         throw new IllegalArgumentException('PLASMID_CATALOG_PREPARE requires at least one FASTA')
     }
     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
-    def contigArgs = files.collect { shellQuote(it) }.join(' ')
+    def contigArgs = files.collect { shellQuote.call(it) }.join(' ')
     """
     plasmid_catalog_prepare.py \\
         --contigs ${contigArgs} \\

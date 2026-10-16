@@ -27,11 +27,11 @@ process FASTQC {
         if (lower.endsWith('.fq') || lower.endsWith('.fastq')) return '.fastq'
         throw new IllegalArgumentException("FASTQC requires .fq/.fastq with optional .gz: ${input}")
     }
-    def alias1 = "${meta.id}.${stage}.R1${fastqSuffix(read1)}"
-    def alias2 = "${meta.id}.${stage}.R2${fastqSuffix(read2)}"
+    def alias1 = "${meta.id}.${stage}.R1${fastqSuffix.call(read1)}"
+    def alias2 = "${meta.id}.${stage}.R2${fastqSuffix.call(read2)}"
     """
-    ln -s -- ${shellQuote(read1)} ${shellQuote(alias1)}
-    ln -s -- ${shellQuote(read2)} ${shellQuote(alias2)}
-    fastqc --threads ${task.cpus} --extract --outdir . ${shellQuote(alias1)} ${shellQuote(alias2)}
+    ln -s -- ${shellQuote.call(read1)} ${shellQuote.call(alias1)}
+    ln -s -- ${shellQuote.call(read2)} ${shellQuote.call(alias2)}
+    fastqc --threads ${task.cpus} --extract --outdir . ${shellQuote.call(alias1)} ${shellQuote.call(alias2)}
     """
 }

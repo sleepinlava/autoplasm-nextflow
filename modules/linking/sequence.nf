@@ -28,14 +28,14 @@ process LINK_SEQUENCE {
         throw new IllegalArgumentException("LINK_SEQUENCE expects one taxonomy file for ${meta.id}, got ${taxPaths}")
     }
     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
-    def taxArg = taxPaths ? "--taxonomy ${shellQuote(taxPaths[0])}" : ''
-    def binsArg = binPaths ? "--host-genomes ${shellQuote(binPaths[0])}" : ''
+    def taxArg = taxPaths ? "--taxonomy ${shellQuote.call(taxPaths[0])}" : ''
+    def binsArg = binPaths ? "--host-genomes ${shellQuote.call(binPaths[0])}" : ''
     """
     sequence_similarity_link.py \\
-        --plasmid-contigs ${shellQuote(plasmid_contigs)} \\
+        --plasmid-contigs ${shellQuote.call(plasmid_contigs)} \\
         ${binsArg} ${taxArg} \\
-        --sample-id ${shellQuote(meta.id)} \\
+        --sample-id ${shellQuote.call(meta.id)} \\
         --min-similarity ${params.link_min_similarity} \\
-        --out ${shellQuote("${meta.id}.sequence_links.tsv")}
+        --out ${shellQuote.call("${meta.id}.sequence_links.tsv")}
     """
 }
