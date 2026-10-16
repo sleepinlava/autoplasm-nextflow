@@ -120,7 +120,7 @@ workflow HYBRID {
         }
         SHORT_READ_MULTIQC_INPUTS(FASTP.out.json, ch_fastqc_raw, ch_fastqc_clean, params.run_fastqc)
         MULTIQC(SHORT_READ_MULTIQC_INPUTS.out.files, 'multiqc_illumina')
-        MULTIQC_ONT(NANOPLOT.out.html.collect(), 'multiqc_ont')
+        MULTIQC_ONT(NANOPLOT.out.report_dir.map { meta, dir -> dir }.collect(), 'multiqc_ont')
     }
 
     emit:

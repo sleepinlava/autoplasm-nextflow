@@ -91,7 +91,8 @@ workflow ONT {
     COMPARATIVE(ch_plasmids, PLASMID_DOWNSTREAM.out.bakta_dir)
 
     if (params.run_multiqc) {
-        MULTIQC(NANOPLOT.out.html.collect(), 'multiqc_ont')
+        // Preserve sample directories: each contains the same report basename.
+        MULTIQC(NANOPLOT.out.report_dir.map { meta, dir -> dir }.collect(), 'multiqc_ont')
     }
 
     emit:
