@@ -35,16 +35,19 @@ def require_tools(names):
 
 
 def java_version():
-    if shutil.which("java") is None:
+    java = str(Path(os.environ["JAVA_HOME"]) / "bin" / "java") if os.environ.get("JAVA_HOME") else shutil.which("java")
+    if java is None:
         return "missing"
-    result = subprocess.run(["java", "-version"], text=True, capture_output=True, check=False)
+    result = subprocess.run([java, "-version"], text=True, capture_output=True, check=False)
     return (result.stderr or result.stdout).splitlines()[0] if (result.stderr or result.stdout) else "unknown"
 
 
 def nextflow_version():
     result = subprocess.run(["nextflow", "-version"], text=True, capture_output=True, check=True)
     output = result.stdout + result.stderr
-    match = re.search(r"nextflow version\s+(\d+)(?:\.[^\s]+)?", output, re.IGNORECASE)
+    # `-version` prints a spaced banner followed by `version 26.x`; older
+    # launchers may instead print the one-line `nextflow version 26.x`.
+    match = re.search(r"\bversion\s+(\d+)(?:\.[^\s]+)?", output, re.IGNORECASE)
     if not match:
         raise RegressionFailure(f"无法识别 Nextflow 版本：{output.strip()}")
     if int(match.group(1)) != 26:
@@ -83,8 +86,12 @@ def run_nf(base, harness, fixture_dir, out_dir, work_dir, trace_path,
         "-work-dir", str(work_dir), "-with-trace", str(trace_path),
         "-ansi-log", "false",
     ]
-    for key, value in (params or {}).items():
-        command.extend([f"--{key}", str(value).lower() if isinstance(value, bool) else str(value)])
+    if params:
+        # An empty CLI string is treated as a flag by Nextflow. JSON preserves
+        # empty IDs, booleans and lists exactly as supplied by each test case.
+        param_file = trace_path.with_suffix('.params.json')
+        param_file.write_text(json.dumps(params))
+        command.extend(['-params-file', str(param_file)])
     if resume:
         command.append("-resume")
     result = subprocess.run(
@@ -398,12 +405,15 @@ def suite_longread_source(base):
 def suite_crispr_guard(base):
     trace = base / "trace-enabled.trace"
     result = run_nf(base, "crispr_guard.nf", base / "fixtures", base / "out-enabled",
-                    base / "work-enabled", trace, {"enable_crispr": True}, expect_success=False)
+                    base / "work-enabled", trace,
+                    {"host_linking_methods": [], "host_linking_optional_methods": ["crispr"]},
+                    expect_success=False)
     assert_true("CRISPR host-plasmid linking is not implemented" in result.stdout + result.stderr,
                 "enabling the unsupported CRISPR branch did not fail explicitly")
     disabled_trace = base / "trace-disabled.trace"
     result = run_nf(base, "crispr_guard.nf", base / "fixtures", base / "out-disabled",
-                    base / "work-disabled", disabled_trace, {"enable_crispr": False})
+                    base / "work-disabled", disabled_trace,
+                    {"host_linking_methods": [], "host_linking_optional_methods": []})
     assert_true("CRISPR host-plasmid linking is not implemented" not in result.stdout + result.stderr,
                 "disabled CRISPR branch still raised the unsupported error")
     fixture = base / "fixtures" / "crispr"
@@ -412,7 +422,7 @@ def suite_crispr_guard(base):
     module_trace = base / "trace-module.trace"
     result = run_nf(base, "crispr_guard.nf", fixture, base / "out-module",
                     base / "work-module", module_trace,
-                    {"enable_crispr": False, "direct_module": True}, expect_success=False)
+                    {"host_linking_optional_methods": [], "direct_module": True}, expect_success=False)
     assert_true("CRISPR host-plasmid linking is not implemented" in result.stdout + result.stderr,
                 "direct LINK_CRISPR caller did not receive an explicit unsupported error")
     main_enabled = run_nf(base, "../../main.nf", base / "fixtures", base / "out-main-enabled",

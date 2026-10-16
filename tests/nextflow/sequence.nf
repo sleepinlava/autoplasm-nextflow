@@ -9,5 +9,5 @@ workflow {
     def tax = params.with_taxonomy ? [file("${params.fixture_dir}/${meta.id}.taxonomy.tsv", checkIfExists: true)] : []
     ch_input = Channel.of(tuple(meta, plasmid, [mag], tax))
     LINK_SEQUENCE(ch_input)
-    LINK_SEQUENCE.out.links.view { meta, path -> "LINKS\t${meta.id}\t${path}" }
+    LINK_SEQUENCE.out.links.view { sample_meta, path -> "LINKS\t${sample_meta.id}\t${path}" }
 }
