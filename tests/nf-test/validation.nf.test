@@ -1,0 +1,78 @@
+// Uses the upstream nf-test pipeline/stderr contract and nf-core/mag's
+// broken-samplesheet cases, translated to AutoPlasm's TSV input schema.
+nextflow_pipeline {
+    name 'P0 AutoPlasm input contracts'
+    script '../../main.nf'
+    config './validation.config'
+    tag 'P0'
+    tag 'pipeline'
+
+    test('duplicate biological sample IDs are rejected') {
+        when {
+            params {
+                samplesheet = new File('tests/nf-test/fixtures/duplicate.tsv').absolutePath
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.failed
+            assert workflow.stderr.join('\n').contains('duplicate sample_id')
+            assert workflow.trace.succeeded().isEmpty()
+        }
+    }
+    test('sample IDs containing spaces are rejected') {
+        when {
+            params {
+                samplesheet = new File('tests/nf-test/fixtures/invalid.tsv').absolutePath
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.failed
+            assert workflow.stderr.join('\n').contains('invalid sample_id')
+            assert workflow.trace.succeeded().isEmpty()
+        }
+    }
+    test('missing paired mate is rejected') {
+        when {
+            params {
+                samplesheet = new File('tests/nf-test/fixtures/missing-read2.tsv').absolutePath
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.failed
+            assert workflow.stderr.join('\n').contains('illumina requires read1/read2')
+            assert workflow.trace.succeeded().isEmpty()
+        }
+    }
+    test('mandatory geNomad database is enforced') {
+        when {
+            params {
+                samplesheet = new File('tests/nf-test/fixtures/duplicate.tsv').absolutePath
+                genomad_db = null
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.failed
+            assert workflow.stderr.join('\n').contains('geNomad is mandatory')
+            assert workflow.trace.succeeded().isEmpty()
+        }
+    }
+    test('unimplemented CRISPR does not silently succeed') {
+        when {
+            params {
+                samplesheet = new File('tests/nf-test/fixtures/duplicate.tsv').absolutePath
+                host_plasmid_linking = true
+                host_linking_optional_methods = ['crispr']
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.failed
+            assert workflow.stderr.join('\n').contains('CRISPR host-plasmid linking is not implemented')
+            assert workflow.trace.succeeded().isEmpty()
+        }
+    }
+}

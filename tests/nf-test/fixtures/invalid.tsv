@@ -1,0 +1,2 @@
+sample_id	group	read1	read2
+invalid sample	control	/not/used/R1.fastq.gz	/not/used/R2.fastq.gz

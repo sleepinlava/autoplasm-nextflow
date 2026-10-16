@@ -1,0 +1,18 @@
+[project]
+name = "autoplasm-test-environment"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["pytest>=8,<9"]
+
+[project.optional-dependencies]
+pipeline = ["genomad==1.12.0", "quast==5.3.0", "multiqc==1.33"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+quast = { git = "https://github.com/ablab/quast.git", rev = "c3eb988a2fa8a815e1b0bfff55a58cb8d6ff0152" }
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true
