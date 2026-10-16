@@ -24,6 +24,9 @@ process GENOMAD {
     """
     genomad end-to-end --cleanup --restart --threads ${task.cpus} \\
         ${assembly} ${meta.id}.genomad_out ${genomad_db}
-    mv ${meta.id}.genomad_out/${prefix}_summary ./${meta.id}_summary
+    mkdir -p ${meta.id}_summary
+    cp ${meta.id}.genomad_out/${prefix}_summary/${prefix}_plasmid_summary.tsv ${meta.id}_summary/${meta.id}_plasmid_summary.tsv
+    cp ${meta.id}.genomad_out/${prefix}_summary/${prefix}_plasmid.fna ${meta.id}_summary/${meta.id}_plasmid.fna
+    cp ${meta.id}.genomad_out/${prefix}_summary/${prefix}_virus_summary.tsv ${meta.id}_summary/${meta.id}_virus_summary.tsv
     """
 }

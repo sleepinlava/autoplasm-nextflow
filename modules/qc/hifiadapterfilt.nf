@@ -18,10 +18,11 @@ process HIFIADAPTERFILT {
     script:
     def prefix = long_reads.name.replaceAll(/\.(fastq|fq)(\.gz)?$/, '')
     """
-    # HiFiAdapterFilt writes <prefix>.filt.fastq.gz next to its working directory
+    # HiFiAdapterFilt selects input files in cwd by prefix, not a positional path.
     mkdir -p hifiadapterfilt_out
     cd hifiadapterfilt_out
-    hifiadapterfilt.sh -t ${task.cpus} ../${long_reads}
-    mv ${prefix}.filt.fastq.gz ../${meta.id}.hifiadapterfilt.fastq.gz
+    ln -s "../${long_reads}" "${long_reads.name}"
+    hifiadapterfilt.sh -t ${task.cpus} -p "${prefix}"
+    mv "${prefix}.filt.fastq.gz" ../${meta.id}.hifiadapterfilt.fastq.gz
     """
 }

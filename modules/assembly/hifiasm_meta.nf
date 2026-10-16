@@ -1,7 +1,6 @@
 /*
  * hifiasm-meta HiFi metagenomic assembly (DAG node: assembly_hifiasm).
- * The conda package provides hifiasm with metagenomics support (the ABI
- * registry uses the same fallback).
+ * Use the dedicated hifiasm_meta binary and its primary contig graph.
  */
 process HIFIASM_META {
     tag { meta.id }
@@ -19,7 +18,7 @@ process HIFIASM_META {
 
     script:
     """
-    hifiasm -t ${task.cpus} -o ${meta.id} ${long_reads}
+    hifiasm_meta -t ${task.cpus} -o ${meta.id} ${long_reads}
     # Convert primary contig graph to FASTA
     awk '/^S/{printf ">%s\\n%s\\n", \$2, \$3}' ${meta.id}.p_ctg.gfa > ${meta.id}.hifiasm.fasta
     """
