@@ -1,0 +1,53 @@
+// Adapted from nf-core/mag tests/default.nf.test and platform-specific suites.
+// Upstream reference + MIT license are retained in upstream/; see UPSTREAM.md.
+// No snapshot is bootstrapped from this codebase: success, required output sets
+// and scientific file contents are checked explicitly before any baseline exists.
+nextflow_pipeline {
+    name 'P2 AutoPlasm real-tool integration on nf-core data'
+    script '../../main.nf'
+    config './integration.config'
+    tag 'P2'
+    tag 'pipeline'
+
+    ['illumina', 'assembly', 'ont', 'hybrid', 'pacbio_hifi'].each { platformName ->
+        test("${platformName}: upstream reads or assembly to report") {
+            tag platformName
+            when {
+                params {
+                    platform = platformName
+                    samplesheet = "${System.getenv('AUTOPLASM_TEST_DATA')}/${platformName}.tsv"
+                    outdir = "$outputDir"
+                }
+            }
+            then {
+                assert workflow.success
+                assert workflow.trace.failed().isEmpty()
+                assert workflow.trace.succeeded().size() > 0
+                // nf-core/mag uses section-based file discovery followed by content checks.
+                def consensus = getAllFilesFromDir(params.outdir, include: ['04_plasmid_detection/consensus/*.plasmid_consensus.tsv'])
+                def structures = getAllFilesFromDir(params.outdir, include: ['04_plasmid_detection/structure/*.plasmid_structure.tsv'])
+                def quast = getAllFilesFromDir(params.outdir, include: ['03_assembly_qc/quast/*.quast_report.tsv'])
+                def expectedSamples = platformName == 'illumina' ? 2 : 1
+                assert consensus.size() == expectedSamples
+                assert structures.size() == expectedSamples
+                assert quast.size() == expectedSamples
+                assert consensus.every { it.text.startsWith('contig_id\tsample_id\t') }
+                assert structures.every { it.text.startsWith('sample_id\tplasmid_id\t') }
+                assert quast.every { it.text.contains('contigs') }
+                def report = path("${params.outdir}/report/report.md")
+                assert report.text.contains("- Samples: ${expectedSamples}")
+                assert report.text.contains("- Platform: `${platformName}`")
+                assert path("${params.outdir}/report/report.html").size() > 0
+                if (platformName != 'assembly') {
+                    def abundance = path("${params.outdir}/tables/contig_abundance.tsv")
+                    assert abundance.text.readLines().size() > 1
+                    assert abundance.text.contains('sample_id')
+                    assert path("${params.outdir}/tables/plasmid_abundance.tsv").text.contains('plasmid_id')
+                }
+                // No differential or network claims from <3 biological replicates/group.
+                assert !path("${params.outdir}/11_diversity/differential_abundance.tsv").exists()
+                assert !path("${params.outdir}/12_network/correlation.tsv").exists()
+            }
+        }
+    }
+}

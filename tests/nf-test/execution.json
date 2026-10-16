@@ -1,0 +1,407 @@
+{
+  "date": "2026-10-16",
+  "base_commit": "731f98063bce69a59d03cfa989f46e34ed0b9c3a",
+  "dirty_worktree": true,
+  "note": "Other code changes were present during execution; not a validation of the base commit alone.",
+  "versions": {
+    "uv": "0.12.23",
+    "python": "3.12.15",
+    "nf-test": "0.9.5",
+    "nextflow": "26.10.0",
+    "java": "21.0.12"
+  },
+  "test_sources": {
+    "tests/nf-test/validation.nf.test": "28d4f582d4239e4ce671a0e3cead076d212ed69444cc209bcd8d8d47a88c126f",
+    "tests/nf-test/integration.nf.test": "dbc0a90cfbde39cb801821c6d75c6b54b55b145ac0e55524a8a4a61500783d13",
+    "modules/nf-core/fastp/tests/main.nf.test": "42d0776e4f2d0d099dc8f439e4ef4a34241727da7f105455ff0b87c525bd840e",
+    "modules/nf-core/fastqc/tests/main.nf.test": "5dd1e8bef1168b6122fadf1a1fec28ba4d569e2ddda7cf683ba258dd181e9654",
+    "modules/nf-core/samtools/sort/tests/main.nf.test": "66c260d2caff78875994da53ad9b67c642965ef7afd47e364b74835d5a54149a",
+    "modules/nf-core/megahit/tests/main.nf.test": "8ada930bc15b30d83f518f4cac7d50eb29335d3fbab3c8711521870347d9b5a4"
+  },
+  "reports": [
+    {
+      "tier": "P0",
+      "suite": "P0 AutoPlasm input contracts",
+      "timestamp": "2026 10 16 23:04:19",
+      "junit_path": "results/nf-test/p0-final.xml",
+      "junit_sha256": "c4715d6b0d85ec2199340544fce164c2e8425486e6de36de172e300820fc2ae2",
+      "cases": [
+        {
+          "name": "duplicate biological sample IDs are rejected",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 9.937
+        },
+        {
+          "name": "sample IDs containing spaces are rejected",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 10.408
+        },
+        {
+          "name": "missing paired mate is rejected",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 8.998
+        },
+        {
+          "name": "mandatory geNomad database is enforced",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 8.907
+        },
+        {
+          "name": "unimplemented CRISPR does not silently succeed",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 6.422
+        }
+      ]
+    },
+    {
+      "tier": "P1",
+      "suite": "Test Process FASTP",
+      "timestamp": "2026 10 16 22:53:20",
+      "junit_path": "results/nf-test/p1.xml",
+      "junit_sha256": "d8ee72faccdd36ee8be1048b69659eb31c4fd4cc07c8b6afb829e2703f0041d7",
+      "cases": [
+        {
+          "name": "test_fastp_single_end",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 8.976
+        },
+        {
+          "name": "test_fastp_paired_end",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 12.828
+        },
+        {
+          "name": "fastp test_fastp_interleaved",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 9.415
+        },
+        {
+          "name": "test_fastp_single_end_trim_fail",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 8.759
+        },
+        {
+          "name": "test_fastp_paired_end_trim_fail",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 11.342
+        },
+        {
+          "name": "test_fastp_paired_end_merged",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 12.512
+        },
+        {
+          "name": "test_fastp_paired_end_merged_adapterlist",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 19.536
+        },
+        {
+          "name": "test_fastp_single_end_qc_only",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 8.411
+        },
+        {
+          "name": "test_fastp_paired_end_qc_only",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 12.372
+        },
+        {
+          "name": "test_fastp_single_end - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 8.101
+        },
+        {
+          "name": "test_fastp_paired_end - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 9.942
+        },
+        {
+          "name": "fastp - stub test_fastp_interleaved",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 7.387
+        },
+        {
+          "name": "test_fastp_single_end_trim_fail - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 6.57
+        },
+        {
+          "name": "test_fastp_paired_end_trim_fail - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 11.126
+        },
+        {
+          "name": "test_fastp_paired_end_merged - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 11.597
+        },
+        {
+          "name": "test_fastp_paired_end_merged_adapterlist - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 13.351
+        },
+        {
+          "name": "test_fastp_single_end_qc_only - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 7.352
+        },
+        {
+          "name": "test_fastp_paired_end_qc_only - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 10.531
+        }
+      ]
+    },
+    {
+      "tier": "P1",
+      "suite": "Test Process FASTQC",
+      "timestamp": "2026 10 16 22:56:30",
+      "junit_path": "results/nf-test/p1.xml",
+      "junit_sha256": "d8ee72faccdd36ee8be1048b69659eb31c4fd4cc07c8b6afb829e2703f0041d7",
+      "cases": [
+        {
+          "name": "sarscov2 single-end [fastq]",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 13.076
+        },
+        {
+          "name": "sarscov2 paired-end [fastq]",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 14.597
+        },
+        {
+          "name": "sarscov2 interleaved [fastq]",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 13.354
+        },
+        {
+          "name": "sarscov2 paired-end [bam]",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 10.846
+        },
+        {
+          "name": "sarscov2 multiple [fastq]",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 21.884
+        },
+        {
+          "name": "sarscov2 custom_prefix",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 11.309
+        },
+        {
+          "name": "sarscov2 single-end [fastq] - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 6.939
+        },
+        {
+          "name": "sarscov2 paired-end [fastq] - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 15.163
+        },
+        {
+          "name": "sarscov2 interleaved [fastq] - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 9.326
+        },
+        {
+          "name": "sarscov2 paired-end [bam] - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 12.584
+        },
+        {
+          "name": "sarscov2 multiple [fastq] - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 18.706
+        },
+        {
+          "name": "sarscov2 custom_prefix - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 13.114
+        }
+      ]
+    },
+    {
+      "tier": "P1",
+      "suite": "Test Process MEGAHIT",
+      "timestamp": "2026 10 16 22:59:11",
+      "junit_path": "results/nf-test/p1.xml",
+      "junit_sha256": "d8ee72faccdd36ee8be1048b69659eb31c4fd4cc07c8b6afb829e2703f0041d7",
+      "cases": [
+        {
+          "name": "sarscov2 - fastq - se",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 13.794
+        },
+        {
+          "name": "sarscov2 - fastq - pe",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 12.82
+        },
+        {
+          "name": "sarscov2 - fastq - pe - coassembly",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 19.454
+        },
+        {
+          "name": "sarscov2 - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 10.6
+        }
+      ]
+    },
+    {
+      "tier": "P1",
+      "suite": "Test Process SAMTOOLS_SORT",
+      "timestamp": "2026 10 16 23:00:08",
+      "junit_path": "results/nf-test/p1.xml",
+      "junit_sha256": "d8ee72faccdd36ee8be1048b69659eb31c4fd4cc07c8b6afb829e2703f0041d7",
+      "cases": [
+        {
+          "name": "bam_no_index",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 16.932
+        },
+        {
+          "name": "bam_bai_index",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 19.255
+        },
+        {
+          "name": "bam_csi_index",
+          "status": "FAILED",
+          "stub": false,
+          "seconds": 16.388
+        },
+        {
+          "name": "multiple bam",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 20.645
+        },
+        {
+          "name": "multiple bam bai index",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 16.59
+        },
+        {
+          "name": "multiple bam csi index",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 17.238
+        },
+        {
+          "name": "cram",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 13.729
+        },
+        {
+          "name": "bam - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 15.91
+        },
+        {
+          "name": "multiple bam - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 15.961
+        },
+        {
+          "name": "cram - stub",
+          "status": "PASSED",
+          "stub": true,
+          "seconds": 15.29
+        },
+        {
+          "name": "sam",
+          "status": "PASSED",
+          "stub": false,
+          "seconds": 14.588
+        }
+      ]
+    },
+    {
+      "tier": "P2",
+      "suite": "P2 AutoPlasm real-tool integration on nf-core data",
+      "timestamp": "2026 10 16 22:58:22",
+      "junit_path": "results/nf-test/p2.xml",
+      "junit_sha256": "7ecf1af2144b9df18013561f98e2e602cde1305838d4bfd16dcddc630a96ff2c",
+      "cases": [
+        {
+          "name": "illumina: upstream reads or assembly to report",
+          "status": "FAILED",
+          "stub": false,
+          "seconds": 17.693
+        },
+        {
+          "name": "assembly: upstream reads or assembly to report",
+          "status": "FAILED",
+          "stub": false,
+          "seconds": 9.845
+        },
+        {
+          "name": "ont: upstream reads or assembly to report",
+          "status": "FAILED",
+          "stub": false,
+          "seconds": 9.8
+        },
+        {
+          "name": "hybrid: upstream reads or assembly to report",
+          "status": "FAILED",
+          "stub": false,
+          "seconds": 10.498
+        },
+        {
+          "name": "pacbio_hifi: upstream reads or assembly to report",
+          "status": "FAILED",
+          "stub": false,
+          "seconds": 11.352
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "source": "nf-core/test-datasets",
+  "files": [
+    {
+      "path": "test_data/test_minigut_R1.fastq.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 3323528,
+      "git_blob_sha1": "8f5060cb419b896e61f2410ff32bc99158daf070"
+    },
+    {
+      "path": "test_data/test_minigut_R2.fastq.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 3398619,
+      "git_blob_sha1": "4339b59323ff8d7893311856ab81402e9fa0df0d"
+    },
+    {
+      "path": "test_data/test_minigut_sample2_R1.fastq.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 1599430,
+      "git_blob_sha1": "0c2550255bd5028caacf6b5cc6366ba166a5a840"
+    },
+    {
+      "path": "test_data/test_minigut_sample2_R2.fastq.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 1806457,
+      "git_blob_sha1": "369cd57f4f21543d77e03e9ccbe9f1d5f5980caf"
+    },
+    {
+      "path": "test_data/minigut_reads.fastq.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 10258859,
+      "git_blob_sha1": "f7f92b0e0d0b88b9f85293e75558843b70762319"
+    },
+    {
+      "path": "assemblies/MEGAHIT-test_minigut.contigs.fa.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 511326,
+      "git_blob_sha1": "83185a06b64158a5ea144b8a5a4c26499cd3f585"
+    },
+    {
+      "path": "databases/genomad/genomad_db_subset_v1.9.tar.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 5912894,
+      "git_blob_sha1": "2a6a30fca0adbde43d2e8b6a6c81c589bbc2042c"
+    },
+    {
+      "path": "host_reference/genome.hg38.chr21_10000bp_region.fa",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 510011,
+      "git_blob_sha1": "7cf2a21b06bd6f012717f4b8c034b53ddcdd5282"
+    },
+    {
+      "path": "data/genomics/eukaryotes/gallus_gallus/pacbio_metagenome.fastq.gz",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 127407,
+      "git_blob_sha1": "7e6bdaa7834ae754f96f5302dda9a7f0a89d5e0f"
+    }
+  ]
+}
