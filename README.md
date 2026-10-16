@@ -119,6 +119,18 @@ ABI 不自动下载数据库，本流程同样要求预先准备并通过参数�
 
 ## 验证状态
 
+2026-10-16 新增主入口 mock 端到端测试：Illumina 正常场景 **140 个任务通过**，
+无质粒场景 **84 个任务通过**。使用真实 Nextflow 26.10.0 和仓库 Python 脚本，
+外部生信命令使用显式 mock；不代表真实工具/数据库验收。复现方法见
+[`tests/mock_e2e/README.md`](tests/mock_e2e/README.md)，失败基线与修复记录见
+[`docs/mock-e2e-validation.md`](docs/mock-e2e-validation.md)。
+
+同日追加 ONT、PacBio HiFi、hybrid：默认阳性分别通过 **134 / 127 / 183** 个任务；
+包含无质粒、BAM/POD5/FASTQ 输入路由、hybridSPAdes 在内的 **10 个新增场景、
+1,340 个任务全部通过**。同样为外部工具 mock 验证；完整矩阵和未覆盖范围见上述记录。
+
+以下为先前修复轮次的历史记录：
+
 - 本轮 Python 回归使用标准库 `unittest`，运行命令为
   `python3 -m unittest discover -s tests -p 'test_*.py' -v`。
 - 本次工作区该命令运行 **38 项通过**。当前执行环境没有 Nextflow、FastQC、
