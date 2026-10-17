@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "bin" / "merge_abundance.py"
+SCRIPT = ROOT / "bin" / "merge_abundance.R"
 HEADER = "Contig\tLength\tCount Mean\tRPKM\tTPM\n"
 
 
@@ -27,7 +27,7 @@ class MergeAbundanceTests(unittest.TestCase):
         return path
 
     def run_cli(self, tables=(), sample_ids=None, extra=()):
-        command = [sys.executable, str(SCRIPT), "--tables", *map(str, tables)]
+        command = ["Rscript", str(SCRIPT), "--tables", *map(str, tables)]
         if sample_ids is not None:
             command += ["--sample-ids", *sample_ids]
         command += [*extra, "--out", str(self.out)]

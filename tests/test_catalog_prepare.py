@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "bin" / "plasmid_catalog_prepare.py"
+SCRIPT = ROOT / "bin" / "plasmid_catalog_prepare.R"
 
 
 class CatalogPrepareTests(unittest.TestCase):
@@ -20,7 +20,7 @@ class CatalogPrepareTests(unittest.TestCase):
 
     def run_cli(self, *paths):
         return subprocess.run(
-            [sys.executable, str(SCRIPT), "--contigs", *map(str, paths), "--out", str(self.out)],
+            ["Rscript", str(SCRIPT), "--contigs", *map(str, paths), "--out", str(self.out)],
             text=True, capture_output=True, check=False,
         )
 

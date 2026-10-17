@@ -77,7 +77,8 @@ def validate(base, empty, platform='illumina', assembler='opera_ms', long_input=
         consensus = rows(out / f'04_plasmid_detection/consensus/{sid}.plasmid_consensus.tsv')
         assert len(consensus) == (0 if empty else 1), f'{sid}: unexpected consensus count'
         assert sum(row['plasmid_call'] == 'plasmid' for row in consensus) == (0 if empty else 1)
-    assert len(rows(out / '11_diversity/diversity_metrics.tsv')) == 12
+    # diversity.R emits 4 metrics per sample (richness/shannon/simpson/pielou)
+    assert len(rows(out / '11_diversity/diversity_metrics.tsv')) == 24
     assert len(rows(out / '11_diversity/differential_abundance.tsv')) == 2
     report = (out / 'report/report.md').read_text()
     assert '- Samples: 6' in report, 'Report lost samples'
@@ -86,8 +87,14 @@ def validate(base, empty, platform='illumina', assembler='opera_ms', long_input=
     assert f'- Platform: `{platform}`' in report
     profiles = list((out / '07_host_prediction/metaphlan').glob('*.metaphlan.tsv'))
     assert len(profiles) == 6, 'Host profiles must be unique per sample'
-    for audit in (base / 'work').rglob('mock-metaphlan.json'):
-        reads = json.loads(audit.read_text())['argv'][0].split(',')
+    audits = [json.loads(a.read_text())['argv']
+              for a in (base / 'work').rglob('mock-metaphlan.json')]
+    real = [argv for argv in audits if '--input_type' in argv]
+    assert len(real) == 6, f'Expected 6 metaphlan audits, got {len(real)}: {audits}'
+    for argv in real:
+        # nf-core metaphlan/metaphlan puts flags first; the comma-separated
+        # reads are the token right after `--input_type fastq`.
+        reads = argv[argv.index('--input_type') + 2].split(',')
         assert len(reads) == (2 if platform in ['illumina', 'hybrid'] else 1)
         if platform == 'hybrid':
             assert all('.clean.fastq.gz' in name for name in reads), 'Hybrid host profile must use short reads'
@@ -100,7 +107,7 @@ def validate(base, empty, platform='illumina', assembler='opera_ms', long_input=
     if not empty:
         catalog = (out / '09_comparative_genomics/plasmid_catalog_input.fasta').read_text()
         assert all(f'>{sid}|plasmid_1' in catalog for sid in SAMPLES)
-    return {'status': 'PASS', 'mode': 'mock external tools; real Nextflow and repository Python',
+    return {'status': 'PASS', 'mode': 'mock external tools; real Nextflow and repository R',
             'tasks': len(trace), 'process_counts': counts, 'empty_plasmids': empty,
             'platform': platform, 'hybrid_assembler': assembler if platform == 'hybrid' else None,
             'long_input': long_input if platform != 'illumina' else None}
@@ -176,6 +183,7 @@ singularity.enabled = false
     if not executable:
         raise RuntimeError(f'Nextflow unavailable: {args.nextflow}')
     command = [executable, '-log', str(base / 'nextflow.log'), '-c', str(base / 'test.config'),
+        '-c', str(ROOT / 'conf/nfcore_host_comparative.config'),
         'run', str(ROOT / 'main.nf'), '-params-file', str(base / 'params.json'),
         '-work-dir', str(base / 'work'), '-with-trace', str(base / 'trace.tsv'), '-ansi-log', 'false']
     env = os.environ.copy()

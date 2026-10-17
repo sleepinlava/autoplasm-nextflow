@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "bin" / "coabundance_link.py"
+SCRIPT = ROOT / "bin" / "coabundance_link.R"
 SPECIES = "k__Bacteria|p__Example|g__Genus|s__Example"
 
 
@@ -34,7 +34,7 @@ class CoabundanceLinkTests(unittest.TestCase):
         return path
 
     def run_cli(self, profiles=(), sample_ids=None, *extra):
-        cmd = [sys.executable, str(SCRIPT), "--plasmid-abundance", str(self.abundance),
+        cmd = ["Rscript", str(SCRIPT), "--plasmid-abundance", str(self.abundance),
                "--host-profiles", *map(str, profiles)]
         if sample_ids is not None:
             cmd += ["--host-sample-ids", *sample_ids]

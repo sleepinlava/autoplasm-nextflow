@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "bin" / "longread_bridge_link.py"
+SCRIPT = ROOT / "bin" / "longread_bridge_link.R"
 
 
 class LongReadBridgeLinkTests(unittest.TestCase):
@@ -32,7 +32,7 @@ class LongReadBridgeLinkTests(unittest.TestCase):
     def run_cli(self, records, *extra):
         self.sam.write_text("@HD\tVN:1.6\n@SQ\tSN:p1\tLN:4\n@SQ\tSN:h1\tLN:4\n" + "".join(records))
         return subprocess.run(
-            [sys.executable, str(SCRIPT), "--sam", str(self.sam),
+            ["Rscript", str(SCRIPT), "--sam", str(self.sam),
              "--plasmid-contigs", str(self.plasmids), "--assembly", str(self.assembly),
              "--sample-id", "S1", "--out", str(self.out), *extra],
             text=True, capture_output=True, check=False,
@@ -103,7 +103,7 @@ class LongReadBridgeLinkTests(unittest.TestCase):
     def test_bad_sam_record_fails_with_line_number_without_output(self):
         self.sam.write_text("@HD\tVN:1.6\nread1\t0\tp1\n")
         result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--sam", str(self.sam),
+            ["Rscript", str(SCRIPT), "--sam", str(self.sam),
              "--plasmid-contigs", str(self.plasmids), "--assembly", str(self.assembly),
              "--out", str(self.out)], text=True, capture_output=True, check=False,
         )

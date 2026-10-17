@@ -230,7 +230,7 @@ def suite_sequence(base):
                 "nested MetaBAT2 bin directory did not produce the expected link")
     assert_true(abs(float(rows[0]["score"]) - 1.0) < 0.001, "matching sequences did not score near one")
     scripts = command_files(work)
-    command = next((path.read_text() for path in scripts if "sequence_similarity_link.py" in path.read_text()), "")
+    command = next((path.read_text() for path in scripts if "sequence_similarity_link.R" in path.read_text()), "")
     assert_true("--host-genomes 'mag_bins/S1.metabat2_bins" in command,
                 "sequence .command.sh does not pass the nested staged MAG directory")
     assert_true("${params.outdir}" not in command and "mag_bins/*.fa" not in command,
@@ -354,7 +354,7 @@ def suite_coabundance(base):
     assert_true(len(rows) == 1 and abs(float(rows[0]["score"]) - 1.0) < 0.001,
                 "three-sample matching profiles did not correlate")
     link_command = next((path.read_text() for path in command_files(work)
-                         if "coabundance_link.py" in path.read_text()), "")
+                         if "coabundance_link.R" in path.read_text()), "")
     assert_true("--plasmid-abundance" in link_command and "--host-sample-ids" in link_command,
                 "co-abundance module command did not pass the merged table and explicit host IDs")
     print("coabundance: real merge module fed one explicit-ID merged table to the linking module")
@@ -386,7 +386,11 @@ def suite_longread_source(base):
                        check=True, text=True, capture_output=True)
 
     out, work, trace = base / "out", base / "work", base / "trace.trace"
-    run_nf(base, "longread_source.nf", fixture, out, work, trace)
+    # The harness script's params block loses to the -C config file
+    # (params.host_linking_methods = ['sequence'] there), so pin the intended
+    # method via the params file, which outranks the config.
+    run_nf(base, "longread_source.nf", fixture, out, work, trace,
+           {"host_linking_methods": ["long_read"], "host_linking_optional_methods": []})
     links = out / "07_host_prediction" / "linking" / "longread" / "S1.longread_bridge_links.tsv"
     assert_true(links.exists(), "long-read linking module output missing")
     with links.open() as fh:
@@ -394,7 +398,7 @@ def suite_longread_source(base):
     assert_true(len(rows) == 1 and rows[0]["host_id"] == "h1" and rows[0]["score"] == "2",
                 "long-read bridge did not use the two primary/supplementary reads")
     command = next((path.read_text() for path in command_files(work)
-                    if "longread_bridge_link.py" in path.read_text()), "")
+                    if "longread_bridge_link.R" in path.read_text()), "")
     assert_true("S1.long.bam" in command and "S1.merged.bam" not in command and "S1.short.bam" not in command,
                 "long-read linking task did not stage only the long-read BAM")
     coverage = (ROOT / "subworkflows" / "contig_coverage.nf").read_text()

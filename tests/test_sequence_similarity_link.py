@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "bin" / "sequence_similarity_link.py"
+SCRIPT = ROOT / "bin" / "sequence_similarity_link.R"
 MATCHING = "ACGT" * 300
 
 
@@ -29,7 +29,7 @@ class SequenceSimilarityLinkTests(unittest.TestCase):
 
     def run_cli(self, *extra):
         return subprocess.run(
-            [sys.executable, str(SCRIPT), "--plasmid-contigs", str(self.plasmids),
+            ["Rscript", str(SCRIPT), "--plasmid-contigs", str(self.plasmids),
              "--sample-id", "S1", "--out", str(self.out), *map(str, extra)],
             text=True, capture_output=True, check=False,
         )
@@ -122,7 +122,8 @@ class SequenceSimilarityLinkTests(unittest.TestCase):
         result = self.run_cli("--host-genomes", mag_dir)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("candidate FASTA files: 3", result.stderr)
-        self.assertEqual(len(self.rows()), 1)
+        # The TETRA linker emits every bin above the threshold, not only the best.
+        self.assertEqual(len(self.rows()), 3)
 
     def test_duplicate_host_ids_and_compressed_only_directory_fail(self):
         self.fasta(self.plasmids, [("p1", MATCHING)])
