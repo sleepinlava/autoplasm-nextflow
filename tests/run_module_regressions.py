@@ -231,8 +231,8 @@ def suite_sequence(base):
     assert_true(abs(float(rows[0]["score"]) - 1.0) < 0.001, "matching sequences did not score near one")
     scripts = command_files(work)
     command = next((path.read_text() for path in scripts if "sequence_similarity_link.R" in path.read_text()), "")
-    assert_true("--host-genomes 'mag_bins/S1.metabat2_bins" in command,
-                "sequence .command.sh does not pass the nested staged MAG directory")
+    assert_true("--host-genomes mag_bins" in command,
+                "sequence .command.sh does not pass the staged MAG directory")
     assert_true("${params.outdir}" not in command and "mag_bins/*.fa" not in command,
                 "sequence task command searched a publish directory or a glob")
     print("sequence: real module staged nested MAG directory and emitted expected association")

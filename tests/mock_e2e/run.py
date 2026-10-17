@@ -12,11 +12,11 @@ from pathlib import Path
 from generate import generate, SAMPLES
 
 ROOT = Path(__file__).resolve().parents[2]
-COMMANDS = ['fastp', 'fastqc', 'multiqc', 'megahit', 'metaquast.py', 'genomad',
-            'bowtie2-build', 'bowtie2', 'samtools', 'coverm', 'python', 'mob_typer',
+COMMANDS = ['fastp', 'fastqc', 'multiqc', 'megahit', 'quast.py', 'genomad',
+            'bowtie2-build', 'bowtie2', 'samtools', 'coverm', 'plasmidfinder.py', 'mob_typer',
             'bakta', 'amrfinder', 'isescan.py', 'integron_finder', 'metaphlan', 'mmseqs',
             'NanoPlot', 'filtlong', 'hifiadapterfilt.sh', 'flye', 'hifiasm', 'hifiasm_meta',
-            'minimap2', 'OPERA-MS.pl', 'spades.py', 'dorado']
+            'minimap2', 'OPERA-MS.pl', 'spades.py', 'dorado', 'pigz']
 
 
 def rows(path):
@@ -33,15 +33,16 @@ def validate(base, empty, platform='illumina', assembler='opera_ms', long_input=
         name = row['name'].split(' (')[0].split(':')[-1]
         counts[name] = counts.get(name, 0) + 1
     expected = {name: 6 for name in ['QUAST', 'GENOMAD', 'PLASMID_CONSENSUS',
-        'PLASMID_STRUCTURE', 'SAMTOOLS_MERGE', 'COVERM_CONTIG', 'METAPHLAN']}
+        'PLASMID_STRUCTURE', 'SAMTOOLS_MERGE', 'COVERM_CONTIG', 'METAPHLAN',
+        'SAMTOOLS_INDEX']}
     expected.update({name: 1 for name in ['MERGE_ABUNDANCE',
         'MERGE_ABUNDANCE_PLASMID', 'DIVERSITY', 'DIFFERENTIAL_ABUNDANCE', 'REPORT']})
     if platform in ['illumina', 'hybrid']:
         expected.update({name: 6 for name in ['FASTP', 'FASTQC', 'FASTQC_CLEAN',
-                                             'BOWTIE2_CONTIG_COVERAGE', 'SAMTOOLS_SORT']})
+                                             'BOWTIE2_BUILD_COVERAGE', 'BOWTIE2_ALIGN_COVERAGE']})
         expected['MULTIQC'] = 1
     if platform != 'illumina':
-        expected.update(MINIMAP2_CONTIG_COVERAGE=6, SAMTOOLS_SORT_LONG=6)
+        expected.update(MINIMAP2_ALIGN_COVERAGE=6)
     if platform in ['ont', 'hybrid']:
         expected.update(NANOPLOT=6, FILTLONG=6)
         expected['MULTIQC_ONT' if platform == 'hybrid' else 'MULTIQC'] = 1
@@ -58,9 +59,10 @@ def validate(base, empty, platform='illumina', assembler='opera_ms', long_input=
         expected.update({name: 6 for name in ['PLASMIDFINDER', 'MOB_TYPER', 'BAKTA',
             'AMRFINDERPLUS', 'ISESCAN', 'INTEGRONFINDER']})
         if platform in ['illumina', 'hybrid']:
-            expected.update(BOWTIE2_ABUNDANCE=6, SAMTOOLS_SORT_ABUND=6, COVERM_ABUNDANCE=6)
+            expected.update(BOWTIE2_BUILD_ABUNDANCE=6, BOWTIE2_ALIGN_ABUNDANCE=6,
+                            COVERM_ABUNDANCE=6)
         if platform != 'illumina':
-            expected.update(MINIMAP2_ABUNDANCE=6, SAMTOOLS_SORT_ABUND_LONG=6, COVERM_ABUNDANCE_LONG=6)
+            expected.update(MINIMAP2_ALIGN_ABUNDANCE=6, COVERM_ABUNDANCE_LONG=6)
         expected.update(PLASMID_CATALOG_PREPARE=1, MMSEQS2=1)
     assert counts == expected, f'Process coverage differs: actual={counts}, expected={expected}'
     contigs = rows(out / 'tables/contig_abundance.tsv')
@@ -183,7 +185,6 @@ singularity.enabled = false
     if not executable:
         raise RuntimeError(f'Nextflow unavailable: {args.nextflow}')
     command = [executable, '-log', str(base / 'nextflow.log'), '-c', str(base / 'test.config'),
-        '-c', str(ROOT / 'conf/nfcore_host_comparative.config'),
         'run', str(ROOT / 'main.nf'), '-params-file', str(base / 'params.json'),
         '-work-dir', str(base / 'work'), '-with-trace', str(base / 'trace.tsv'), '-ansi-log', 'false']
     env = os.environ.copy()

@@ -1,4 +1,5 @@
 import csv
+import gzip
 import subprocess
 import sys
 import tempfile
@@ -125,7 +126,7 @@ class SequenceSimilarityLinkTests(unittest.TestCase):
         # The TETRA linker emits every bin above the threshold, not only the best.
         self.assertEqual(len(self.rows()), 3)
 
-    def test_duplicate_host_ids_and_compressed_only_directory_fail(self):
+    def test_duplicate_host_ids_fail(self):
         self.fasta(self.plasmids, [("p1", MATCHING)])
         duplicate_dir = self.root / "duplicates"
         self.fasta(duplicate_dir / "bin.1.fa", [("c1", MATCHING)])
@@ -135,13 +136,17 @@ class SequenceSimilarityLinkTests(unittest.TestCase):
         self.assertIn("Duplicate MAG host_id 'bin.1'", result.stderr)
         self.assertFalse(self.out.exists())
 
+    def test_compressed_mag_fasta_is_supported(self):
+        # R file connections auto-detect gzip on read.
+        self.fasta(self.plasmids, [("p1", MATCHING)])
         compressed_dir = self.root / "compressed"
         compressed_dir.mkdir()
-        (compressed_dir / "bin.1.fa.gz").write_bytes(b"compressed")
+        with gzip.open(compressed_dir / "bin.9.fa.gz", "wt") as fh:
+            fh.write(">c9\n" + MATCHING + "\n")
         result = self.run_cli("--host-genomes", compressed_dir)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Compressed MAG FASTA is not supported yet", result.stderr)
-        self.assertFalse(self.out.exists())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("valid bins: 1", result.stderr)
+        self.assertEqual(self.rows()[0]["host_id"], "bin.9")
 
     def test_loaded_bin_with_no_similarity_is_reported_as_loaded(self):
         self.fasta(self.plasmids, [("p1", "A" * 1200)])
