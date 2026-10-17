@@ -3,13 +3,17 @@
  * [BAM→FASTQ | provided FASTQ] → HiFiAdapterFilt → [minimap2 host removal] →
  * hifiasm-meta → QUAST → contig coverage → plasmid detection/consensus →
  * downstream → abundance → host prediction → MAG → linking → comparative.
+ *
+ * QC/basecalling modules are the vendored nf-core ones; their publish layout
+ * replicates the retired local modules via conf/nfcore_qc_assembly.config.
  */
-include { SAMTOOLS_FASTQ } from '../modules/basecalling/samtools_fastq'
-include { HIFIADAPTERFILT } from '../modules/qc/hifiadapterfilt'
-include { MULTIQC } from '../modules/qc/multiqc'
-include { MINIMAP2_HOST_REMOVAL } from '../modules/host_removal/minimap2_host'
+include { SAMTOOLS_FASTQ } from '../modules/nf-core/samtools/fastq/main'
+include { HIFIADAPTERFILT_HIFIADAPTERFILT as HIFIADAPTERFILT } from '../modules/nf-core/hifiadapterfilt/hifiadapterfilt/main'
+include { MINIMAP2_ALIGN as MINIMAP2_ALIGN_HOST } from '../modules/nf-core/minimap2/align/main'
+include { SAMTOOLS_VIEW as SAMTOOLS_VIEW_HOST } from '../modules/nf-core/samtools/view/main'
+include { SAMTOOLS_FASTQ as SAMTOOLS_FASTQ_HOST } from '../modules/nf-core/samtools/fastq/main'
 include { HIFIASM_META } from '../modules/assembly/hifiasm_meta'
-include { QUAST } from '../modules/assembly_qc/quast'
+include { QUAST } from '../modules/nf-core/quast/main'
 include { CONTIG_COVERAGE } from './contig_coverage'
 include { PLASMID_DETECTION } from './plasmid_detection'
 include { PLASMID_DOWNSTREAM } from './plasmid_downstream'
@@ -29,29 +33,52 @@ workflow PACBIO_HIFI {
         bam: bam != null
         fastq: true
     }
-    SAMTOOLS_FASTQ(ch_br.bam.map { meta, bam, lr -> tuple(meta, bam) })
+    // Long-read BAMs carry unpaired records: samtools fastq buckets them into
+    // the -0 "other" output (nf-core module naming: <prefix>_other.fastq.gz).
+    SAMTOOLS_FASTQ(ch_br.bam.map { meta, bam, lr -> tuple(meta, bam) }, false)
     ch_long_raw = ch_br.fastq.map { meta, bam, lr -> tuple(meta, lr) }
-        .mix(SAMTOOLS_FASTQ.out.long_reads)
+        .mix(SAMTOOLS_FASTQ.out.other)
 
     // ---------------- QC (01) ----------------
-    HIFIADAPTERFILT(ch_long_raw)
+    // db=[]: the vendored module falls back to the adapter database shipped
+    // with the hifiadapterfilt package itself (see the module's local patch).
+    HIFIADAPTERFILT(ch_long_raw.map { meta, fq -> tuple(meta, fq, []) })
+    ch_hifi_reads = HIFIADAPTERFILT.out.fastq
 
     // ---------------- host removal (optional) ----------------
-    ch_hr = HIFIADAPTERFILT.out.reads.branch { meta, fq ->
+    ch_hr = ch_hifi_reads.branch { meta, _fq ->
         host: meta.host_reference != null
         nohost: true
     }
-    MINIMAP2_HOST_REMOVAL(
-        ch_hr.host.map { meta, fq -> tuple(meta, fq, file(meta.host_reference)) },
-        'map-hifi'
+    ch_host_long = ch_hr.host.map { meta, fq -> tuple(meta + [preset: 'map-hifi'], fq, file(meta.host_reference)) }
+    MINIMAP2_ALIGN_HOST(
+        ch_host_long.map { meta, fq, _ref -> tuple(meta, fq) },
+        ch_host_long.map { meta, _fq, ref -> tuple(meta, ref) },
+        true,  // bam_format
+        '',    // bam_index_extension
+        false, // cigar_paf_format
+        false  // cigar_bam
     )
-    ch_final_long = ch_hr.nohost.mix(MINIMAP2_HOST_REMOVAL.out.reads)
+    // Drop the 'preset' helper key (only needed for MINIMAP2_ALIGN_HOST's
+    // ext.args) so downstream metas match the no-host-removal branch exactly.
+    ch_host_bam = MINIMAP2_ALIGN_HOST.out.bam
+        .map { meta, bam -> tuple(meta.findAll { entry -> entry.key != 'preset' }, bam) }
+    SAMTOOLS_VIEW_HOST(
+        ch_host_bam.map { meta, bam -> tuple(meta, bam, []) },
+        [[], [], []], // no reference fasta
+        [[], []],     // no qname file
+        [[], []],     // no BED
+        ''            // no index
+    )
+    SAMTOOLS_FASTQ_HOST(SAMTOOLS_VIEW_HOST.out.bam, true) // interleaved long reads
+    ch_final_long = ch_hr.nohost.mix(SAMTOOLS_FASTQ_HOST.out.interleaved)
 
     // ---------------- assembly (02) ----------------
     HIFIASM_META(ch_final_long)
     ch_assembly = HIFIASM_META.out.assembly
 
-    QUAST(ch_assembly)
+    QUAST(ch_assembly.map { meta, fasta -> tuple(meta, [fasta]) },
+        Channel.value([[:], []]), Channel.value([[:], []]))
 
     // ---------------- contig coverage ----------------
     CONTIG_COVERAGE(ch_assembly, Channel.empty(), ch_final_long, 'map-hifi')
@@ -87,5 +114,5 @@ workflow PACBIO_HIFI {
         .mix(CONTIG_COVERAGE.out.table.map { meta, f -> f })
         .mix(PLASMID_ABUNDANCE.out.long_abundance.map { meta, f -> f })
         .mix(HOST_PREDICTION.out.host_profile.map { meta, f -> f })
-        .mix(QUAST.out.report.map { meta, f -> f })
+        .mix(QUAST.out.tsv.map { meta, f -> f })
 }

@@ -85,7 +85,7 @@ def validateParams() {
         required << ['plasx_annotations', params.plasx_annotations]
         required << ['plasx_model', params.plasx_model]
     }
-    if (params.typing_tools.contains('plasmidfinder')) required << ['plasmidfinder_db', params.plasmidfinder_db]
+    // nf-core plasmidfinder / mobsuite-recon use their packaged databases
     if (params.typing_tools.contains('mob_typer')) required << ['mob_suite_db', params.mob_suite_db]
     if (params.typing_optional_tools.contains('copla')) {
         required << ['copla_refgraph', params.copla_refgraph]
@@ -95,10 +95,6 @@ def validateParams() {
     if (params.annotation_tools.contains('amrfinderplus')) required << ['amrfinderplus_db', params.amrfinderplus_db]
     if (params.annotation_optional_tools.contains('rgi')) required << ['card_db', params.card_db]
     if (params.annotation_optional_tools.contains('eggnog_mapper')) required << ['eggnog_db', params.eggnog_db]
-    if (params.annotation_optional_tools.contains('mob_suite')) required << ['mob_suite_db', params.mob_suite_db]
-    if (params.plasmid_binning_tools.contains('mob_suite') || params.plasmid_binning_tools.contains('mob_recon')) {
-        required << ['mob_suite_db', params.mob_suite_db]
-    }
     if (params.host_prediction_tools.contains('metaphlan') && params.platform != 'assembly') {
         required << ['metaphlan_db', params.metaphlan_db]
     }
@@ -107,6 +103,7 @@ def validateParams() {
         required << ['plasmidhostfinder_db', params.plasmidhostfinder_db]
     }
     if (params.mag_tools.contains('gtdbtk')) required << ['gtdbtk_db', params.gtdbtk_db]
+    if (params.mag_tools.contains('checkm2')) required << ['checkm2_db', params.checkm2_db]
     if (params.comparative_optional_tools.contains('blast')) required << ['blast_db', params.blast_db]
     if (params.comparative_optional_tools.contains('mummer')) required << ['reference_plasmids', params.reference_plasmids]
     if (params.comparative_optional_tools.contains('clinker') && !params.annotation_tools.contains('bakta')) {

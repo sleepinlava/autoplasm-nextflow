@@ -6,6 +6,7 @@ process SCAPP_BIN {
     tag { meta.id }
     label 'process_medium'
     conda "${projectDir}/envs/scapp.yml"
+    container 'quay.io/biocontainers/scapp:0.1.4--py_0'
 
     publishDir "${params.outdir}/05_plasmid_binning/scapp", mode: params.publish_dir_mode
 

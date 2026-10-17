@@ -1,7 +1,7 @@
 /*
  * OPERA-MS hybrid metagenomic assembly (DAG node: assembly_opera_ms; default
- * hybrid assembler). OPERA-MS is not on bioconda; install OPERA-MS.pl manually
- * and ensure it is on PATH.
+ * hybrid assembler). OPERA-MS is not on bioconda and has no community
+ * container; install OPERA-MS.pl manually and ensure it is on PATH.
  */
 process OPERA_MS {
     tag { meta.id }

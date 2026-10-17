@@ -6,6 +6,8 @@ process PLATON {
     tag { meta.id }
     label 'process_medium'
     conda "${projectDir}/envs/platon.yml"
+    // 版本对齐 envs/platon.yml 的 platon>=1.7 pin
+    container 'quay.io/biocontainers/platon:1.7--pyhdfd78af_0'
 
     publishDir "${params.outdir}/04_plasmid_detection/platon", mode: params.publish_dir_mode
 

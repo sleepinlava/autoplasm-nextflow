@@ -21,7 +21,11 @@ process NANOPLOT {
 
     script:
     def args = task.ext.args ?: ''
+    // Local patch (refactor/nf-core-modules): accept plain .fastq/.fq too.
+    // The pipeline's Dorado basecaller emits uncompressed '<id>.dorado.fastq',
+    // which upstream's gz/txt-only sniffing would silently drop.
     def input_file = ("$ontfile".endsWith(".fastq.gz") || "$ontfile".endsWith(".fq.gz")) ? "--fastq ${ontfile}" :
+        ("$ontfile".endsWith(".fastq") || "$ontfile".endsWith(".fq")) ? "--fastq ${ontfile}" :
         ("$ontfile".endsWith(".txt")) ? "--summary ${ontfile}" : ''
     """
     NanoPlot \\

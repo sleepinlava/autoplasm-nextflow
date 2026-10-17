@@ -21,8 +21,19 @@ process FASTQC {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
+    // Local patch (refactor/nf-core-modules): input symlinks keep the legacy
+    // alias scheme <prefix>.R1.fastq.gz / <prefix>.R2.fastq.gz (upstream uses
+    // <prefix>_N.<extension>), preserving the full .fastq/.fq(+gz) suffix.
+    // FastQC embeds these aliases as the report Filename, and the pipeline's
+    // published layout plus regression tests assert that exact shape.
+    def fastqSuffix = { input ->
+        def lower = input.name.toLowerCase()
+        if (lower.endsWith('.fq.gz') || lower.endsWith('.fastq.gz')) return '.fastq.gz'
+        if (lower.endsWith('.fq') || lower.endsWith('.fastq')) return '.fastq'
+        throw new IllegalArgumentException("FASTQC requires .fq/.fastq with optional .gz: ${input}")
+    }
     // Make list of old name and new name pairs to use for renaming in the bash while loop
-    def old_new_pairs = reads instanceof Path || reads.size() == 1 ? [[reads, "${prefix}.${reads.extension}"]] : reads.withIndex().collect { entry, index -> [entry, "${prefix}_${index + 1}.${entry.extension}"] }
+    def old_new_pairs = reads instanceof Path || reads.size() == 1 ? [[reads, "${prefix}${fastqSuffix.call(reads)}"]] : reads.withIndex().collect { entry, index -> [entry, "${prefix}.R${index + 1}${fastqSuffix.call(entry)}"] }
     def rename_to = old_new_pairs*.join(' ').join(' ')
     def renamed_files = old_new_pairs.collect { _old_name, new_name -> new_name }.join(' ')
 

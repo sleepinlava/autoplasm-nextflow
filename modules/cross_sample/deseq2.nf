@@ -6,6 +6,7 @@ process DESEQ2 {
     tag 'deseq2'
     label 'process_medium'
     conda "${projectDir}/envs/deseq2.yml"
+    container 'quay.io/biocontainers/bioconductor-deseq2:1.42.0--r43hf17093f_2'
 
     publishDir "${params.outdir}/11_diversity", mode: params.publish_dir_mode
 

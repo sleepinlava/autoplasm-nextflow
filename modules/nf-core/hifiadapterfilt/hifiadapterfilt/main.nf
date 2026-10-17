@@ -25,6 +25,13 @@ process HIFIADAPTERFILT_HIFIADAPTERFILT {
     def ext  = reads.name.endsWith('.bam') ? '.bam' :
         (reads.name.endsWith('.fastq.gz') || reads.name.endsWith('.fq.gz')) ? '.fastq.gz' : '.fastq'
     prefix   = task.ext.prefix ?: "${meta.id}"
+    // Local patch (refactor/nf-core-modules): the db input may be empty. In
+    // that case fall back to the adapter database shipped inside the tool's
+    // own package (bioconda: $CONDA_PREFIX/bin/DB; biocontainer:
+    // /usr/local/bin/DB), which sits next to the hifiadapterfilt.sh binary.
+    def db_link = db
+        ? "ln -s \$(realpath ${db}) HiFiAdapterFilt/DB"
+        : "ln -s \$(dirname \$(command -v hifiadapterfilt.sh))/DB HiFiAdapterFilt/DB"
     """
     # Workaround: BusyBox sed in this container lacks GNU step-address syntax (1~4,2~4).
     # hifiadapterfilt.sh uses `sed -n '1~4s/^@/>/p;2~4p'` to convert FASTQ→FASTA for
@@ -50,7 +57,7 @@ SEDWRAP
     # database to /usr/local/bin/DB which never matches that pattern. Create the expected
     # directory structure from the provided db input and inject it into PATH.
     mkdir -p HiFiAdapterFilt
-    ln -s \$(realpath ${db}) HiFiAdapterFilt/DB
+    ${db_link}
     export PATH="\$PWD/_wrappers:\$PWD/HiFiAdapterFilt/DB:\$PATH"
 
     ln -s \$(realpath ${reads}) ${prefix}${ext}

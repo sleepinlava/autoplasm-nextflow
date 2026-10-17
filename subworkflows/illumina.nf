@@ -4,15 +4,20 @@
  * contig coverage → plasmid detection/consensus → downstream (typing,
  * annotation, binning) → abundance → host prediction → MAG → linking →
  * comparative genomics.
+ *
+ * QC/basecalling/assembly modules are the vendored nf-core ones; their
+ * publish layout replicates the retired local modules via
+ * conf/nfcore_qc_assembly.config.
  */
-include { FASTP } from '../modules/qc/fastp'
-include { FASTQC; FASTQC as FASTQC_CLEAN } from '../modules/qc/fastqc'
-include { MULTIQC } from '../modules/qc/multiqc'
+include { FASTP } from '../modules/nf-core/fastp/main'
+include { FASTQC; FASTQC as FASTQC_CLEAN } from '../modules/nf-core/fastqc/main'
+include { MULTIQC } from '../modules/nf-core/multiqc/main'
 include { SHORT_READ_MULTIQC_INPUTS } from './short_read_multiqc_inputs'
-include { BOWTIE2_HOST_REMOVAL } from '../modules/host_removal/bowtie2_host'
-include { MEGAHIT } from '../modules/assembly/megahit'
-include { METASPADES } from '../modules/assembly/metaspades'
-include { QUAST } from '../modules/assembly_qc/quast'
+include { BOWTIE2_BUILD as BOWTIE2_BUILD_HOST } from '../modules/nf-core/bowtie2/build/main'
+include { BOWTIE2_ALIGN as BOWTIE2_ALIGN_HOST } from '../modules/nf-core/bowtie2/align/main'
+include { MEGAHIT } from '../modules/nf-core/megahit/main'
+include { SPADES as METASPADES } from '../modules/nf-core/spades/main'
+include { QUAST } from '../modules/nf-core/quast/main'
 include { CONTIG_COVERAGE } from './contig_coverage'
 include { PLASMID_DETECTION } from './plasmid_detection'
 include { PLASMID_DOWNSTREAM } from './plasmid_downstream'
@@ -28,38 +33,50 @@ workflow ILLUMINA {
 
     main:
     // ---------------- QC (01) ----------------
-    FASTP(ch_samples)
-    ch_clean = FASTP.out.reads
+    FASTP(ch_samples.map { meta, r1, r2 -> tuple(meta, [r1, r2], []) }, false, false, false)
+    ch_clean = FASTP.out.reads.map { meta, reads -> tuple(meta, reads[0], reads[1]) }
 
     if (params.run_fastqc) {
-        FASTQC(ch_samples.map { meta, r1, r2 -> tuple(meta, 'raw', r1, r2) })
-        FASTQC_CLEAN(ch_clean.map { meta, r1, r2 -> tuple(meta, 'clean', r1, r2) })
+        FASTQC(ch_samples.map { meta, r1, r2 -> tuple(meta + [stage: 'raw'], [r1, r2]) })
+        FASTQC_CLEAN(ch_clean.map { meta, r1, r2 -> tuple(meta + [stage: 'clean'], [r1, r2]) })
     }
 
     // ---------------- host removal (optional, per-sample reference) ----------------
-    ch_br = ch_clean.branch { meta, r1, r2 ->
+    ch_br = ch_clean.branch { meta, _r1, _r2 ->
         host: meta.host_reference != null
         nohost: true
     }
-    BOWTIE2_HOST_REMOVAL(
-        ch_br.host.map { meta, r1, r2 -> tuple(meta, r1, r2, file(meta.host_reference)) }
+    ch_host_ref = ch_br.host.map { meta, _r1, _r2 -> tuple(meta, file(meta.host_reference)) }
+    BOWTIE2_BUILD_HOST(ch_host_ref)
+    BOWTIE2_ALIGN_HOST(
+        ch_br.host.map { meta, r1, r2 -> tuple(meta, [r1, r2]) },
+        BOWTIE2_BUILD_HOST.out.index,
+        ch_host_ref,
+        true,  // save_unaligned — the unmapped pairs are the host-free reads
+        false  // sort_bam
     )
-    ch_final_reads = ch_br.nohost.mix(BOWTIE2_HOST_REMOVAL.out.reads)
+    ch_final_reads = ch_br.nohost.mix(
+        BOWTIE2_ALIGN_HOST.out.fastq.map { meta, fqs ->
+            def pair = fqs in List ? fqs : [fqs]
+            tuple(meta, pair[0], pair[1])
+        }
+    )
 
     // ---------------- assembly (02) ----------------
     ch_assembly = Channel.empty()
     ch_graph = Channel.empty()
     if (params.short_read_assembler == 'metaspades') {
-        METASPADES(ch_final_reads)
-        ch_assembly = METASPADES.out.assembly
-        ch_graph = METASPADES.out.graph
+        METASPADES(ch_final_reads.map { meta, r1, r2 -> tuple(meta, [r1, r2], [], []) }, [], [])
+        ch_assembly = METASPADES.out.contigs
+        ch_graph = METASPADES.out.fastg
     } else {
         MEGAHIT(ch_final_reads)
-        ch_assembly = MEGAHIT.out.assembly
+        ch_assembly = MEGAHIT.out.contigs
     }
 
     // ---------------- assembly QC (03) ----------------
-    QUAST(ch_assembly)
+    QUAST(ch_assembly.map { meta, fasta -> tuple(meta, [fasta]) },
+        Channel.value([[:], []]), Channel.value([[:], []]))
 
     // ---------------- contig coverage (02/coverage) ----------------
     CONTIG_COVERAGE(ch_assembly, ch_final_reads, Channel.empty(), 'map-ont')
@@ -104,11 +121,13 @@ workflow ILLUMINA {
         ch_fastqc_raw = Channel.empty()
         ch_fastqc_clean = Channel.empty()
         if (params.run_fastqc) {
-            ch_fastqc_raw = FASTQC.out.results
-            ch_fastqc_clean = FASTQC_CLEAN.out.results
+            ch_fastqc_raw = FASTQC.out.zip
+            ch_fastqc_clean = FASTQC_CLEAN.out.zip
         }
         SHORT_READ_MULTIQC_INPUTS(FASTP.out.json, ch_fastqc_raw, ch_fastqc_clean, params.run_fastqc)
-        MULTIQC(SHORT_READ_MULTIQC_INPUTS.out.files, 'multiqc_illumina')
+        MULTIQC(SHORT_READ_MULTIQC_INPUTS.out.files.map { files ->
+            tuple([id: 'multiqc_illumina'], files, [], [], [], [])
+        })
     }
 
     emit:
@@ -120,5 +139,5 @@ workflow ILLUMINA {
         .mix(CONTIG_COVERAGE.out.table.map { meta, f -> f })
         .mix(PLASMID_ABUNDANCE.out.short_abundance.map { meta, f -> f })
         .mix(HOST_PREDICTION.out.host_profile.map { meta, f -> f })
-        .mix(QUAST.out.report.map { meta, f -> f })
+        .mix(QUAST.out.tsv.map { meta, f -> f })
 }

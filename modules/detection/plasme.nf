@@ -6,6 +6,8 @@ process PLASME {
     tag { meta.id }
     label 'process_medium'
     conda "${projectDir}/envs/plasme.yml"
+    // PLASMe 无 bioconda 包（envs pin 亦无法解析），container 用 python 运行时兜底
+    container 'quay.io/biocontainers/python:3.11'
 
     publishDir "${params.outdir}/04_plasmid_detection/plasme", mode: params.publish_dir_mode
 

@@ -67,10 +67,13 @@ output:
           description: |
             Groovy Map containing sample information
             e.g. `[ id:'sample1' ]`
-      - "*.depth.tsv":
+      - "*.tsv":
           type: file
           description: Tab-delimited file containing coverage information for each contig and sample.
-          pattern: "*.depth.tsv"
+            The filename suffix defaults to .depth.tsv; the pipeline overrides
+            it via task.ext.suffix to keep its legacy '*.coverm.tsv' product
+            names.
+          pattern: "*.tsv"
           ontologies:
             - edam: http://edamontology.org/format_3475 # TSV
 

@@ -6,6 +6,7 @@ process RECYCLER {
     tag { meta.id }
     label 'process_medium'
     conda "${projectDir}/envs/recycler.yml"
+    container 'quay.io/biocontainers/recycler:0.7--py_3'
 
     publishDir "${params.outdir}/05_plasmid_binning/recycler", mode: params.publish_dir_mode
 

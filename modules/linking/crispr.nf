@@ -3,9 +3,10 @@
  * direct callers receive an explicit failure instead of a fabricated result.
  */
 process LINK_CRISPR {
-    tag { meta.id }
+    tag "${meta.id}"
     label 'process_medium'
     conda "${projectDir}/envs/minced.yml"
+    container 'quay.io/biocontainers/minced:0.4.2--hdfd78af_1'
 
     publishDir "${params.outdir}/07_host_prediction/linking/crispr", mode: params.publish_dir_mode
 

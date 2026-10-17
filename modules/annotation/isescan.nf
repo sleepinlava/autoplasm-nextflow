@@ -6,6 +6,7 @@ process ISESCAN {
     tag { meta.id }
     label 'process_medium'
     conda "${projectDir}/envs/annotation.yml"
+    container 'quay.io/biocontainers/isescan:1.7.3--hab16a5f_1'
 
     publishDir "${params.outdir}/08_annotation/isescan", mode: params.publish_dir_mode
 

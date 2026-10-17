@@ -22,17 +22,17 @@ process LINK_SEQUENCE {
 
     script:
     def binPaths = (mag_bins in List ? mag_bins : (mag_bins ? [mag_bins] : []))
-    if (binPaths.size() > 1) {
-        throw new IllegalArgumentException("LINK_SEQUENCE expects one MAG directory for ${meta.id}, got ${binPaths}")
-    }
     def taxPaths = (host_taxonomy in List ? host_taxonomy : (host_taxonomy ? [host_taxonomy] : []))
-    if (taxPaths.size() > 1) {
-        throw new IllegalArgumentException("LINK_SEQUENCE expects one taxonomy file for ${meta.id}, got ${taxPaths}")
-    }
     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
-    def taxArg = taxPaths ? "--taxonomy ${shellQuote.call(taxPaths[0])}" : ''
-    def binsArg = binPaths ? "--host-genomes ${shellQuote.call(binPaths[0])}" : ''
+    // MAG bins are a list of fastas staged under mag_bins/; the R script scans
+    // that directory. GTDB-Tk emits one summary per domain (ar53 + bac120), so
+    // merge them into a single taxonomy table with one header.
+    def binsArg = binPaths ? "--host-genomes mag_bins" : ''
+    def taxArg = taxPaths ? "--taxonomy taxonomy.tsv" : ''
+    def taxList = taxPaths.collect { shellQuote.call(it) }.join(' ')
+    def mergeTax = taxPaths ? "head -n 1 ${shellQuote.call(taxPaths[0])} > taxonomy.tsv && tail -q -n +2 ${taxList} >> taxonomy.tsv" : ''
     """
+    ${mergeTax}
     sequence_similarity_link.R \\
         --plasmid-contigs ${shellQuote.call(plasmid_contigs)} \\
         ${binsArg} ${taxArg} \\

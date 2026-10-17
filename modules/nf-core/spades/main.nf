@@ -18,6 +18,10 @@ process SPADES {
     tuple val(meta), path('*.transcripts.fa.gz')  , optional:true, emit: transcripts
     tuple val(meta), path('*.gene_clusters.fa.gz'), optional:true, emit: gene_clusters
     tuple val(meta), path('*.assembly.gfa.gz')    , optional:true, emit: gfa
+    // Local patch (refactor/nf-core-modules): also export SPAdes'
+    // assembly_graph.fastg. The pipeline's SCAPP/Recycler plasmid binning
+    // consumes the FASTG graph (upstream only exports the GFA sibling).
+    tuple val(meta), path('*.assembly_graph.fastg'), optional:true, emit: fastg
     tuple val(meta), path('*.warnings.log')         , optional:true, emit: warnings
     tuple val(meta), path('*.spades.log')         , emit: log
     tuple val("${task.process}"), val('spades'), eval("spades.py --version 2>&1 | sed -n 's/^.*SPAdes genome assembler v//p'"), topic: versions, emit: versions_spades
@@ -61,6 +65,11 @@ process SPADES {
         gzip -n ${prefix}.assembly.gfa
     fi
 
+    # Local patch (refactor/nf-core-modules): keep the FASTG graph for SCAPP.
+    if [ -f assembly_graph.fastg ]; then
+        cp assembly_graph.fastg ${prefix}.assembly_graph.fastg
+    fi
+
     if [ -f gene_clusters.fasta ]; then
         mv gene_clusters.fasta ${prefix}.gene_clusters.fa
         gzip -n ${prefix}.gene_clusters.fa
@@ -79,6 +88,7 @@ process SPADES {
     echo "" | gzip > ${prefix}.transcripts.fa.gz
     echo "" | gzip > ${prefix}.gene_clusters.fa.gz
     echo "" | gzip > ${prefix}.assembly.gfa.gz
+    touch ${prefix}.assembly_graph.fastg
     touch ${prefix}.spades.log
     touch ${prefix}.warnings.log
     """

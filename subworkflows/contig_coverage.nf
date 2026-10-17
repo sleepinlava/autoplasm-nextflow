@@ -1,13 +1,26 @@
 /*
  * Contig coverage subworkflow (DAG category contig_coverage): map reads to
- * the assembly, sort, and estimate coverage with CoverM. Short-read samples
- * use bowtie2, long-read samples minimap2; hybrid runs both and merges the
- * BAMs (mirroring the DAG's two contig mappers for hybrid).
+ * the assembly and estimate coverage with CoverM. Short-read samples use
+ * bowtie2 (index + align with sort_bam=true, so the sorted BAM comes straight
+ * out of the aligner), long-read samples minimap2 (bam_format=true pipes
+ * through samtools sort inside the module); hybrid runs both and merges the
+ * BAMs with the nf-core samtools/merge. Chain labels ('.short'/'.long') ride
+ * in meta.suffix so the published BAM names match the legacy layout; they are
+ * stripped before the per-sample join/merge and before emit. Process names,
+ * file names and publish dirs replicate the former local modules via
+ * conf/nfcore_upstream.config.
  */
-include { BOWTIE2_CONTIG_COVERAGE } from '../modules/coverage/bowtie2_contig'
-include { MINIMAP2_CONTIG_COVERAGE } from '../modules/coverage/minimap2_contig'
-include { SAMTOOLS_SORT; SAMTOOLS_SORT as SAMTOOLS_SORT_LONG; SAMTOOLS_MERGE } from '../modules/coverage/samtools_sort'
-include { COVERM_CONTIG } from '../modules/coverage/coverm_contig'
+include { BOWTIE2_BUILD as BOWTIE2_BUILD_COVERAGE } from '../modules/nf-core/bowtie2/build/main'
+include { BOWTIE2_ALIGN as BOWTIE2_ALIGN_COVERAGE } from '../modules/nf-core/bowtie2/align/main'
+include { MINIMAP2_ALIGN as MINIMAP2_ALIGN_COVERAGE } from '../modules/nf-core/minimap2/align/main'
+include { SAMTOOLS_MERGE } from '../modules/nf-core/samtools/merge/main'
+include { COVERM_CONTIG } from '../modules/nf-core/coverm/contig/main'
+
+// Drop the chain-label keys ('suffix'/'preset') that the wiring adds to meta
+// before joining, merging, or emitting downstream.
+def stripChainMeta(meta) {
+    return meta.findAll { entry -> !(entry.key in ['suffix', 'preset']) }
+}
 
 workflow CONTIG_COVERAGE {
     take:
@@ -17,24 +30,43 @@ workflow CONTIG_COVERAGE {
     long_preset    // val: minimap2 preset ('map-ont' or 'map-hifi')
 
     main:
-    ch_short_bam = SAMTOOLS_SORT(
-        BOWTIE2_CONTIG_COVERAGE(ch_assembly.join(ch_short_reads)).alignment
-            .map { meta, sam -> tuple(meta, sam, '.short') }
-    ).bam
-    ch_long_bam = SAMTOOLS_SORT_LONG(
-        MINIMAP2_CONTIG_COVERAGE(ch_assembly.join(ch_long_reads), long_preset).alignment
-            .map { meta, sam -> tuple(meta, sam, '.long') }
-    ).bam
+    // ---- short-read chain: bowtie2 index build + align (sorted BAM) ----
+    ch_short_in = ch_assembly.join(ch_short_reads)
+        .map { meta, fasta, r1, r2 -> tuple(meta + [suffix: '.short'], fasta, r1, r2) }
+    BOWTIE2_BUILD_COVERAGE(ch_short_in.map { meta, fasta, _r1, _r2 -> tuple(meta, fasta) })
+    BOWTIE2_ALIGN_COVERAGE(
+        ch_short_in.map { meta, _fasta, r1, r2 -> tuple(meta, [r1, r2]) },
+        BOWTIE2_BUILD_COVERAGE.out.index,
+        ch_short_in.map { meta, fasta, _r1, _r2 -> tuple(meta, fasta) },
+        false, // save_unaligned
+        true   // sort_bam
+    )
+    ch_short_bam = BOWTIE2_ALIGN_COVERAGE.out.bam
+        .map { meta, bam -> tuple(stripChainMeta(meta), bam) }
+
+    // ---- long-read chain: minimap2 (sorted BAM via samtools sort pipe) ----
+    ch_long_in = ch_assembly.join(ch_long_reads)
+        .map { meta, fasta, lr -> tuple(meta + [suffix: '.long', preset: long_preset], fasta, lr) }
+    MINIMAP2_ALIGN_COVERAGE(
+        ch_long_in.map { meta, _fasta, lr -> tuple(meta, lr) },
+        ch_long_in.map { meta, fasta, _lr -> tuple(meta, fasta) },
+        true,  // bam_format
+        '',    // bam_index_extension
+        false, // cigar_paf_format
+        false  // cigar_bam
+    )
+    ch_long_bam = MINIMAP2_ALIGN_COVERAGE.out.bam
+        .map { meta, bam -> tuple(stripChainMeta(meta), bam) }
 
     // Per-sample: merge when both mappers ran (hybrid), else pass through
     ch_per_sample = ch_short_bam.join(ch_long_bam, remainder: true)
         .map { meta, short_bam, long_bam ->
-            def bams = [short_bam, long_bam].findAll { it != null }
-            tuple(meta, bams)
+            def bams = [short_bam, long_bam].findAll { bam -> bam != null }
+            tuple(meta, bams, []) // no BAM indexes to merge
         }
-    ch_bam = SAMTOOLS_MERGE(ch_per_sample).bam
+    ch_bam = SAMTOOLS_MERGE(ch_per_sample, [[], [], [], []], '').bam
 
-    ch_table = COVERM_CONTIG(ch_bam).table
+    ch_table = COVERM_CONTIG(ch_bam, [[], []], true, false, false).coverage
 
     emit:
     bam      = ch_bam

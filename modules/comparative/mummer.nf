@@ -7,6 +7,7 @@ process MUMMER {
     tag { meta.id }
     label 'process_medium'
     conda "${projectDir}/envs/comparative.yml"
+    container 'quay.io/biocontainers/mummer:3.23--pl5321h503566f_21'
 
     publishDir "${params.outdir}/09_comparative_genomics/mummer", mode: params.publish_dir_mode
 

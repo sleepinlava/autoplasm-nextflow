@@ -1,9 +1,10 @@
 /*
- * Shared plasmid detection subworkflow: geNomad (mandatory) + optional
- * PLASMe/PlasX/Platon/SCAPP, followed by consensus integration (DAG node
- * plasmid_consensus) and structure detection (plasmid_structure).
+ * Shared plasmid detection subworkflow: geNomad via the nf-core
+ * genomad/endtoend module (mandatory) + optional PLASMe/PlasX/Platon/SCAPP,
+ * followed by consensus integration (DAG node plasmid_consensus) and
+ * structure detection (plasmid_structure).
  */
-include { GENOMAD } from '../modules/detection/genomad'
+include { GENOMAD_ENDTOEND as GENOMAD } from '../modules/nf-core/genomad/endtoend/main'
 include { PLASME } from '../modules/detection/plasme'
 include { PLASX } from '../modules/detection/plasx'
 include { PLATON } from '../modules/detection/platon'
@@ -17,7 +18,9 @@ workflow PLASMID_DETECTION {
     ch_scapp_reads // tuple(meta, graph, r1, r2); empty unless SCAPP can run
 
     main:
-    GENOMAD(ch_assembly, Channel.value(file(params.genomad_db, checkIfExists: true)))
+    // nf-core module expects the database as tuple val(meta2), path(db); the
+    // db carries no sample metadata, so meta2 is an empty map.
+    GENOMAD(ch_assembly, Channel.value([[:], file(params.genomad_db, checkIfExists: true)]))
 
     ch_plasme = Channel.empty()
     if (params.plasmid_detection_tools.contains('plasme')) {

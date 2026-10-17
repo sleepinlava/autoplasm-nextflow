@@ -1,6 +1,10 @@
 /*
  * Dorado basecalling from ONT POD5 (DAG node: basecalling_dorado).
- * Dorado is not available on conda; install it manually (see envs/basecalling.yml).
+ * Dorado has no bioconda package and no community container is pinned by the
+ * project, so this process deliberately ships no `container` directive: with
+ * docker/singularity profiles enabled Nextflow will run it in the default
+ * `ontresearch/dorado:latest` image only if the deployment provides one.
+ * Install dorado manually (see envs/basecalling.yml) and keep it on PATH.
  */
 process DORADO_BASECALL {
     tag { meta.id }

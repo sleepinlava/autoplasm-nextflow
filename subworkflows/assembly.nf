@@ -4,7 +4,7 @@
  * assembly_provided); no read-based steps (QC, coverage, abundance, MAG,
  * linking) are instantiated. Host prediction uses PlasmidHostFinder.
  */
-include { QUAST } from '../modules/assembly_qc/quast'
+include { QUAST } from '../modules/nf-core/quast/main'
 include { PLASMID_DETECTION } from './plasmid_detection'
 include { PLASMID_DOWNSTREAM } from './plasmid_downstream'
 include { HOST_PREDICTION } from './host_prediction'
@@ -17,7 +17,8 @@ workflow ASSEMBLY {
     main:
     ch_assembly = ch_samples
 
-    QUAST(ch_assembly)
+    QUAST(ch_assembly.map { meta, fasta -> tuple(meta, [fasta]) },
+        Channel.value([[:], []]), Channel.value([[:], []]))
 
     PLASMID_DETECTION(ch_assembly, Channel.empty())
     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
@@ -37,5 +38,5 @@ workflow ASSEMBLY {
     plasmid_tables = Channel.empty()
     done = PLASMID_DETECTION.out.consensus.map { meta, f -> f }
         .mix(PLASMID_DETECTION.out.structure.map { meta, f -> f })
-        .mix(QUAST.out.report.map { meta, f -> f })
+        .mix(QUAST.out.tsv.map { meta, f -> f })
 }

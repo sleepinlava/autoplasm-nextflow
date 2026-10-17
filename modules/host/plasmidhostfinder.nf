@@ -6,6 +6,7 @@ process PLASMIDHOSTFINDER {
     tag { meta.id }
     label 'process_low'
     conda "${projectDir}/envs/plasmidhostfinder.yml"
+    container 'quay.io/biocontainers/plasmidhostfinder:0.1.0--pyhdfd78af_0'
 
     publishDir "${params.outdir}/07_host_prediction/plasmidhostfinder", mode: params.publish_dir_mode
 

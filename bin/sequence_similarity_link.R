@@ -241,7 +241,7 @@ load_taxonomy <- function(path) {
     if (is.na(genome_col)) next
     genome <- if (genome_col <= length(cells)) cells[genome_col] else ""
     if (!nzchar(genome)) next
-    stem <- sub("\\.[^.]*$", "", basename(genome))
+    stem <- sub("\\.(fa|fna|fasta)(\\.gz)?$", "", basename(genome), ignore.case = TRUE)
     classification <- if (!is.na(class_col) && class_col <= length(cells)) cells[class_col] else ""
     tax[stem] <- classification
   }
@@ -255,7 +255,9 @@ mag_candidates <- function(directory) {
   if (!dir.exists(directory)) {
     die(sprintf("MAG path is not a directory: %s", directory))
   }
-  entries <- list.files(directory, full.names = TRUE, all.files = TRUE, no.. = TRUE)
+  # recursive: Nextflow staging can nest the source directory one level down
+  entries <- list.files(directory, full.names = TRUE, all.files = TRUE, no.. = TRUE,
+                        recursive = TRUE)
   names_only <- basename(entries)
   ord <- order(names_only, method = "radix")
   entries <- entries[ord]
@@ -263,14 +265,11 @@ mag_candidates <- function(directory) {
   lower <- tolower(names_only)
   is_file <- file.exists(entries) & !dir.exists(entries)
   ext <- tolower(sub("^.*\\.", "", names_only))
-  candidates <- entries[is_file & ext %in% c("fa", "fna", "fasta")]
-  compressed <- entries[is_file & (endsWith(lower, ".fa.gz") |
-                                     endsWith(lower, ".fna.gz") |
-                                     endsWith(lower, ".fasta.gz"))]
-  if (!length(candidates) && length(compressed)) {
-    die(sprintf("Compressed MAG FASTA is not supported yet: %s",
-                paste(compressed, collapse = ", ")))
-  }
+  compressed <- endsWith(lower, ".fa.gz") |
+                endsWith(lower, ".fna.gz") |
+                endsWith(lower, ".fasta.gz")
+  # R file connections auto-detect gzip on read, so .gz FASTAs are fine
+  candidates <- entries[is_file & (ext %in% c("fa", "fna", "fasta") | compressed)]
   candidates
 }
 
@@ -278,7 +277,7 @@ load_bins <- function(files) {
   features <- list()
   owners <- character(0)
   for (path in files) {
-    host_id <- sub("\\.[^.]*$", "", basename(path))
+    host_id <- sub("\\.(fa|fna|fasta)(\\.gz)?$", "", basename(path), ignore.case = TRUE)
     if (host_id %in% names(owners)) {
       die(sprintf("Duplicate MAG host_id '%s': %s and %s", host_id, owners[host_id], path))
     }

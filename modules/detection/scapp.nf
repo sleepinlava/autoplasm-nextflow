@@ -6,6 +6,8 @@ process SCAPP_DETECT {
     tag { meta.id }
     label 'process_medium'
     conda "${projectDir}/envs/scapp.yml"
+    // bioconda 最新仅 0.1.4（envs pin scapp>=0.1.5 无对应容器镜像）
+    container 'quay.io/biocontainers/scapp:0.1.4--py_0'
 
     publishDir "${params.outdir}/04_plasmid_detection/scapp", mode: params.publish_dir_mode
 

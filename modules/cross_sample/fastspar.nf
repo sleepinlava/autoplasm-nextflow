@@ -7,6 +7,7 @@ process FASTSPAR {
     tag 'fastspar'
     label 'process_medium'
     conda "${projectDir}/envs/network.yml"
+    container 'quay.io/biocontainers/fastspar:1.0.0--h1b620e3_6'
 
     publishDir "${params.outdir}/12_network", mode: params.publish_dir_mode
 

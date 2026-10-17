@@ -124,9 +124,9 @@
                             "modules"
                         ]
                     },
-                    "dastool/scaffolds2bin": {
+                    "dastool/fastatocontig2bin": {
                         "branch": "master",
-                        "git_sha": "f186f4761d880987fa03c0bed60c93b3068c58e9",
+                        "git_sha": "6d46786420b4d7bc88eba026eb389c0c5535d120",
                         "installed_by": [
                             "modules"
                         ]

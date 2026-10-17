@@ -9,9 +9,10 @@ workflow SHORT_READ_MULTIQC_INPUTS {
     main:
     ch_qc_files = ch_fastp_json.map { meta, file -> file }
     if (run_fastqc) {
+        // nf-core fastqc emits zips as tuple(meta, [R1_zip, R2_zip])
         ch_qc_files = ch_qc_files
-            .mix(ch_fastqc_raw.map { meta, zips, htmls -> zips }.flatten())
-            .mix(ch_fastqc_clean.map { meta, zips, htmls -> zips }.flatten())
+            .mix(ch_fastqc_raw.map { meta, zips -> zips }.flatten())
+            .mix(ch_fastqc_clean.map { meta, zips -> zips }.flatten())
     }
 
     emit:
