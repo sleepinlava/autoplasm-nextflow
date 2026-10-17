@@ -1,0 +1,48 @@
+---
+title: "`r paste('AutoPlasm report —', params$project_name)`"
+params:
+  project_name: "plasmid_analysis"
+  platform: ""
+  data_json: "report_data.json"
+output:
+  html_document:
+    self_contained: true
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(jsonlite)
+data <- fromJSON(params$data_json, simplifyVector = TRUE)
+```
+
+**Platform:** `r data$platform`  
+**Date:** `r data$date`  
+**Samples:** `r length(data$samples$sample_id)`
+
+## Plasmid detection summary
+
+```{r detection}
+knitr::kable(data$samples,
+             col.names = c("sample_id", "consensus_plasmids", "circular", "detection_tools"),
+             row.names = FALSE)
+```
+
+## Analysis sections
+
+```{r sections}
+sections <- data$sections
+knitr::kable(data.frame(Section = sections$name,
+                        Present = ifelse(sections$present, "yes", "no")),
+             row.names = FALSE)
+```
+
+## Limitations
+
+- Sequence-based circularity is predictive and should be confirmed from the assembly graph or read support.
+- Plasmid calls are predictions from automated classifiers; confirm biologically important hits manually.
+
+## Methods
+
+`r data$methods`
