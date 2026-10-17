@@ -1,0 +1,11 @@
+# Custom container image for the R analysis modules (bin/*.R).
+# The conda env envs/r_analysis.yml is the authoritative dependency spec;
+# this image mirrors it for container profiles, because no public image ships
+# R + vegan + data.table + Biostrings + Rsamtools together.
+#
+# Build:
+#   docker build -f containers/Dockerfile.r-analysis -t autoplasm-r-analysis:latest .
+FROM bioconductor/bioconductor_docker:RELEASE_3_21
+
+RUN Rscript -e 'install.packages(c("vegan", "jsonlite", "rmarkdown"), repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'stopifnot(all(vapply(c("vegan", "data.table", "Biostrings", "Rsamtools", "jsonlite", "rmarkdown"), requireNamespace, logical(1), quietly = TRUE)))'

@@ -2,12 +2,14 @@
  * Host-plasmid linking subworkflow (DAG category host_plasmid_linking;
  * default disabled — params.host_plasmid_linking). Methods: co_abundance
  * (cross-sample), sequence (per-sample), CRISPR (currently rejected),
- * long_read (per-sample bridge evidence).
+ * long_read (per-sample bridge evidence), HOTSPOT (optional Transformer
+ * host prediction, needs --hotspot_home/--hotspot_db/--hotspot_models).
  */
 include { LINK_COABUNDANCE } from '../modules/linking/coabundance'
 include { MERGE_ABUNDANCE as MERGE_ABUNDANCE_FOR_LINK } from '../modules/cross_sample/merge_abundance'
 include { LINK_SEQUENCE } from '../modules/linking/sequence'
 include { LINK_LONGREAD } from '../modules/linking/longread'
+include { LINK_HOTSPOT } from '../modules/linking/hotspot'
 
 workflow HOST_LINKING {
     take:
@@ -62,6 +64,11 @@ workflow HOST_LINKING {
         if (params.host_linking_methods.contains('long_read') && has_long_reads) {
             LINK_LONGREAD(ch_plasmids.join(ch_assembly).join(ch_longread_bam))
             ch_links = ch_links.mix(LINK_LONGREAD.out.links.map { meta, f -> f })
+        }
+        // HOTSPOT Transformer host prediction (optional; needs --hotspot_home/--hotspot_db/--hotspot_models)
+        if (params.host_linking_optional_methods.contains('hotspot')) {
+            LINK_HOTSPOT(ch_plasmids)
+            ch_links = ch_links.mix(LINK_HOTSPOT.out.links.map { meta, f -> f })
         }
     }
 

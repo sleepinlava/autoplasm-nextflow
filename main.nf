@@ -56,6 +56,13 @@ def validateParams() {
     if (params.host_plasmid_linking && params.host_linking_optional_methods.contains('crispr')) {
         paramError("CRISPR host-plasmid linking is not implemented; remove 'crispr' from --host_linking_optional_methods")
     }
+    if (params.host_plasmid_linking && params.host_linking_optional_methods.contains('hotspot')) {
+        ['hotspot_home', 'hotspot_db', 'hotspot_models'].each { p ->
+            if (!params[p]) {
+                paramError("host_linking_optional_methods 'hotspot' requires --${p} (cloned HOTSPOT repo + database/models folders)")
+            }
+        }
+    }
     def platforms = ['illumina', 'ont', 'pacbio_hifi', 'hybrid', 'assembly']
     if (!platforms.contains(params.platform)) {
         paramError("--platform must be one of ${platforms}")

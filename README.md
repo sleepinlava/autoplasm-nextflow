@@ -57,7 +57,7 @@ host_reference, notes`，按平台需要填写。
 `sample_id` 必须全表唯一，并符合 `[A-Za-z0-9][A-Za-z0-9_.-]*`。点号、连字符和双下划线均可保留，例如 `A__B.v1`；空值、空白、斜线和其他字符会在流程启动时按样本表行号报错。此约束用于保证输出文件名和 shell 参数具有唯一、明确的样本身份。
 
 丰度合并由流程按每个 CoverM 文件的元数据显式传入样本 ID。独立调用
-`bin/merge_abundance.py` 时也应使用与 `--tables` 顺序对应的 `--sample-ids`；
+`bin/merge_abundance.R` 时也应使用与 `--tables` 顺序对应的 `--sample-ids`；
 为兼容旧调用保留的文件名推断无法无歧义处理点号和后缀相似的样本名。
 
 ## 主要参数（默认值镜像 config_default.yaml）
@@ -78,9 +78,9 @@ host_reference, notes`，按平台需要填写。
   `--network_min_samples 20`。
 - 宿主-质粒关联默认关闭：`--host_plasmid_linking true` 开启，
   `--host_linking_methods 'co_abundance,sequence,long_read'`、
-  `--host_linking_optional_methods crispr`。
+  `--host_linking_optional_methods hotspot`（或 `crispr`，尚未实现）。
 
-当前 CRISPR 宿主-质粒关联尚未实现。开启宿主关联并把 `crispr` 加入可选方法时，流程会提前明确失败；关闭该方法不影响其他关联类型。Hybrid 的 MetaPhlAn 宿主 profile 使用短读长，每个样本只生成一份 profile。
+当前 CRISPR 宿主-质粒关联尚未实现。开启宿主关联并把 `crispr` 加入可选方法时，流程会提前明确失败；关闭该方法不影响其他关联类型。可选方法 `hotspot` 接入 [HOTSPOT](https://github.com/Orin-beep/HOTSPOT)（Transformer 宿主预测，蛋白/复制子特征，高置信），需要预先克隆其仓库并下载模型库，经 `--hotspot_home`、`--hotspot_db`、`--hotspot_models` 传入。Hybrid 的 MetaPhlAn 宿主 profile 使用短读长，每个样本只生成一份 profile。
 
 FastQC 报告以样本、阶段和 read 端命名，例如 `S1.raw.R1_fastqc.zip` 与 `S1.clean.R2_fastqc.html`。FASTQ 输入本身不重写；FastQC 内部记录的输入名也带有相同身份，例如 `S1.raw.R1.fastq.gz`。MultiQC 汇总 raw/clean FastQC ZIP 与 fastp JSON，不重复暂存 HTML。
 
@@ -157,13 +157,15 @@ ABI 不自动下载数据库，本流程同样要求预先准备并通过参数�
 - `plasmid_structure` 与 ABI 算法一致（header 环化标记 + 20–1000 bp 精确
   末端重叠）。
 - 序列相似性宿主关联简化为四核苷酸组成余弦相似度 + GC 惩罚（ABI 还建模
-  密码子使用）；长读桥接基于 SAM 文本解析（同一条读段同时比对到质粒与
-  非质粒 contig）。
-- 差异丰度"内部效应量法"为 Welch t（正态近似 p 值）+ Hedges' g + BH 校正；
+  密码子使用）；长读桥接基于 Rsamtools 的 SAM/BAM 解析（同一条读段同时
+  比对到质粒与非质粒 contig，默认 MAPQ≥20 过滤）。
+- 差异丰度"内部效应量法"为 Welch t 检验 + Hedges' g + BH 校正，默认按
+  Maaslin2/ANCOM-BC 惯例过滤低流行度 contig（--min-prevalence 0.1）；
   CoverM 无原始计数，DESeq2/FastSpar 以取整 coverage 作为计数代理（与 ABI
   DESeq2 脚本相同的约定）。
-- 报告为简化版汇总（样本质粒数、环化数、启用的分析板块），不是 ABI 的
-  完整图文报告。
+- 报告为汇总版（样本质粒数、环化数、启用的分析板块），HTML 由
+  `assets/plasmid_report.Rmd` 模板渲染（rmarkdown+pandoc 缺失时回退为简版
+  静态页），不是 ABI 的完整图文报告。
 - hybrid 平台的跨样本统计使用短读丰度链；contig 覆盖度合并长短读 BAM。
 - PLASMe/PlasX/COPLA 等工具输出列格式存在版本差异，解析器做了宽松启发式
   处理（按列名候选匹配）。
