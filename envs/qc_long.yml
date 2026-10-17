@@ -1,8 +1,0 @@
-name: autoplasm-qc-long
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - nanoplot>=1.42
-  - filtlong>=0.2.1
-  - multiqc>=1.20

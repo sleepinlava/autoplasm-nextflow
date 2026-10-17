@@ -1,6 +1,0 @@
-name: autoplasm-semibin
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - semibin>=2.0

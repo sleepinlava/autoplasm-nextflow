@@ -1,7 +1,0 @@
-name: autoplasm-typing
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - plasmidfinder>=2.1
-  - mob_suite>=3.1

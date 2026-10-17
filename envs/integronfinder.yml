@@ -1,9 +1,0 @@
-name: autoplasm-integronfinder
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  # IntegronFinder 2.0rc6 imports the removed Bio.Seq.IUPAC API, hence the
-  # biopython pin (mirrors the ABI autoplasm-integronfinder environment).
-  - integron_finder>=2.0
-  - biopython=1.77

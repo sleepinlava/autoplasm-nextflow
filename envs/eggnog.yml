@@ -1,6 +1,0 @@
-name: autoplasm-eggnog
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - eggnog-mapper>=2.1.12

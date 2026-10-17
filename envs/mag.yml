@@ -1,8 +1,0 @@
-name: autoplasm-mag
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - metabat2>=2.15
-  - concoct>=1.1
-  - das_tool>=1.1.6

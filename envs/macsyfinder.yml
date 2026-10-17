@@ -1,7 +1,0 @@
-name: autoplasm-macsyfinder
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  # CONJscan models are distributed through MacSyFinder >= 2.1.2.
-  - macsyfinder>=2.1.2

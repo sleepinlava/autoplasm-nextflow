@@ -18,7 +18,6 @@ nextflow run . \
     --genomad_db /path/to/genomad_db \
     --bakta_db /path/to/bakta_db \
     --amrfinderplus_db /path/to/amrfinder_db/latest \
-    --plasmidfinder_db /path/to/plasmidfinder_db \
     --mob_suite_db /path/to/mob_suite_db \
     --metaphlan_db /path/to/metaphlan_db \
     -profile conda
@@ -28,6 +27,25 @@ nextflow run . \
 `--plasmid_detection_tools 'genomad,platon'`。所有参数的默认值见
 `nextflow.config`，与 ABI `config_default.yaml` 保持一致。
 
+## 实现基座（nf-core 模块）
+
+凡 nf-core/modules 有官方实现的工具（bowtie2、minimap2、samtools、CoverM、
+fastp、FastQC、MultiQC、NanoPlot、Filtlong、HiFiAdapterFilt、MEGAHIT、SPAdes、
+Flye、QUAST、medaka、geNomad、Prodigal、Bakta、AMRFinderPlus、ABRicate、
+IntegronFinder、RGI、eggNOG-mapper、MOB-suite、PlasmidFinder、MacSyFinder/
+CONJScan、MetaPhlAn、Kraken2、MetaBAT2、CONCOCT、SemiBin2、DAS Tool、CheckM2、
+GTDB-Tk、MMseqs2、BLAST 等），本流程直接使用 vendor 在 `modules/nf-core/` 的
+官方模块（版本与 git SHA 固定于 `modules.json`，可用 `nf-core modules update`
+升级）；发布路径与参数经 `conf/nfcore_*.config` 按域配置。无官方实现的质粒
+专用工具（PLASMe、PlasX、Platon、SCAPP、gplas2、PlasMAAG、Recycler、COPLA、
+PlasmidHostFinder、clinker、nucmer/MUMmer 链、FastSpar 及自研统计脚本）保留
+自研模块并补齐了容器指令。
+
+执行 profile：`-profile conda` / `mamba`（每个模块自带 conda 环境）、
+`-profile docker` / `-profile singularity`（模块自带 biocontainers/Wave 镜像）。
+例外（无公共包/镜像，需手动安装到 PATH）：**Dorado**（ONT POD5 basecalling）与
+**OPERA-MS**（默认 hybrid 组装器；也可改用 `--hybrid_assembler hybridspades`）。
+
 ## 流程阶段
 
 | 阶段 | 目录 | 内容 |
@@ -36,7 +54,7 @@ nextflow run . \
 | 01 | `01_qc/` | fastp（必选）、FastQC/MultiQC（可选）、NanoPlot+Filtlong（ONT）、HiFiAdapterFilt（HiFi）；宿主去除 bowtie2（短读）/minimap2（长读，样本表 `host_reference` 触发） |
 | 02 | `02_assembly/` | MEGAHIT(默认)/metaSPAdes（illumina）、metaFlye（ont）、hifiasm-meta（hifi）、OPERA-MS(默认)/hybridSPAdes（hybrid）；`02_assembly/coverage/` 为 contig 覆盖度 |
 | 03 | `03_assembly_qc/` | metaQUAST；`03_assembly_qc/polishing/` 为可选 medaka 抛光（ont） |
-| 04 | `04_plasmid_detection/` | geNomad（必选）+ 可选 PLASMe/PlasX/Platon/SCAPP；共识整合 + 环化/末端重叠检测（`bin/` Python 脚本） |
+| 04 | `04_plasmid_detection/` | geNomad（必选）+ 可选 PLASMe/PlasX/Platon/SCAPP；共识整合（plasmidEC 式 ensemble 表）+ 环化/末端重叠检测（`bin/` R 脚本） |
 | 05 | `05_plasmid_binning/` | 可选 PlasMAAG、gplas2、MOB-recon、SCAPP、Recycler |
 | 06 | `06_plasmid_typing/` | 默认 PlasmidFinder + MOB-typer；可选 COPLA、CONJscan、MacSyFinder |
 | 07 | `07_host_prediction/` | MetaPhlAn4（默认）/Kraken2/PlasmidHostFinder(assembly)；`07_host_prediction/mag/` 为可选 MAG 链；宿主-质粒关联（默认关） |
@@ -93,17 +111,17 @@ ABI 不自动下载数据库，本流程同样要求预先准备并通过参数�
 | `--genomad_db` | geNomad（必选） | `genomad download-database <dir>` |
 | `--bakta_db` | Bakta | `bakta_db download --output <dir>` |
 | `--amrfinderplus_db` | AMRFinderPlus | `amrfinder -u`（指向 `<dir>/latest`） |
-| `--plasmidfinder_db` | PlasmidFinder | https://bitbucket.org/genomicepidemiology/plasmidfinder_db |
-| `--mob_suite_db` | MOB-typer / MOB-recon | `mob_init -d <dir>` |
+| `--mob_suite_db` | MOB-typer | `mob_init -d <dir>`（MOB-recon 与 PlasmidFinder 使用工具自带库，无需配置） |
 | `--metaphlan_db` | MetaPhlAn4 | `metaphlan --install --db_dir <dir>` |
 | `--kraken2_db` | Kraken2 | 标准/自定义 Kraken2 库 |
 | `--gtdbtk_db` | GTDB-Tk | GTDB release 参考数据 |
+| `--checkm2_db` | CheckM2 | `checkm2 database --download --path <dir>`（启用 checkm2 时必填） |
 | `--plasme_db / --platon_db` | PLASMe / Platon | 各自官方数据库 |
 | `--plasx_annotations / --plasx_model` | PlasX | PlasX 官方注释与模型文件 |
 | `--copla_refgraph / --copla_reflist` | COPLA | COPLA 参考图与列表 |
-| `--card_db` | RGI | CARD card.json |
+| `--card_db` | RGI | 含 card.json 与 card_database 序列的目录 |
 | `--eggnog_db` | eggNOG-mapper | `download_eggnog_data.py` |
-| `--blast_db` | BLASTn | 预构建 BLAST 库前缀 |
+| `--blast_db` | BLASTn | 预构建 BLAST 库目录 |
 | `--reference_plasmids` | MUMmer | 参考质粒 FASTA |
 | `--plasmidhostfinder_db` | PlasmidHostFinder | 官方数据库（assembly 平台） |
 
@@ -111,15 +129,32 @@ ABI 不自动下载数据库，本流程同样要求预先准备并通过参数�
 
 ## Conda 环境
 
-`-profile conda`（或 `mamba`）按 process 自动创建 `envs/` 下的环境。
-例外（需手动安装到 PATH）：**Dorado**（ONT POD5 basecalling）与
-**OPERA-MS**（默认 hybrid 组装器，bioconda 已下架；也可改用
-`--hybrid_assembler hybridspades`）。IntegronFinder 环境固定
-`biopython=1.77`（镜像 ABI 的兼容环境说明）。
+`-profile conda`（或 `mamba`）下，nf-core 模块使用各自 vendored
+`environment.yml`；保留的自研模块使用 `envs/` 下的环境 yml。例外（需手动
+安装到 PATH）：**Dorado**（ONT POD5 basecalling）与 **OPERA-MS**（默认
+hybrid 组装器，bioconda 已下架；也可改用 `--hybrid_assembler hybridspades`）。
 
 ## 验证状态
 
-2026-10-16 新增主入口 mock 端到端测试：Illumina 正常场景 **140 个任务通过**，
+2026-10-17 nf-core 化改造（`refactor/nf-core-modules` 分支）：约 50 个 process
+替换为 `modules/nf-core/` vendored 官方模块。验证（Nextflow 26.10.0 + Java 21）：
+
+- mock 端到端 **9 个场景全部通过**：illumina(146 任务) / ont(128) /
+  pacbio_hifi(121) / hybrid+opera_ms(177) / hybrid+hybridspades(177) /
+  illumina 无质粒(90) / ont+pod5(134) / ont+bam(134) / pacbio_hifi+mixed(124)。
+  外部生信命令为显式 mock，不代表真实工具/数据库验收。
+- `pytest tests/ -q`：**42 项通过**（含共识 ensemble schema 与 gz MAG 新用例）。
+- `python tests/run_module_regressions.py --suite all`：catalog / sequence /
+  sample-ids / coabundance / host-routing / sequence-optional / crispr-guard
+  全部通过；qc（缺真实 fastqc/multiqc）与 longread-source（缺真实 samtools）
+  按设计报“未运行”，与基线一致。
+- `nextflow lint main.nf subworkflows modules conf tests/nextflow`：0 error。
+- 共识输出新增 plasmidEC 式 ensemble 列（各工具判定、`plasmid_count`、
+  `combined_prediction`），`plasmid_call` 等既有列不变。
+
+历史验证记录：
+
+2026-10-16 新增主入口 mock 端到端测试：Illumina 正常场景 140 个任务通过，
 无质粒场景 **84 个任务通过**。使用真实 Nextflow 26.10.0 和仓库 Python 脚本，
 外部生信命令使用显式 mock；不代表真实工具/数据库验收。复现方法见
 [`tests/mock_e2e/README.md`](tests/mock_e2e/README.md)，失败基线与修复记录见

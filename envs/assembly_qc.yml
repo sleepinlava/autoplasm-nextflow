@@ -1,6 +1,0 @@
-name: autoplasm-assembly-qc
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - quast>=5.2

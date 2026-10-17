@@ -1,6 +1,0 @@
-name: autoplasm-gtdbtk
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - gtdbtk>=2.3
