@@ -1,14 +1,16 @@
 /*
- * Sequence similarity host-plasmid linking (k-mer/GC composition; DAG node:
- * host_plasmid_link_sequence; internal handler in ABI, implemented here by
- * bin/sequence_similarity_link.py). Reads the actual staged MAG directory;
- * GTDB-Tk taxonomy is attached when available. Missing optional inputs arrive
- * as empty lists.
+ * Sequence similarity host-plasmid linking (TETRA tetranucleotide z-scores;
+ * DAG node: host_plasmid_link_sequence; internal handler in ABI, implemented
+ * here by bin/sequence_similarity_link.R). Reads the actual staged MAG
+ * directory; GTDB-Tk taxonomy is attached when available. Missing optional
+ * inputs arrive as empty lists.
  */
 process LINK_SEQUENCE {
-    tag { meta.id }
+    tag "${meta.id}"
     label 'process_low'
-    conda "${projectDir}/envs/python.yml"
+    conda "${projectDir}/envs/r_analysis.yml"
+    // R 包集合以 envs/r_analysis.yml 为准；镜像需提供 data.table/vegan/Biostrings/Rsamtools
+    container 'bioconductor/bioconductor_docker:RELEASE_3_21'
 
     publishDir "${params.outdir}/07_host_prediction/linking/sequence", mode: params.publish_dir_mode
 
@@ -31,7 +33,7 @@ process LINK_SEQUENCE {
     def taxArg = taxPaths ? "--taxonomy ${shellQuote.call(taxPaths[0])}" : ''
     def binsArg = binPaths ? "--host-genomes ${shellQuote.call(binPaths[0])}" : ''
     """
-    sequence_similarity_link.py \\
+    sequence_similarity_link.R \\
         --plasmid-contigs ${shellQuote.call(plasmid_contigs)} \\
         ${binsArg} ${taxArg} \\
         --sample-id ${shellQuote.call(meta.id)} \\

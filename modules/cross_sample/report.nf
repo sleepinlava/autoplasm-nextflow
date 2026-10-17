@@ -1,13 +1,15 @@
 /*
  * AutoPlasm Markdown + HTML report (DAG node: report_markdown; internal
- * report renderer in ABI, implemented here by bin/generate_report.py). The
+ * report renderer in ABI, implemented here by bin/generate_report.R). The
  * script scans the published results directory and writes a simplified
  * summary report plus a methods section.
  */
 process REPORT {
     tag 'report'
     label 'process_single'
-    conda "${projectDir}/envs/python.yml"
+    conda "${projectDir}/envs/r_analysis.yml"
+    // R 包集合以 envs/r_analysis.yml 为准；镜像需提供 data.table/vegan/Biostrings/Rsamtools
+    container 'bioconductor/bioconductor_docker:RELEASE_3_21'
 
     publishDir "${params.outdir}/report", mode: params.publish_dir_mode
 
@@ -21,10 +23,11 @@ process REPORT {
 
     script:
     """
-    generate_report.py \\
+    generate_report.R \\
         --outdir ${params.outdir} \\
         --platform ${params.platform} \\
         --project-name ${params.project_name} \\
+        --template ${projectDir}/assets/plasmid_report.Rmd \\
         --out-prefix .
     """
 }

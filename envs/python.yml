@@ -1,8 +1,0 @@
-name: autoplasm-python
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - python>=3.10
-  - pandas>=2.0
-  - numpy>=1.24

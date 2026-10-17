@@ -1,0 +1,13 @@
+name: autoplasm-r-analysis
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base>=4.3
+  - r-data.table
+  - r-vegan
+  - r-jsonlite
+  - r-rmarkdown
+  - pandoc
+  - bioconductor-biostrings
+  - bioconductor-rsamtools

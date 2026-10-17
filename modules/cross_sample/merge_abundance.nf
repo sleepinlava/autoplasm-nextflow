@@ -1,12 +1,14 @@
 /*
  * Merge per-sample CoverM tables into a single long-format abundance table
  * (supports multisample_diversity / multisample_differential_abundance /
- * network / DESeq2 inputs). Implemented by bin/merge_abundance.py.
+ * network / DESeq2 inputs). Implemented by bin/merge_abundance.R.
  */
 process MERGE_ABUNDANCE {
     tag { label_name }
     label 'process_single'
-    conda "${projectDir}/envs/python.yml"
+    conda "${projectDir}/envs/r_analysis.yml"
+    // R 包集合以 envs/r_analysis.yml 为准；镜像需提供 data.table/vegan/Biostrings/Rsamtools
+    container 'bioconductor/bioconductor_docker:RELEASE_3_21'
 
     publishDir "${params.outdir}/tables", mode: params.publish_dir_mode
 
@@ -24,7 +26,7 @@ process MERGE_ABUNDANCE {
     def ids = (sample_ids in List ? sample_ids : [sample_ids])
         .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ')
     """
-    merge_abundance.py --tables ${files} --sample-ids ${ids} \\
+    merge_abundance.R --tables ${files} --sample-ids ${ids} \\
         --id-column '${id_column}' --out '${label_name}.tsv'
     """
 }

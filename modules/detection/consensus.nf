@@ -1,12 +1,15 @@
 /*
  * Plasmid consensus builder (DAG node: plasmid_consensus; internal handler in
- * ABI, implemented here by bin/plasmid_consensus.py). Merges per-contig calls
- * from geNomad and the enabled optional tools with the configured strategy.
+ * ABI, implemented here by bin/plasmid_consensus.R). Merges per-contig calls
+ * from geNomad and the enabled optional tools with the configured strategy;
+ * the consensus table carries plasmidEC-style per-tool ensemble columns.
  */
 process PLASMID_CONSENSUS {
     tag { meta.id }
     label 'process_low'
-    conda "${projectDir}/envs/python.yml"
+    conda "${projectDir}/envs/r_analysis.yml"
+    // R 包集合以 envs/r_analysis.yml 为准；镜像需提供 data.table/vegan/Biostrings/Rsamtools
+    container 'bioconductor/bioconductor_docker:RELEASE_3_21'
 
     publishDir "${params.outdir}/04_plasmid_detection/consensus", mode: params.publish_dir_mode
 
@@ -21,7 +24,7 @@ process PLASMID_CONSENSUS {
     script:
     def extras_args = extras ? (extras in List ? extras.collect { it.toString() } : [extras.toString()]).collect { "--extra ${it}" }.join(' ') : ''
     """
-    plasmid_consensus.py \\
+    plasmid_consensus.R \\
         --assembly ${assembly} \\
         --genomad-summary ${genomad_summary} \\
         ${extras_args} \\
