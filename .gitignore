@@ -12,9 +12,22 @@ docs/计划书.md
 docs/review-executability-repro.py
 docs/review-executability-round2.md
 docs/review-fix-plan-detailed.md
+docs/*
 
 # lazygit
 lazygit
 
 # log
 *.log
+
+# agent
+.code/
+.aws/
+.agents/
+
+# nf-test runtime artifacts (plugin cache, wrapper scripts)
+.nf-test/
+.nf-test-*.nf
+
+# agent tooling dirs
+.codex/
