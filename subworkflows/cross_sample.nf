@@ -1,7 +1,7 @@
 /*
  * Cross-sample subworkflow: merged abundance tables (tables/), diversity and
  * differential abundance (11), FastSpar co-occurrence network (12), and the
- * final report. Sample-count gates mirror config_default.yaml thresholds.
+ * final report. Sample-count gates are set by the nextflow.config defaults.
  */
 include { MERGE_ABUNDANCE; MERGE_ABUNDANCE as MERGE_ABUNDANCE_PLASMID } from '../modules/cross_sample/merge_abundance'
 include { DIVERSITY } from '../modules/cross_sample/diversity'
@@ -63,7 +63,10 @@ workflow CROSS_SAMPLE {
             ch_stats_done = ch_stats_done.mix(DESEQ2.out.results)
         }
         if (params.run_network && n_samples >= params.network_min_samples) {
-            NETWORK_PREPARE(ch_plasmid_merged)
+            // FastSpar cannot run on an empty plasmid table; zero detections
+            // are a legitimate outcome, so gate the branch on real rows.
+            ch_plasmid_nonempty = ch_plasmid_merged.filter { f -> f.text.readLines().size() > 1 }
+            NETWORK_PREPARE(ch_plasmid_nonempty)
             FASTSPAR(NETWORK_PREPARE.out.network_input)
             ch_stats_done = ch_stats_done.mix(FASTSPAR.out.correlation, FASTSPAR.out.covariance)
         }

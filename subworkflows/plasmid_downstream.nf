@@ -128,7 +128,7 @@ workflow PLASMID_DOWNSTREAM {
         SCAPP_BIN(ch_graph.join(ch_short_reads))
     }
     if (params.plasmid_binning_tools.contains('recycler')) {
-        RECYCLER(ch_graph.join(ch_plasmids).join(ch_contig_bam))
+        RECYCLER(ch_graph.join(ch_contig_bam))
     }
 
     emit:

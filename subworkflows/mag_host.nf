@@ -1,5 +1,5 @@
 /*
- * MAG host-genome subworkflow (DAG category mag_host_genomes): MetaBAT2 /
+ * MAG host-genome subworkflow (mag_host_genomes): MetaBAT2 /
  * CONCOCT / SemiBin binners, optional DAS Tool aggregation, CheckM2 quality,
  * GTDB-Tk taxonomy. All optional via params.mag_tools.
  *
@@ -32,8 +32,13 @@ workflow MAG_HOST {
     ch_contig_table // tuple(meta, coverm tsv); unused by the nf-core CONCOCT chain
 
     main:
-    ch_bam_bai = ch_contig_bam
-        .join(SAMTOOLS_INDEX(ch_contig_bam).bai)
+    // Only index when a MAG tool actually consumes the BAM; the bridge is
+    // pointless (and fails container-less hosts) when mag_tools is empty.
+    ch_bam_bai = Channel.empty()
+    if (params.mag_tools) {
+        ch_bam_bai = ch_contig_bam
+            .join(SAMTOOLS_INDEX(ch_contig_bam).bai)
+    }
 
     ch_metabat2_bins = Channel.empty()
     if (params.mag_tools.contains('metabat2')) {

@@ -4,7 +4,7 @@
 # Converts the merged plasmid abundance table into FastSpar's OTU-table
 # layout (rows = contigs, columns = samples, first header cell ``#OTU ID``).
 # CoverM does not emit raw counts, so rounded coverage is used as the count
-# proxy (same convention as the ABI DESeq2 script); a stderr warning notes
+# proxy (same convention as bin/deseq2_plasmid.R); a stderr warning notes
 # this because FastSpar expects integer absolute counts.
 #
 # FastSpar input best practices (phanta pipeline, bhattlab/phanta; scwatts/
@@ -109,6 +109,13 @@ num <- round(num)
 mat_dt <- data.table(contig = cid, sample = as.character(ab$sample_id),
                      value = num)
 mat_dt[is.na(sample), sample := ""]
+if (nrow(mat_dt) == 0L) {
+  # Zero detections (e.g. no plasmid calls) are a legitimate result, not an
+  # error: emit a valid empty FastSpar matrix and exit cleanly.
+  fwrite(data.table(`#OTU ID` = character(0)), opts$out, sep = "\t", quote = FALSE)
+  cat("fastspar input: 0 contig(s) x 0 sample(s)\n")
+  quit(status = 0)
+}
 wide <- dcast(mat_dt, contig ~ sample, value.var = "value",
               fun.aggregate = function(x) x[length(x)], fill = 0)
 setorder(wide, contig)

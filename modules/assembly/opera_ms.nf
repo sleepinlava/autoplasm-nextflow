@@ -1,6 +1,6 @@
 /*
- * OPERA-MS hybrid metagenomic assembly (DAG node: assembly_opera_ms; default
- * hybrid assembler). OPERA-MS is not on bioconda and has no community
+ * OPERA-MS hybrid metagenomic assembly (pipeline step: assembly_opera_ms;
+ * default hybrid assembler). OPERA-MS is not on bioconda and has no community
  * container; install OPERA-MS.pl manually and ensure it is on PATH.
  */
 process OPERA_MS {
@@ -17,8 +17,10 @@ process OPERA_MS {
     tuple val(meta), path("${meta.id}.opera_ms_out"), emit: output_dir
 
     script:
+    // Upstream v0.8.3 ships OPERA-MS.pl without a shebang (first line is a
+    // comment), so invoke it through perl explicitly.
     """
-    OPERA-MS.pl \\
+    perl OPERA-MS.pl \\
         --short-read1 ${read1} --short-read2 ${read2} \\
         --long-read ${long_reads} \\
         --out-dir ${meta.id}.opera_ms_out \\
