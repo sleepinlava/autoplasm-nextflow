@@ -1,0 +1,37 @@
+// P3 real-data node test: SAMTOOLS_INDEX (mag domain).
+// Real bowtie2 BAM of the minigut illumina pair against the real minigut
+// assembly (scaffolding workflow) is indexed by the custom bridge module.
+// Backend: podman. The module declares no container (native samtools is
+// absent on this host), so the suite-only w2mag profile pins one:
+//   --profile podman,w2mag
+nextflow_pipeline {
+    name 'P3 real node: SAMTOOLS_INDEX on a real minigut illumina BAM'
+    script 'tests/nf-test/workflows/samtools_index_real.nf'
+    tag 'P3'
+    tag 'mag'
+    tag 'backend-podman'
+
+    test('real minigut BAM gets a valid BAI index') {
+        when {
+            params {
+                test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            def tasks = workflow.trace.succeeded().collect { it.name }
+            assert tasks.any { it.startsWith('ALIGN_FOR_INDEX') }
+            assert tasks.any { it.startsWith('SAMTOOLS_INDEX') }
+            def bais = getAllFilesFromDir(params.outdir,
+                include: ['w2_mag/*.bai'])
+            assert bais.size() == 1
+            assert bais[0].name == 'minigut.bam.bai'
+            assert bais[0].size() > 0
+            // BAI magic bytes: "BAI\1".
+            def magic = new String(bais[0].bytes, 0, 3)
+            assert magic == 'BAI'
+        }
+    }
+}

@@ -1,0 +1,70 @@
+// P4 real multi-sample integration: ENA PRJNA848809 sugarbeet bacteriome,
+// day 6, 3 infected vs 3 control runs (locked in ena-multisample.lock.json,
+// prepared by prepare_data.py --dataset ena-multi; ENA_TEST_DATA points there).
+// geNomad test database still comes from AUTOPLASM_TEST_DATA (real-nodes).
+// Drives MERGE_ABUNDANCE / DIVERSITY / DIFFERENTIAL_ABUNDANCE / DESEQ2 /
+// NETWORK_PREPARE / FASTSPAR / REPORT on genuine biological replicates.
+// network_min_samples is lowered from the production default (20) to 6 to
+// exercise the code path; this tests execution, not statistical power.
+// Backend: podman. No snapshots; assertions are structural contracts.
+nextflow_pipeline {
+    name 'P4 ENA real multi-sample cross-sample stats'
+    script '../../main.nf'
+    config './ena.config'
+    tag 'P4'
+    tag 'ena-multi'
+    tag 'backend-podman'
+
+    test('six real ENA samples, infected vs control, to cross-sample outputs') {
+        when {
+            params {
+                platform = 'illumina'
+                samplesheet = "${System.getenv('ENA_TEST_DATA')}/illumina.tsv"
+                outdir = "$outputDir"
+                run_diversity = true
+                run_differential_internal = true
+                run_differential_deseq2 = true
+                run_network = true
+                network_min_samples = 6
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            def samples = ['SRR19638267', 'SRR19638268', 'SRR19638269',
+                           'SRR19638270', 'SRR19638273', 'SRR19638274']
+            // merged contig abundance is long format:
+            // contig_id, sample_id, rpkm, tpm, coverage, raw_count, mapper
+            def contig = path("${params.outdir}/tables/contig_abundance.tsv").text.readLines()
+            def header = contig[0].split('\t', -1).toList()
+            assert header[0] == 'contig_id'
+            assert header.contains('sample_id')
+            def seenSamples = contig.drop(1).collect { it.split('\t', -1)[1] }.toSet()
+            assert seenSamples == samples.toSet()
+            assert contig.size() > 6
+            // diversity on real replicates (long format: sample_id, metric, value, group)
+            def metrics = path("${params.outdir}/11_diversity/diversity_metrics.tsv").text.readLines()
+            assert metrics.size() > 1
+            assert metrics[0].split('\t', -1).toList() == ['sample_id', 'metric', 'value', 'group']
+            def mSamples = metrics.drop(1).collect { it.split('\t', -1)[0] }.toSet()
+            assert mSamples == samples.toSet()
+            assert metrics.drop(1).any { it.endsWith('\tinfected') }
+            assert metrics.drop(1).any { it.endsWith('\tcontrol') }
+            // internal differential between the two real groups
+            assert path("${params.outdir}/11_diversity/differential_abundance.tsv").text.readLines().size() >= 1
+            // DESeq2 on the merged plasmid table (may legitimately find nothing)
+            assert path("${params.outdir}/11_diversity/differential_plasmids.tsv").exists()
+            // FastSpar network runs only when real plasmid rows exist; zero
+            // detections on these low-biomass samples legitimately skip it.
+            def plasmidRows = path("${params.outdir}/tables/plasmid_abundance.tsv").text.readLines()
+            if (plasmidRows.size() > 1) {
+                assert path("${params.outdir}/12_network/correlation.tsv").exists()
+            }
+            // final report
+            def report = path("${params.outdir}/report/report.md").text
+            assert report.contains('- Samples: 6')
+            assert report.contains('- Platform: `illumina`')
+            assert path("${params.outdir}/report/report.html").size() > 0
+        }
+    }
+}

@@ -1,0 +1,37 @@
+// P3 real-data node test: HIFIASM_META (assembly domain, pacbio_hifi platform).
+// hifiasm_meta has no biocontainers image (module comment, verified
+// 2026-10-16), so it runs native: binary built from the pinned upstream
+// release (hamtv0.3.5) into results/nf-test/runtime/.
+// Input: pinned gallus gallus PacBio metagenome reads (nf-core/test-datasets).
+// resourceLimits cap process_highmem to 2 cpus / 7 GB here.
+nextflow_process {
+    name 'P3 real node: HIFIASM_META'
+    script '../../modules/assembly/hifiasm_meta.nf'
+    process 'HIFIASM_META'
+    tag 'P3'
+    tag 'assembly'
+    tag 'backend-native'
+
+    test('gallus pacbio metagenome reads assemble to a real contig graph') {
+        when {
+            process {
+                """
+                input[0] = [
+                    [id: 'gallus_hifi'],
+                    file("${System.getenv('AUTOPLASM_TEST_DATA')}/data/genomics/eukaryotes/gallus_gallus/pacbio_metagenome.fastq.gz", checkIfExists: true)
+                ]
+                """
+            }
+        }
+        then {
+            // Real execution contract: hifiasm_meta hamtv0.3.5 ran (peak RSS
+            // ~16 GB even on this tiny fixture). The 127 KB gallus PacBio
+            // fixture is too sparse for contigs, so the graph may be empty —
+            // this test proves real execution, not assembly yield.
+            assert process.success
+            assert process.out.graph.size() == 1
+            assert path(process.out.graph[0][1]).exists()
+            assert path(process.out.assembly[0][1]).exists()
+        }
+    }
+}

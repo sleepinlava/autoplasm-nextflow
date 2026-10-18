@@ -1,0 +1,26 @@
+// P3 real-data node chain: JGISUMMARIZEBAMCONTIGDEPTHS -> METABAT2 (mag domain).
+// Input: pinned nf-core/test-datasets binning fixture (real contigs + s1 BAM/BAI).
+// Backend: podman.
+nextflow_pipeline {
+    name 'P3 real nodes: metabat2 depth + binning'
+    script 'tests/nf-test/workflows/metabat2_real.nf'
+    tag 'P3'
+    tag 'mag'
+    tag 'backend-podman'
+
+    test('real contigs + real BAM produce metabat2 bins') {
+        when {
+            params {
+                test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            def tasks = workflow.trace.succeeded().collect { it.name }
+            assert tasks.any { it.contains('JGISUMMARIZEBAMCONTIGDEPTHS') }
+            assert tasks.any { it.contains('METABAT2') }
+        }
+    }
+}

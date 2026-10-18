@@ -1,0 +1,34 @@
+// P3 real-data node chain: NETWORK_PREPARE -> FASTSPAR (cross_sample domain).
+// Input: real ENA contig abundance table (P4 product; 482 contigs x 6 real
+// samples). The P4 run itself skips this branch legitimately (zero plasmid
+// calls), hence this dedicated chain test.
+// Backend: podman.
+nextflow_pipeline {
+    name 'P3 real nodes: NETWORK_PREPARE + FASTSPAR'
+    script 'tests/nf-test/workflows/network_real.nf'
+    tag 'P3'
+    tag 'cross_sample'
+    tag 'backend-podman'
+
+    test('FastSpar co-occurrence network from real ENA abundance') {
+        when {
+            params {
+                test_data = "${System.getenv('ENA_TEST_DATA')}"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            def tasks = workflow.trace.succeeded().collect { it.name }
+            assert tasks.any { it.startsWith('NETWORK_PREPARE') }
+            assert tasks.any { it.startsWith('FASTSPAR') }
+            def corr = getAllFilesFromDir(params.outdir, include: ['12_network/correlation.tsv'])
+            assert corr.size() == 1
+            // Real network output: square matrix with a header row.
+            def lines = corr[0].text.readLines()
+            assert lines.size() > 2
+            assert lines[0].split('\t').size() == lines[1].split('\t').size()
+        }
+    }
+}

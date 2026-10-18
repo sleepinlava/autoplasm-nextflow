@@ -1,0 +1,33 @@
+// P3 real-data node test: RECYCLER (binning domain).
+// Real metaSPAdes fastg graph of the minigut illumina pair (SPADES --meta
+// via w2spades profile) + real bowtie2 BAM of the same reads against the
+// real minigut assembly (scaffolding workflow). RECYCLER takes
+// tuple(meta, graph, bam) since the wrong `-k contigs` argument was removed.
+// Backend: podman (spades/recycler biocontainers, bowtie2_samtools wave image).
+nextflow_pipeline {
+    name 'P3 real node: RECYCLER on a real metaSPAdes fastg graph and real illumina BAM'
+    script 'tests/nf-test/workflows/recycler_real.nf'
+    tag 'P3'
+    tag 'binning'
+    tag 'backend-podman'
+
+    test('metaSPAdes fastg graph and real illumina BAM fed to recycle.py') {
+        when {
+            params {
+                test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            def tasks = workflow.trace.succeeded().collect { it.name }
+            assert tasks.any { it.startsWith('MINIGUT_FASTG:SPADES') }
+            assert tasks.any { it.startsWith('ALIGN_FOR_RECYCLER') }
+            assert tasks.any { it.startsWith('RECYCLER') }
+            def outFiles = getAllFilesFromDir(params.outdir,
+                include: ['05_plasmid_binning/recycler/minigut.recycler_out/**'])
+            assert outFiles.size() >= 1
+        }
+    }
+}

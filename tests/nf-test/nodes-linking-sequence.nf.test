@@ -1,0 +1,35 @@
+// P3 real-data node test: LINK_SEQUENCE (host-plasmid linking domain).
+// Input: pinned pUTI89 plasmid; MAG/taxonomy inputs empty (optional per module).
+// Backend: native (system R + Biostrings).
+nextflow_process {
+    name 'P3 real node: LINK_SEQUENCE'
+    script '../../modules/linking/sequence.nf'
+    process 'LINK_SEQUENCE'
+    tag 'P3'
+    tag 'linking'
+    tag 'backend-native'
+
+    test('pUTI89 plasmid with no MAG bins yields a valid empty links table') {
+        when {
+            process {
+                """
+                input[0] = [
+                    [id: 'pUTI89'],
+                    file("${System.getenv('AUTOPLASM_TEST_DATA')}/pUTI89.fasta", checkIfExists: true),
+                    [],
+                    []
+                ]
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.links.size() == 1
+            def lines = path(process.out.links[0][1]).text.readLines()
+            // No host genomes -> header-only table, but the R script really ran.
+            assert lines.size() == 1
+            assert lines[0].contains('plasmid_id')
+            assert lines[0].contains('sample_id')
+        }
+    }
+}

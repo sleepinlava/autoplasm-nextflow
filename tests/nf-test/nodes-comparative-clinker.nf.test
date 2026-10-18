@@ -1,0 +1,34 @@
+// P3 real-data node test: CLINKER (comparative domain).
+// Real adjacent antiSMASH regions of the Streptomyces coelicolor A3(2)
+// chromosome (NC_003888.3 region001 + region002, pinned test-datasets gbk)
+// staged under .gbff names feed clinker synteny visualization.
+// Backend: podman (clinker-py biocontainer; staging on host coreutils).
+nextflow_pipeline {
+    name 'P3 real node: CLINKER on real adjacent S. coelicolor chromosome regions'
+    script 'tests/nf-test/workflows/clinker_real.nf'
+    tag 'P3'
+    tag 'comparative'
+    tag 'backend-podman'
+
+    test('two real NC_003888.3 regions produce a non-empty clinker html') {
+        when {
+            params {
+                test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            def tasks = workflow.trace.succeeded().collect { it.name }
+            assert tasks.any { it.startsWith('STAGE_GBFF') }
+            assert tasks.any { it.startsWith('CLINKER') }
+            def htmls = getAllFilesFromDir(params.outdir,
+                include: ['09_comparative_genomics/clinker/*.clinker.html'])
+            assert htmls.size() == 1
+            // clinker embeds locus data; a real comparison is kilobytes-large.
+            assert htmls[0].size() > 1000
+            assert htmls[0].text.contains('clinker')
+        }
+    }
+}

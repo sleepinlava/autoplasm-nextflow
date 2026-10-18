@@ -1,0 +1,41 @@
+// P3 real-data node test: DORADO_BASECALL (basecalling domain).
+// Dorado has no bioconda package/community container (module comment), so it
+// runs native: official ONT binary 2.1.2 in results/nf-test/runtime/, plus the
+// pinned fast model zip (ONT CDN) extracted under results/nf-test/databases/.
+// Input: pinned HG002 GIAB pod5 (R10.4.1, 5 kHz) from nf-core/test-datasets.
+// The sarscov2 test.pod5 is R9.4.1 chemistry, which dorado >= 1.0.0 dropped —
+// so it cannot exercise dorado 2.x; documented in REAL-NODES-RESULTS.md.
+// NOTE: dorado is ONT Public License (source-available), not OSI open source.
+nextflow_process {
+    name 'P3 real node: DORADO_BASECALL'
+    script '../../modules/basecalling/dorado.nf'
+    process 'DORADO_BASECALL'
+    tag 'P3'
+    tag 'basecalling'
+    tag 'backend-native'
+
+    test('real pod5 basecalled with the pinned fast model') {
+        when {
+            params {
+                dorado_model = "${System.getenv('AUTOPLASM_DORADO_MODEL')}"
+            }
+            process {
+                """
+                input[0] = [
+                    [id: 'hg002_ont'],
+                    file("${System.getenv('AUTOPLASM_TEST_DATA')}/data/genomics/homo_sapiens/nanopore/pod5/HG002_PAW70337_giab_10reads.pod5", checkIfExists: true)
+                ]
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.long_reads.size() == 1
+            def lines = path(process.out.long_reads[0][1]).text.readLines()
+            // Real basecalling output: FASTQ records with called bases.
+            assert lines.size() >= 4
+            assert lines[0].startsWith('@')
+            assert lines[1] ==~ /^[ACGTN]+$/
+        }
+    }
+}

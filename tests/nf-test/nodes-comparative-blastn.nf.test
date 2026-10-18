@@ -1,0 +1,28 @@
+// P3 real-data node chain: makeblastdb (scaffold) -> BLAST_BLASTN
+// (comparative domain). Real pUTI89 plasmid as both DB and query.
+// Backend: podman.
+nextflow_pipeline {
+    name 'P3 real node: BLAST_BLASTN on a real mini database'
+    script 'tests/nf-test/workflows/blastn_real.nf'
+    config './blastn.config'
+    tag 'P3'
+    tag 'comparative'
+    tag 'backend-podman'
+
+    test('pUTI89 blastn against a freshly built pUTI89 database') {
+        when {
+            params {
+                test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            def hits = getAllFilesFromDir(params.outdir, include: ['blastn/*.txt'])
+            assert hits.size() >= 1
+            // A real self hit must exist for the full plasmid.
+            assert hits[0].text.contains('NC_007941.1')
+        }
+    }
+}

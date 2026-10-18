@@ -1,0 +1,37 @@
+// P3 real-data node tests: annotation domain.
+// Data: pinned nf-core/test-datasets pUTI89 plasmid (AUTOPLASM_TEST_DATA).
+// Backend: podman (isescan has no native install on this host).
+nextflow_process {
+    name 'P3 real node: ISESCAN'
+    script '../../modules/annotation/isescan.nf'
+    process 'ISESCAN'
+    tag 'P3'
+    tag 'annotation'
+    tag 'backend-podman'
+
+    test('ISEScan scans the real pUTI89 plasmid') {
+        when {
+            process {
+                """
+                input[0] = [
+                    [id: 'pUTI89'],
+                    file("${System.getenv('AUTOPLASM_TEST_DATA')}/pUTI89.fasta", checkIfExists: true)
+                ]
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.results.size() == 1
+            def outdir = path(process.out.results[0][1])
+            def files = outdir.list().collect { it.toString() }
+            // ISEScan writes summary/tsv outputs for the real plasmid.
+            assert files.any { it.endsWith('.sum') }
+            def tsv = files.find { it.endsWith('.tsv') }
+            assert path(tsv).text.contains('NC_007941.1')
+            // pUTI89 carries real insertion sequences (12 IS copies upstream-verified).
+            def sum = path(files.find { it.endsWith('.sum') }).text
+            assert sum.contains('pUTI89.fasta') || sum.contains('NC_007941.1')
+        }
+    }
+}

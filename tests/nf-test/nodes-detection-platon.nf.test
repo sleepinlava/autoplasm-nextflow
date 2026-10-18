@@ -1,0 +1,39 @@
+// P3 real-data node test: PLATON (detection domain).
+// Database: official Platon db v1.5.0 (Zenodo 4066768, pinned sha256 in
+// results/nf-test/databases/manifest.txt), extracted to
+// results/nf-test/databases/platon/db.
+// Input: the real pUTI89 reference plasmid — platon should call it plasmid.
+// Backend: podman (quay.io/biocontainers/platon:1.7).
+nextflow_process {
+    name 'P3 real node: PLATON'
+    script '../../modules/detection/platon.nf'
+    process 'PLATON'
+    tag 'P3'
+    tag 'detection'
+    tag 'backend-podman'
+
+    test('platon classifies the real pUTI89 plasmid with its real database') {
+        when {
+            process {
+                """
+                input[0] = [
+                    [id: 'pUTI89'],
+                    file("${System.getenv('AUTOPLASM_TEST_DATA')}/pUTI89.fasta", checkIfExists: true)
+                ]
+                input[1] = file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true)
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.predictions.size() == 1
+            def lines = path(process.out.predictions[0][1]).text.readLines()
+            assert lines.size() >= 2
+            assert lines[0].contains('ID')
+            // pUTI89 is a complete reference plasmid: platon must report it.
+            def rows = lines.drop(1).findAll { it.startsWith('NC_007941.1\t') }
+            assert rows.size() == 1
+            assert rows[0].split('\t', -1).length > 5
+        }
+    }
+}

@@ -1,0 +1,31 @@
+// P3 real-data node test: SCAPP_BIN (binning domain).
+// Same real scaffolding as SCAPP_DETECT: genuine metaSPAdes fastg graph of
+// the minigut illumina pair (SPADES --meta via w2spades profile), mined by
+// SCAPP with the same real reads.
+// Backend: podman (spades + scapp images).
+nextflow_pipeline {
+    name 'P3 real node: SCAPP_BIN on a real metaSPAdes assembly graph'
+    script 'tests/nf-test/workflows/scapp_bin_real.nf'
+    tag 'P3'
+    tag 'binning'
+    tag 'backend-podman'
+
+    test('metaSPAdes graph of real minigut illumina reads processed by scapp binning') {
+        when {
+            params {
+                test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            def tasks = workflow.trace.succeeded().collect { it.name }
+            assert tasks.any { it.startsWith('MINIGUT_FASTG:SPADES') }
+            assert tasks.any { it.startsWith('SCAPP_BIN') }
+            def scappFiles = getAllFilesFromDir(params.outdir,
+                include: ['05_plasmid_binning/scapp/minigut.scapp_bin_out/**'])
+            assert scappFiles.size() >= 1
+        }
+    }
+}

@@ -1,0 +1,34 @@
+// P3 real-data node test: MUMMER (comparative domain).
+// Input: pinned pUTI89 plasmid as both query and reference set
+// (self-alignment: real nucmer/show-coords execution with deterministic output).
+// Backend: podman (mummer has no native install on this host).
+nextflow_process {
+    name 'P3 real node: MUMMER'
+    script '../../modules/comparative/mummer.nf'
+    process 'MUMMER'
+    tag 'P3'
+    tag 'comparative'
+    tag 'backend-podman'
+
+    test('nucmer self-alignment of the real pUTI89 plasmid') {
+        when {
+            process {
+                """
+                def asm = file("${System.getenv('AUTOPLASM_TEST_DATA')}/pUTI89.fasta", checkIfExists: true)
+                // Same real plasmid under its pipeline-convention name as the
+                // reference set (avoids staging name collision).
+                def ref = file("${System.getenv('AUTOPLASM_TEST_DATA')}/pUTI89.plasmid_contigs.fasta", checkIfExists: true)
+                input[0] = [ [id: 'pUTI89'], asm ]
+                input[1] = ref
+                """
+            }
+        }
+        then {
+            assert process.success
+            def coords = path(process.out.coords[0][1]).text.readLines()
+            // show-coords output must name the real sequence and span its length.
+            assert coords.any { it.contains('NC_007941.1') }
+            assert coords.any { it.contains('114230') }
+        }
+    }
+}

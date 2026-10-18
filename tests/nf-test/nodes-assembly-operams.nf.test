@@ -1,0 +1,36 @@
+// P3 real-data node test: OPERA_MS (assembly domain, hybrid platform).
+// OPERA-MS is not on bioconda and has no container (module comment); the
+// pinned upstream release v0.8.3 is built from source into
+// results/nf-test/runtime/ and put on PATH by tests/nf-test/env.sh.
+// Input: real minigut Illumina pair + real minigut ONT reads
+// (nf-core/test-datasets, locked).
+nextflow_process {
+    name 'P3 real node: OPERA_MS'
+    script '../../modules/assembly/opera_ms.nf'
+    process 'OPERA_MS'
+    tag 'P3'
+    tag 'assembly'
+    tag 'backend-native'
+
+    test('minigut hybrid reads assemble with OPERA-MS') {
+        when {
+            process {
+                """
+                def root = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+                input[0] = [
+                    [id: 'minigut_hybrid'],
+                    file("${root}/test_data/test_minigut_R1.fastq.gz", checkIfExists: true),
+                    file("${root}/test_data/test_minigut_R2.fastq.gz", checkIfExists: true),
+                    file("${root}/test_data/minigut_reads.fastq.gz", checkIfExists: true)
+                ]
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.assembly.size() == 1
+            def fasta = path(process.out.assembly[0][1]).text.readLines()
+            assert fasta.any { it.startsWith('>') }
+        }
+    }
+}

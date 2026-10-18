@@ -1,0 +1,32 @@
+// P3 real-data node test: LINK_LONGREAD (host-plasmid linking domain).
+// Real minigut ONT reads are aligned to the real minigut assembly with
+// minimap2+samtools (test scaffolding workflow), then the R bridge counter runs.
+// Backend: podman (scaffolding in minimap2_samtools image; LINK_LONGREAD runs in its declared bioconductor image).
+nextflow_pipeline {
+    name 'P3 real node: LINK_LONGREAD on real minigut ONT alignment'
+    script 'tests/nf-test/workflows/link_longread_real.nf'
+    tag 'P3'
+    tag 'linking'
+    tag 'backend-podman'
+
+    test('minigut ONT reads aligned to minigut assembly feed bridge counting') {
+        when {
+            params {
+                test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            // Real alignment happened: minimap2+samtools task and the R task.
+            def tasks = workflow.trace.succeeded().collect { it.name }
+            assert tasks.any { it.startsWith('ALIGN_FOR_LINK') }
+            assert tasks.any { it.startsWith('LINK_LONGREAD') }
+            def links = getAllFilesFromDir(params.outdir,
+                include: ['07_host_prediction/linking/longread/*.longread_bridge_links.tsv'])
+            assert links.size() == 1
+            assert links[0].text.readLines()[0].split('\t').size() >= 2
+        }
+    }
+}
