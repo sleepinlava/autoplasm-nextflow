@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "source": "nf-core/test-datasets",
+  "files": [
+    {
+      "path": "data/genomics/prokaryotes/plasmids/pUTI89/pUTI89.fna.gz",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 35478,
+      "git_blob_sha1": "6fffe679b2177ba7d9d22783c8571800bb70caa6"
+    },
+    {
+      "path": "databases/genomad/genomad_db_subset_v1.9.tar.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 5912894,
+      "git_blob_sha1": "2a6a30fca0adbde43d2e8b6a6c81c589bbc2042c"
+    }
+  ]
+}

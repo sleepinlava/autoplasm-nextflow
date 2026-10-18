@@ -1,0 +1,60 @@
+// Real, complete reference plasmid from nf-core/test-datasets; no simulated reads.
+// Accession and length come from the pinned source, not a first-run snapshot.
+nextflow_pipeline {
+    name 'Small real pUTI89 assembly smoke test'
+    script '../../main.nf'
+    config './integration.config'
+    tag 'P2'
+    tag 'small-real'
+
+    test('NC_007941.1 reference plasmid to consensus and report') {
+        when {
+            params {
+                platform = 'assembly'
+                samplesheet = "${System.getenv('AUTOPLASM_TEST_DATA')}/assembly.tsv"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            assert workflow.trace.succeeded().size() > 0
+            def table = path("${params.outdir}/04_plasmid_detection/consensus/pUTI89.plasmid_consensus.tsv").text.readLines()
+            def header = table.first().split('\t', -1).toList()
+            assert header.containsAll(['contig_id', 'sample_id', 'length', 'plasmid_call'])
+            assert table.size() in [1, 2]
+            table.drop(1).each { line ->
+                def row = line.split('\t', -1).toList()
+                assert row.size() == header.size()
+                assert row[header.indexOf('contig_id')] == 'NC_007941.1'
+                assert row[header.indexOf('sample_id')] == 'pUTI89'
+                assert row[header.indexOf('length')] == '114230'
+                assert row[header.indexOf('plasmid_call')] == 'plasmid'
+            }
+            // Check that the real classifier processed this sequence, even when
+            // the cropped marker database yields no positive calls.
+            def base = "${params.outdir}/04_plasmid_detection/genomad/pUTI89.genomad_out"
+            def marker = path("${base}/pUTI89_marker_classification/pUTI89_marker_classification.tsv").text.readLines()
+            assert marker.size() == 2
+            assert marker.first() == 'seq_name\tchromosome_score\tplasmid_score\tvirus_score'
+            def values = marker[1].split('\t', -1).toList()
+            assert values[0] == 'NC_007941.1'
+            def scores = values.drop(1).collect { Double.parseDouble(it) }
+            assert scores.every { it >= 0 && it <= 1 }
+            assert Math.abs(scores.sum() - 1.0) < 0.001
+            def summary = path("${base}/pUTI89_summary/pUTI89_plasmid_summary.tsv").text.readLines()
+            assert summary.first().startsWith('seq_name\tlength\t')
+            assert summary.size() == table.size()
+            assert summary.drop(1).every { it.startsWith('NC_007941.1\t114230\t') }
+            def quast = path("${params.outdir}/03_assembly_qc/quast/pUTI89.quast_report.tsv").text.readLines()
+            assert quast.any { it == 'Total length\t114230' }
+            assert quast.any { it == '# contigs\t1' }
+            assert path("${params.outdir}/04_plasmid_detection/structure/pUTI89.plasmid_structure.tsv").text.startsWith('sample_id\tplasmid_id\t')
+            assert path("${params.outdir}/report/report.md").text.contains('- Platform: `assembly`')
+            assert path("${params.outdir}/report/report.md").text.contains('- Samples: 1')
+            assert path("${params.outdir}/report/report.html").size() > 0
+            assert !path("${params.outdir}/11_diversity/differential_abundance.tsv").exists()
+            assert !path("${params.outdir}/12_network/correlation.tsv").exists()
+        }
+    }
+}
