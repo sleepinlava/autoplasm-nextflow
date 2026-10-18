@@ -1,5 +1,5 @@
 /*
- * hifiasm-meta HiFi metagenomic assembly (DAG node: assembly_hifiasm).
+ * hifiasm-meta HiFi metagenomic assembly (pipeline step: assembly_hifiasm).
  * Use the dedicated hifiasm_meta binary and its primary contig graph.
  * hifiasm_meta ships as a bioconda package (envs/assembly_hifi.yml) but has
  * no quay.io/biocontainers/hifiasm-meta image (verified 2026-10-16), so this

@@ -1,5 +1,5 @@
 /*
- * Illumina platform subworkflow (DAG platform_resolution.illumina):
+ * Illumina platform subworkflow (platform: illumina):
  * fastp → [fastqc] → [bowtie2 host removal] → MEGAHIT/metaSPAdes → QUAST →
  * contig coverage → plasmid detection/consensus → downstream (typing,
  * annotation, binning) → abundance → host prediction → MAG → linking →

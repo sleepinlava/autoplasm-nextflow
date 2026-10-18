@@ -1,5 +1,5 @@
 /*
- * PacBio HiFi platform subworkflow (DAG platform_resolution.pacbio_hifi):
+ * PacBio HiFi platform subworkflow (platform: pacbio_hifi):
  * [BAM→FASTQ | provided FASTQ] → HiFiAdapterFilt → [minimap2 host removal] →
  * hifiasm-meta → QUAST → contig coverage → plasmid detection/consensus →
  * downstream → abundance → host prediction → MAG → linking → comparative.

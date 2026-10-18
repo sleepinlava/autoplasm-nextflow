@@ -1,7 +1,7 @@
 /*
- * MUMmer/nucmer whole-genome plasmid alignment (DAG node: comparative_mummer;
- * optional via params.comparative_optional_tools). Requires a reference
- * plasmid FASTA.
+ * MUMmer/nucmer whole-genome plasmid alignment (pipeline step:
+ * comparative_mummer; optional via params.comparative_optional_tools).
+ * Requires a reference plasmid FASTA.
  */
 process MUMMER {
     tag { meta.id }

@@ -1,7 +1,7 @@
 /*
  * Shared plasmid detection subworkflow: geNomad via the nf-core
  * genomad/endtoend module (mandatory) + optional PLASMe/PlasX/Platon/SCAPP,
- * followed by consensus integration (DAG node plasmid_consensus) and
+ * followed by consensus integration (pipeline step plasmid_consensus) and
  * structure detection (plasmid_structure).
  */
 include { GENOMAD_ENDTOEND as GENOMAD } from '../modules/nf-core/genomad/endtoend/main'

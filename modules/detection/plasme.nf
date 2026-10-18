@@ -1,6 +1,6 @@
 /*
- * PLASMe plasmid classification (DAG node: plasmid_detect_plasme; optional,
- * enabled via params.plasmid_detection_tools).
+ * PLASMe plasmid classification (pipeline step: plasmid_detect_plasme;
+ * optional, enabled via params.plasmid_detection_tools).
  */
 process PLASME {
     tag { meta.id }

@@ -1,6 +1,6 @@
 /*
- * ISEScan insertion sequence detection (DAG node: annotation_isescan; default
- * enabled per config_default.yaml).
+ * ISEScan insertion sequence detection (pipeline step: annotation_isescan;
+ * enabled by default).
  */
 process ISESCAN {
     tag { meta.id }

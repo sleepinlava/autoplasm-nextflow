@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 # Internal effect-size differential plasmid abundance between groups.
 #
-# Standalone implementation of the ABI ``internal_effect_size`` method for
-# the ``multisample_differential_abundance`` node. For every pair of groups
+# Implements the ``internal_effect_size`` method for the
+# ``multisample_differential_abundance`` step. For every pair of groups
 # with at least ``--min-replicates`` samples it computes, per contig:
 #
 # * log2 fold change of mean coverage (pseudocount 1e-6),
@@ -27,7 +27,7 @@
 # all-zero/single-detection contigs do not dilute the BH denominator.
 # Per-pair filtered counts are logged to stderr.
 #
-# Output schema follows the ABI ``differential_abundance`` standard table.
+# Output schema follows the ``differential_abundance`` standard table.
 
 suppressPackageStartupMessages(library(data.table))
 

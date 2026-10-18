@@ -1,6 +1,6 @@
 /*
- * PlasX plasmid classification (DAG node: plasmid_detect_plasx; optional).
- * Requires the PlasX annotation and model files.
+ * PlasX plasmid classification (pipeline step: plasmid_detect_plasx;
+ * optional). Requires the PlasX annotation and model files.
  */
 process PLASX {
     tag { meta.id }
@@ -23,7 +23,7 @@ process PLASX {
     script:
     """
     # PlasX needs de-novo gene calls; prodigal meta mode provides them
-    # (simplification of the ABI anvi'o-based gene-calls input).
+    # (anvi'o is not required; the prodigal output is used directly).
     prodigal -i ${assembly} -o ${meta.id}.gff -a ${meta.id}.faa -d ${meta.id}.ffn -p meta
     plasx predict \\
         -a ${plasx_annotations} \\

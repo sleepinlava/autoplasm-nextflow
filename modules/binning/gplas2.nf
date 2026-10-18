@@ -1,5 +1,5 @@
 /*
- * gplas2 graph-based plasmid binning (DAG node: plasmid_binning_gplas2;
+ * gplas2 graph-based plasmid binning (pipeline step: plasmid_binning_gplas2;
  * optional; requires an assembly graph from metaFlye/hifiasm).
  */
 process GPLAS2 {

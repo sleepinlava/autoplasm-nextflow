@@ -1,5 +1,5 @@
 /*
- * Host prediction subworkflow (DAG category host_prediction, 07): MetaPhlAn4
+ * Host prediction subworkflow (stage 07 host_prediction): MetaPhlAn4
  * (default) on cleaned reads, Kraken2 (optional, illumina only),
  * PlasmidHostFinder (assembly platform, on plasmid contigs).
  *

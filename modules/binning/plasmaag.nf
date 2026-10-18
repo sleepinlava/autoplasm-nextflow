@@ -1,5 +1,5 @@
 /*
- * PlasMAAG multi-sample graph-based plasmid binning (DAG node:
+ * PlasMAAG multi-sample graph-based plasmid binning (pipeline step:
  * plasmid_binning_plasmaag; optional, params.plasmid_binning_tools).
  */
 process PLASMAAG {

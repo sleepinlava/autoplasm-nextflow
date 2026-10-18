@@ -1,5 +1,5 @@
 /*
- * clinker synteny visualization across Bakta GenBank outputs (DAG node:
+ * clinker synteny visualization across Bakta GenBank outputs (pipeline step:
  * comparative_clinker; optional via params.comparative_optional_tools).
  */
 process CLINKER {

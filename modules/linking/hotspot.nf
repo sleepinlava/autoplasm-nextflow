@@ -5,7 +5,7 @@
  * bioconda, so this module expects a cloned HOTSPOT repository
  * (--hotspot_home) plus the downloaded database/ and models/ folders
  * (--hotspot_db / --hotspot_models; see the HOTSPOT README's prepare_db.sh
- * and prepare_mdl.sh). host_lineage.tsv is converted to the ABI link schema;
+ * and prepare_mdl.sh). host_lineage.tsv is converted to the host-link schema;
  * host_id is the deepest predicted taxonomic level (species -> phylum).
  */
 process LINK_HOTSPOT {

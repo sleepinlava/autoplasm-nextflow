@@ -1,5 +1,5 @@
 /*
- * PlasmidHostFinder assembly-based host prediction (DAG node:
+ * PlasmidHostFinder assembly-based host prediction (pipeline step:
  * host_prediction_plasmidhostfinder; assembly platform).
  */
 process PLASMIDHOSTFINDER {

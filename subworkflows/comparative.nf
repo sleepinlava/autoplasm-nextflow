@@ -1,7 +1,7 @@
 /*
- * Comparative genomics subworkflow (DAG category comparative_genomics, 09):
- * catalog preparation (internal handler) + MMseqs2 cross-sample clustering
- * (default), plus optional per-sample BLASTn / MUMmer / clinker.
+ * Comparative genomics subworkflow (stage 09 comparative_genomics):
+ * catalog preparation (bin/plasmid_catalog_prepare.R) + MMseqs2 cross-sample
+ * clustering (default), plus optional per-sample BLASTn / MUMmer / clinker.
  *
  * The catalog step receives the consensus FASTA files through their channel,
  * so task dependencies do not rely on asynchronous publication.

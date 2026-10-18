@@ -1,5 +1,5 @@
 /*
- * SCAPP plasmid reconstruction from the assembly graph (DAG node:
+ * SCAPP plasmid reconstruction from the assembly graph (pipeline step:
  * plasmid_binning_scapp; optional; requires graph + short reads).
  */
 process SCAPP_BIN {

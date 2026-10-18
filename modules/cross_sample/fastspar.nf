@@ -1,5 +1,5 @@
 /*
- * FastSpar plasmid co-occurrence network (DAG node:
+ * FastSpar plasmid co-occurrence network (pipeline step:
  * multisample_network_fastspar). Runs when at least params.network_min_samples
  * samples are present.
  */

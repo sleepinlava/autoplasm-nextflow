@@ -1,5 +1,5 @@
 /*
- * Host-plasmid linking subworkflow (DAG category host_plasmid_linking;
+ * Host-plasmid linking subworkflow (stage 07 host_plasmid_linking;
  * default disabled — params.host_plasmid_linking). Methods: co_abundance
  * (cross-sample), sequence (per-sample), CRISPR (currently rejected),
  * long_read (per-sample bridge evidence), HOTSPOT (optional Transformer

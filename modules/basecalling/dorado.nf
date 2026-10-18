@@ -1,5 +1,5 @@
 /*
- * Dorado basecalling from ONT POD5 (DAG node: basecalling_dorado).
+ * Dorado basecalling from ONT POD5 (pipeline step: basecalling_dorado).
  * Dorado has no bioconda package and no community container is pinned by the
  * project, so this process deliberately ships no `container` directive: with
  * docker/singularity profiles enabled Nextflow will run it in the default

@@ -1,5 +1,5 @@
 /*
- * Hybrid platform subworkflow (DAG platform_resolution.hybrid): short reads
+ * Hybrid platform subworkflow (platform: hybrid): short reads
  * go through fastp (+ optional bowtie2 host removal), long reads through
  * NanoPlot/Filtlong (+ optional minimap2 host removal); assembly with
  * OPERA-MS (default) or hybridSPAdes; both mappers feed contig coverage

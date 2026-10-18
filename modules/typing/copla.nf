@@ -1,5 +1,5 @@
 /*
- * COPLA PTU classification (DAG node: typing_copla; optional via
+ * COPLA PTU classification (pipeline step: typing_copla; optional via
  * params.typing_optional_tools). Requires the COPLA reference graph/list.
  */
 process COPLA {

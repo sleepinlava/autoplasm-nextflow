@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 # Generate the AutoPlasm summary report (Markdown + HTML + methods + JSON).
 #
-# Simplified standalone re-implementation of the ABI ``report_markdown``
-# node: scans the published results directory, summarizes per-sample plasmid
+# Pipeline step ``report_markdown``: scans the published results
+# directory, summarizes per-sample plasmid
 # counts from the consensus tables, circularity from structure tables, and
 # lists the available analysis sections.
 #

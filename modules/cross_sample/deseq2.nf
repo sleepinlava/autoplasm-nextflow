@@ -1,6 +1,6 @@
 /*
- * DESeq2 differential plasmid abundance (DAG node:
- * multisample_differential_deseq2). Uses the ABI R script verbatim.
+ * DESeq2 differential plasmid abundance (pipeline step:
+ * multisample_differential_deseq2), implemented by bin/deseq2_plasmid.R.
  */
 process DESEQ2 {
     tag 'deseq2'

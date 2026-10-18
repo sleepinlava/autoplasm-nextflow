@@ -1,5 +1,5 @@
 /*
- * Platon plasmid detection (DAG node: plasmid_detect_platon; optional
+ * Platon plasmid detection (pipeline step: plasmid_detect_platon; optional
  * consensus evidence). Requires the Platon database.
  */
 process PLATON {

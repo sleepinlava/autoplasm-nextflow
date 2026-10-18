@@ -1,8 +1,8 @@
 /*
- * Plasmid abundance subworkflow (DAG category abundance, 10): map reads to
+ * Plasmid abundance subworkflow (stage 10 abundance): map reads to
  * the consensus plasmid contigs and estimate per-contig abundance with
  * CoverM. Hybrid samples run a short-read chain and a long-read chain in
- * parallel (abundance_*_short / abundance_*_long in the DAG); the chain label
+ * parallel (abundance_*_short / abundance_*_long); the chain label
  * ('.short'/'.long') rides in meta.suffix so the nf-core modules publish the
  * legacy file names (e.g. <id>.short.coverm.tsv) and is stripped again before
  * emit. Sorted BAMs come straight from the aligners (bowtie2 sort_bam=true;

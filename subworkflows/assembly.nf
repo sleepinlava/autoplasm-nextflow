@@ -1,6 +1,6 @@
 /*
- * Assembly platform subworkflow (DAG platform_resolution.assembly): the
- * user-provided assembly FASTA passes through directly (DAG node
+ * Assembly platform subworkflow (platform: assembly): the
+ * user-provided assembly FASTA passes through directly (pipeline step
  * assembly_provided); no read-based steps (QC, coverage, abundance, MAG,
  * linking) are instantiated. Host prediction uses PlasmidHostFinder.
  */

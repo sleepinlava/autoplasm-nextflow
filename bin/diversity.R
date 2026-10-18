@@ -19,10 +19,10 @@
 # are converted to 0 here to keep the output schema compatible, and a stderr
 # warning lists how many sample pairs were coerced. Per the vegan
 # documentation, empty samples should ideally be removed from the analysis
-# rather than coerced; the coercion is kept for ABI schema compatibility.
+# rather than coerced; the coercion is kept for output schema compatibility.
 # A single sample yields a 1x1 beta matrix of 0.000000 instead of an error.
 #
-# Output schemas follow the ABI ``sample_diversity`` standard table.
+# Output schemas follow the ``sample_diversity`` standard table.
 
 suppressPackageStartupMessages({
   library(vegan)

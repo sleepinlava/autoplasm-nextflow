@@ -1,5 +1,5 @@
 /*
- * Contig coverage subworkflow (DAG category contig_coverage): map reads to
+ * Contig coverage subworkflow (contig_coverage): map reads to
  * the assembly and estimate coverage with CoverM. Short-read samples use
  * bowtie2 (index + align with sort_bam=true, so the sorted BAM comes straight
  * out of the aligner), long-read samples minimap2 (bam_format=true pipes

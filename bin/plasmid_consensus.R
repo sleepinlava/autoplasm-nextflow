@@ -1,8 +1,7 @@
 #!/usr/bin/env Rscript
 # Build consensus plasmid calls across detection tools.
 #
-# R port of bin/plasmid_consensus.py (ABI internal handler
-# ``metagenomic_plasmid.plasmid_consensus``). Strategies: intersection,
+# Pipeline step ``plasmid_consensus``. Strategies: intersection,
 # majority_vote, weighted_vote (default), single_tool (primary tool = geNomad).
 #
 # geNomad is mandatory; additional tool outputs are passed via repeated

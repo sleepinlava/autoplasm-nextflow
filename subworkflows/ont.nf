@@ -1,5 +1,5 @@
 /*
- * ONT platform subworkflow (DAG platform_resolution.ont):
+ * ONT platform subworkflow (platform: ont):
  * [Dorado basecalling | BAM→FASTQ | provided FASTQ] → NanoPlot + Filtlong →
  * [minimap2 host removal] → metaFlye → [medaka polishing] → QUAST →
  * contig coverage → plasmid detection/consensus → downstream → abundance →

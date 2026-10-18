@@ -1,8 +1,8 @@
 #!/usr/bin/env nextflow
 /*
- * AutoPlasm — Metagenomic Plasmid Analysis (standalone Nextflow DSL2 port of
- * the ABI metagenomic_plasmid pipeline; the authoritative specification is
- * src/abi/plugins/metagenomic_plasmid/pipeline_dag.yaml in the ABI repo).
+ * AutoPlasm — Metagenomic Plasmid Analysis (standalone Nextflow DSL2
+ * pipeline; the authoritative design specification is docs/计划书.md in
+ * this repository).
  *
  * Usage: nextflow run . --samplesheet samples.tsv --platform illumina -profile conda
  */

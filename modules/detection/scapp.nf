@@ -1,6 +1,6 @@
 /*
- * SCAPP assembly-graph plasmid detection (DAG node: plasmid_detect_scapp;
- * optional, illumina + metaSPAdes graph only).
+ * SCAPP assembly-graph plasmid detection (pipeline step:
+ * plasmid_detect_scapp; optional, illumina + metaSPAdes graph only).
  */
 process SCAPP_DETECT {
     tag { meta.id }

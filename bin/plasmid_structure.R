@@ -1,8 +1,7 @@
 #!/usr/bin/env Rscript
 # Detect plasmid circularity and terminal overlap.
 #
-# R port of bin/plasmid_structure.py (ABI internal handler
-# ``metagenomic_plasmid.plasmid_structure``). Circularity evidence:
+# Pipeline step ``plasmid_structure``. Circularity evidence:
 # header-declared markers plus sequence-based terminal repeats detected
 # with the geNomad convention (genomad/sequence.py has_dtr/has_itr) and
 # CheckV's low-complexity filters (CheckV complete_genomes.py
