@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "source": "nf-core/test-datasets",
+  "files": [
+    {
+      "path": "data/genomics/prokaryotes/plasmids/pUTI89/pUTI89.fna.gz",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 35478,
+      "git_blob_sha1": "6fffe679b2177ba7d9d22783c8571800bb70caa6"
+    },
+    {
+      "path": "databases/genomad/genomad_db_subset_v1.9.tar.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 5912894,
+      "git_blob_sha1": "2a6a30fca0adbde43d2e8b6a6c81c589bbc2042c"
+    },
+    {
+      "path": "data/genomics/sarscov2/genome/genome.fasta",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 30322,
+      "git_blob_sha1": "e8d0f8e1a173beb109df566d9c33bc83b10b7d64"
+    },
+    {
+      "path": "data/genomics/sarscov2/illumina/fastq/test_1.fastq.gz",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 9413,
+      "git_blob_sha1": "b4bdd21c6ab795635b8130207c4564d4058a68a0"
+    },
+    {
+      "path": "data/genomics/sarscov2/illumina/fastq/test_2.fastq.gz",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 9395,
+      "git_blob_sha1": "5eb2dc853e31fa763aeff156302c1b1e6422f1c6"
+    },
+    {
+      "path": "data/genomics/sarscov2/nanopore/fastq/test.fastq.gz",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 42965,
+      "git_blob_sha1": "36cf71dd3353935d1075c1420974950ed0f553f0"
+    },
+    {
+      "path": "assemblies/MEGAHIT-test_minigut.contigs.fa.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 511326,
+      "git_blob_sha1": "83185a06b64158a5ea144b8a5a4c26499cd3f585"
+    },
+    {
+      "path": "test_data/minigut_reads.fastq.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 10258859,
+      "git_blob_sha1": "f7f92b0e0d0b88b9f85293e75558843b70762319"
+    },
+    {
+      "path": "test_data/test_minigut_R1.fastq.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 3323528,
+      "git_blob_sha1": "8f5060cb419b896e61f2410ff32bc99158daf070"
+    },
+    {
+      "path": "test_data/test_minigut_R2.fastq.gz",
+      "revision": "f450b2e3f8d45b6101978ddeda7e1a522b9be25b",
+      "size": 3398619,
+      "git_blob_sha1": "4339b59323ff8d7893311856ab81402e9fa0df0d"
+    },
+    {
+      "path": "data/genomics/prokaryotes/streptomyces_coelicolor/fixtures_bigslice_gbk.tar.gz",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 84623,
+      "git_blob_sha1": "0368ca347064807e4f848dde0fc19865bfa09d40",
+      "extract_to": "gbk/streptomyces_coelicolor"
+    },
+    {
+      "path": "data/genomics/sarscov2/nanopore/pod5/test.pod5",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 462312,
+      "git_blob_sha1": "29893bfa9dda92da5c33d6f872a8cd5c3763792d"
+    },
+    {
+      "path": "data/genomics/prokaryotes/metagenome/binning/multisample/contigs.fasta.gz",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 1839803,
+      "git_blob_sha1": "5800d403bea0fc42a2618c6c82f21608e51ed356"
+    },
+    {
+      "path": "data/genomics/prokaryotes/metagenome/binning/multisample/s1.sorted.bam",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 1849787,
+      "git_blob_sha1": "38a18e49127aac7d7d91f6bc4f8b64b94c365fbc"
+    },
+    {
+      "path": "data/genomics/prokaryotes/metagenome/binning/multisample/s1.sorted.bam.bai",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 19312,
+      "git_blob_sha1": "a4b5987ad8c91c730c445d7f77ab29cd960e1e15"
+    },
+    {
+      "path": "data/genomics/homo_sapiens/nanopore/pod5/HG002_PAW70337_giab_10reads.pod5",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 2254320,
+      "git_blob_sha1": "462ac3d41ce9476f25ed9572bd28edc89c274520"
+    },
+    {
+      "path": "data/genomics/eukaryotes/gallus_gallus/pacbio_metagenome.fastq.gz",
+      "revision": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+      "size": 127407,
+      "git_blob_sha1": "7e6bdaa7834ae754f96f5302dda9a7f0a89d5e0f"
+    }
+  ]
+}

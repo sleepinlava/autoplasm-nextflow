@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "source": "ENA PRJNA848809 (Sugarbeet leaf bacteriome, BCTV infected vs control, day 6)",
+  "ena_groups": {
+    "SRR19638267": "infected",
+    "SRR19638268": "infected",
+    "SRR19638269": "infected",
+    "SRR19638270": "control",
+    "SRR19638273": "control",
+    "SRR19638274": "control"
+  },
+  "files": [
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/067/SRR19638267/SRR19638267_1.fastq.gz", "dest": "ena/SRR19638267_1.fastq.gz", "size": 23750415, "md5": "94a73e7ce300223982e80b1dd98227ca"},
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/067/SRR19638267/SRR19638267_2.fastq.gz", "dest": "ena/SRR19638267_2.fastq.gz", "size": 25021750, "md5": "807e5dbc7d55db9640aaa3ce8730fe65"},
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/068/SRR19638268/SRR19638268_1.fastq.gz", "dest": "ena/SRR19638268_1.fastq.gz", "size": 17380045, "md5": "9004ecab706d7f61582d86783c4cce45"},
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/068/SRR19638268/SRR19638268_2.fastq.gz", "dest": "ena/SRR19638268_2.fastq.gz", "size": 20759245, "md5": "28c2e203a7f86263c87b24bba8bca4f7"},
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/069/SRR19638269/SRR19638269_1.fastq.gz", "dest": "ena/SRR19638269_1.fastq.gz", "size": 14050237, "md5": "73b8b6a68b1f96c7a8bdbdf6c79d6420"},
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/069/SRR19638269/SRR19638269_2.fastq.gz", "dest": "ena/SRR19638269_2.fastq.gz", "size": 20513933, "md5": "e07ecaeb6b24919548da64e97c75aada"},
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/070/SRR19638270/SRR19638270_1.fastq.gz", "dest": "ena/SRR19638270_1.fastq.gz", "size": 18480209, "md5": "49b49eda8880586f5ad2fbe1f98f2d5b"},
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/070/SRR19638270/SRR19638270_2.fastq.gz", "dest": "ena/SRR19638270_2.fastq.gz", "size": 20291366, "md5": "9ebf855fb42abfb00c3d884f256cdf20"},
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/073/SRR19638273/SRR19638273_1.fastq.gz", "dest": "ena/SRR19638273_1.fastq.gz", "size": 16508082, "md5": "42665ce6d20e7c95da6c99abeff751af"},
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/073/SRR19638273/SRR19638273_2.fastq.gz", "dest": "ena/SRR19638273_2.fastq.gz", "size": 20604092, "md5": "1d392381985536e5d2d009021b6f9239"},
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/074/SRR19638274/SRR19638274_1.fastq.gz", "dest": "ena/SRR19638274_1.fastq.gz", "size": 19364731, "md5": "64e8b42b8adbd0317b2e4aa2b7387791"},
+    {"url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR196/074/SRR19638274/SRR19638274_2.fastq.gz", "dest": "ena/SRR19638274_2.fastq.gz", "size": 21711812, "md5": "e5075c0f2cb17582e161a3a525f808eb"}
+  ]
+}

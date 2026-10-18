@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# SELinux wrapper: append :z to bind mounts so rootless podman can access them.
+# Used only when getenforce returns Enforcing (see tests/nf-test/env.sh).
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v|--volume)
+      if [ $# -ge 2 ]; then
+        spec="$2"
+        case "$spec" in
+          *:z|*:Z|*,z|*,Z) : ;;
+          *:*:*) spec="${spec},z" ;;
+          *:*)   spec="${spec}:z" ;;
+        esac
+        args+=("$1" "$spec"); shift 2
+      else
+        args+=("$1"); shift
+      fi
+      ;;
+    --volume=*|-v=*)
+      flag="${1%%=*}"; spec="${1#*=}"
+      case "$spec" in
+        *:z|*:Z|*,z|*,Z) : ;;
+        *:*:*) spec="${spec},z" ;;
+        *:*)   spec="${spec}:z" ;;
+      esac
+      args+=("${flag}=${spec}"); shift
+      ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+exec /usr/bin/podman "${args[@]}"
