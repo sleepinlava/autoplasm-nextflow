@@ -75,4 +75,27 @@ nextflow_pipeline {
             assert workflow.trace.succeeded().isEmpty()
         }
     }
+    [
+        ['unsupported platform', [platform: 'invalid'], '--platform must be one of'],
+        ['unsupported short read assembler', [short_read_assembler: 'invalid'], 'short_read_assembler must be'],
+        ['unsupported hybrid assembler', [hybrid_assembler: 'invalid'], 'hybrid_assembler must be'],
+        ['enabled Bakta without database', [annotation_tools: ['bakta'], bakta_db: null], 'requires --bakta_db'],
+        ['enabled MOB typer without database', [typing_tools: ['mob_typer'], mob_suite_db: null], 'requires --mob_suite_db'],
+        ['clinker without Bakta', [comparative_optional_tools: ['clinker']], "requires annotation_tools 'bakta'"]
+    ].each { caseName, overrides, diagnostic ->
+        test(caseName) {
+            when {
+                params {
+                    samplesheet = new File('tests/nf-test/fixtures/duplicate.tsv').absolutePath
+                    outdir = "$outputDir"
+                    overrides.each { key, value -> delegate.setProperty(key, value) }
+                }
+            }
+            then {
+                assert workflow.failed
+                assert workflow.stderr.join('\n').contains(diagnostic)
+                assert workflow.trace.succeeded().isEmpty()
+            }
+        }
+    }
 }

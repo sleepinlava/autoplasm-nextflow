@@ -1,12 +1,47 @@
 # AutoPlasm (Nextflow)
 
-AutoPlasm 宏基因组质粒分析流程的独立 Nextflow DSL2 实现 —— 不依赖 ABI Python
-运行时，可直接 `nextflow run` 执行。权威设计来源是 ABI 插件的
-`pipeline_dag.yaml`（`src/abi/plugins/metagenomic_plasmid/`，ABI 仓库），
-本仓库的阶段划分、平台分支、默认开关与该规范一一对应。
+AutoPlasm 是宏基因组质粒分析的独立 Nextflow DSL2 实现，以 `nextflow run`
+为执行入口，无外部控制平面依赖。运行前需准备所选工具、环境、数据库和样本表。
+默认参数以 `nextflow.config` 为准，实际分支与统计对象以源码为准；
+`docs/计划书.md` 保留原设计意图，其中与当前实现的差异见事实审查。
 
 支持五个平台：`illumina` / `ont` / `pacbio_hifi` / `hybrid` / `assembly`
 （一次运行一个平台，由 `--platform` 选择）。
+
+## 交互式分析框架与事实审查
+
+- [打开 Nextflow 流程设计网页](docs/analysis-framework.html)：以我们实际设计的
+  五平台路由、00–12 阶段、并行模块、参数开关和输出结构为主线；支持流程图点击、
+  阶段讲解、共识实验、示例命令和 Markdown 导出，科学审查作为辅助说明保留。
+  使用原生 **HTML + CSS + TypeScript**，无框架或 CDN 运行时依赖；浏览器加载已编译的
+  `docs/analysis-framework.js`。本地打开时需同时保留同目录 CSS/JS，源码链接需保留仓库结构。
+- 页面开发：编辑 [HTML](docs/analysis-framework.html)、[CSS](docs/analysis-framework.css)、
+  [TypeScript](docs/analysis-framework.ts) 后，在仓库根目录运行 `tsc -p docs/tsconfig.json`。
+  随网页保存的 JS 可直接使用，查看页面无需安装 TypeScript。
+- [Computer Use 视觉与交互验收](docs/visual-acceptance.md)：浏览器实际操作、截图、修正项与验收边界。
+- [分析计划与证据契约](docs/analysis-framework-plan.md)：科学问题、实验单位、端点、
+  验收条件与下一步补强路线。
+- [事实可靠性审查](docs/fact-reliability-audit.md)：逐条列出源码依据、文档差异、
+  科学解释边界与验证状态。审查基于 2026-10-17 工作区，而非仅基准提交。
+
+分析路线：**定义问题与对照 → 输入 / QC / 组装 → 候选质粒与结构证据 →
+分型 / 功能 / 序列比较 → 宿主候选 → 可比定量与群落统计 → 可追溯报告**。
+这是科学组织顺序；实际工作流的分型、注释、binning 等分支可并行，编号不代表
+所有结果依次传入下一阶段。
+
+当前最关键的结论边界：
+
+1. 默认只有 geNomad，不能表述为默认多工具交叉验证；共识规则分数不是校准概率。
+2. MMseqs2 catalog 尚未接回定量；各样本回贴自身候选后合并，不能直接视为
+   统一质粒目录上的可比矩阵。DIVERSITY 与内部差异分支实际读取 **contig 表**。
+3. 本项目 CoverM 配置只请求 mean/TPM/RPKM，`raw_count` 留空；DESeq2 与网络
+   的 coverage 取整回退只是代理，不能当作原始 read/fragment 计数验收。
+4. 结构脚本会将通过过滤的 ITR 写成 `is_circular=true`；末端反向重复本身不足以
+   证明闭环。结构标记、宿主预测和共现连线均需独立证据复核。
+5. mock / 单元回归支持工程行为，不证明真实数据库下的分类性能或生物学结论。
+
+建议先补齐 **统一 catalog 回贴与计数 → 研究设计及统计模型 → 结构 / MAG / 宿主
+证据复核 → 真实数据验收及报告溯源**，再进行可发表的跨样本推断。
 
 ## 快速开始
 
@@ -25,7 +60,7 @@ nextflow run . \
 
 列表参数在命令行用逗号分隔字符串传入，例如
 `--plasmid_detection_tools 'genomad,platon'`。所有参数的默认值见
-`nextflow.config`，与 ABI `config_default.yaml` 保持一致。
+`nextflow.config`。
 
 ## 实现基座（nf-core 模块）
 
@@ -57,14 +92,19 @@ PlasmidHostFinder、clinker、nucmer/MUMmer 链、FastSpar 及自研统计脚本
 | 04 | `04_plasmid_detection/` | geNomad（必选）+ 可选 PLASMe/PlasX/Platon/SCAPP；共识整合（plasmidEC 式 ensemble 表）+ 环化/末端重叠检测（`bin/` R 脚本） |
 | 05 | `05_plasmid_binning/` | 可选 PlasMAAG、gplas2、MOB-recon、SCAPP、Recycler |
 | 06 | `06_plasmid_typing/` | 默认 PlasmidFinder + MOB-typer；可选 COPLA、CONJscan、MacSyFinder |
-| 07 | `07_host_prediction/` | MetaPhlAn4（默认）/Kraken2/PlasmidHostFinder(assembly)；`07_host_prediction/mag/` 为可选 MAG 链；宿主-质粒关联（默认关） |
+| 07 | `07_host_prediction/` | MetaPhlAn 群落 profile（reads 路径默认）；Kraken2（仅 illumina 可选）；PlasmidHostFinder（assembly 显式启用）；MAG 与宿主-质粒关联默认关 |
 | 08 | `08_annotation/` | 默认 Bakta + AMRFinderPlus + ISEScan + IntegronFinder；可选 Prodigal、ABRICATE、RGI/CARD、eggNOG-mapper、MOB-suite |
-| 09 | `09_comparative_genomics/` | 默认 MMseqs2 跨样本聚类；可选 BLASTn、MUMmer、clinker |
-| 10 | `10_abundance/` | bowtie2/minimap2 → samtools → CoverM；hybrid 有 `short/` 与 `long/` 两套 |
-| 11 | `11_diversity/` | 多样性（≥3 样本）、内部效应量法差异丰度、可选 DESeq2 |
-| 12 | `12_network/` | FastSpar 共现网络（≥20 样本） |
+| 09 | `09_comparative_genomics/` | 默认 MMseqs2 跨样本聚类（identity 0.95 / target coverage 0.8）；可选 BLASTn、MUMmer、clinker；catalog 未反馈至定量 |
+| 10 | `10_abundance/` | reads 回贴各样本共识候选 → CoverM；hybrid 分 `short/` 与 `long/`；assembly 跳过 |
+| 11 | `11_diversity/` | 默认 contig 多样性（≥3 样本）与内部 contig 差异分析；可选 plasmid 表 DESeq2（默认关） |
+| 12 | `12_network/` | FastSpar 相关 / 协方差矩阵（默认关，≥20 样本）；当前未接 bootstrap / p 值步骤 |
 | — | `tables/` | 合并的 contig/plasmid 丰度长表 |
-| — | `report/` | 汇总 Markdown/HTML 报告 + methods.md |
+| — | `report/` | 汇总 Markdown/HTML 报告 + methods.md；目前仍扫描 publish 目录，完整性需复核 |
+
+平台边界：当前 `hybrid` 长读路径按 ONT 处理（`map-ont`），不能无条件解释为
+任意短读 + HiFi 的混合模式。`pacbio_hifi` 使用 `map-hifi`，但当前未接入 MultiQC。
+`assembly` 不实例化 read QC、覆盖度、丰度、MAG、宿主关联或跨样本丰度统计；
+默认 MetaPhlAn 在该路径跳过，可显式选择 PlasmidHostFinder。
 
 ## 样本表
 
@@ -78,7 +118,7 @@ host_reference, notes`，按平台需要填写。
 `bin/merge_abundance.R` 时也应使用与 `--tables` 顺序对应的 `--sample-ids`；
 为兼容旧调用保留的文件名推断无法无歧义处理点号和后缀相似的样本名。
 
-## 主要参数（默认值镜像 config_default.yaml）
+## 主要参数
 
 - 工具开关：`--plasmid_detection_tools`（默认 `['genomad']`）、
   `--plasmid_binning_tools`（默认 `[]`）、`--typing_tools`
@@ -93,18 +133,19 @@ host_reference, notes`，按平台需要填写。
   `--hybrid_assembler opera_ms|hybridspades`。
 - 宿主去除：样本表 `host_reference` 列或全局 `--host_reference`。
 - 跨样本门控：`--min_diversity_samples 3`、`--min_group_replicates 3`、
-  `--network_min_samples 20`。
+  `--network_min_samples 20`。这些是运行 / 脚本门槛，不是功效保证；DESeq2
+  脚本目前另有写死的每组 ≥3 条件，不读取 `min_group_replicates`。
 - 宿主-质粒关联默认关闭：`--host_plasmid_linking true` 开启，
   `--host_linking_methods 'co_abundance,sequence,long_read'`、
   `--host_linking_optional_methods hotspot`（或 `crispr`，尚未实现）。
 
-当前 CRISPR 宿主-质粒关联尚未实现。开启宿主关联并把 `crispr` 加入可选方法时，流程会提前明确失败；关闭该方法不影响其他关联类型。可选方法 `hotspot` 接入 [HOTSPOT](https://github.com/Orin-beep/HOTSPOT)（Transformer 宿主预测，蛋白/复制子特征，高置信），需要预先克隆其仓库并下载模型库，经 `--hotspot_home`、`--hotspot_db`、`--hotspot_models` 传入。Hybrid 的 MetaPhlAn 宿主 profile 使用短读长，每个样本只生成一份 profile。
+当前 CRISPR 宿主-质粒关联尚未实现。开启宿主关联并把 `crispr` 加入可选方法时，流程会提前明确失败。可选方法 `hotspot` 接入 [HOTSPOT](https://github.com/Orin-beep/HOTSPOT)，需要预先克隆其仓库并下载模型库，经 `--hotspot_home`、`--hotspot_db`、`--hotspot_models` 传入。其输出属于候选宿主预测，尚未在本项目数据上校准或验收，不能直接标为“高置信宿主”。Hybrid 的 MetaPhlAn 群落 profile 使用短读，每个样本只生成一份。
 
 FastQC 报告以样本、阶段和 read 端命名，例如 `S1.raw.R1_fastqc.zip` 与 `S1.clean.R2_fastqc.html`。FASTQ 输入本身不重写；FastQC 内部记录的输入名也带有相同身份，例如 `S1.raw.R1.fastq.gz`。MultiQC 汇总 raw/clean FastQC ZIP 与 fastp JSON，不重复暂存 HTML。
 
 ## 数据库准备
 
-ABI 不自动下载数据库，本流程同样要求预先准备并通过参数传入路径：
+本流程不自动下载数据库，需要预先准备并通过参数传入路径：
 
 | 参数 | 工具 | 获取方式（参考） |
 |---|---|---|
@@ -135,6 +176,10 @@ ABI 不自动下载数据库，本流程同样要求预先准备并通过参数�
 hybrid 组装器，bioconda 已下架；也可改用 `--hybrid_assembler hybridspades`）。
 
 ## 验证状态
+
+以下分日期记录为既有历史记录，不代表本次框架审查重跑了全部测试。
+本次检查及未执行项见 [审查记录](docs/fact-reliability-audit.md#本次验证)。
+工作区仍有未提交的实现修改，历史通过数不能替代对当前状态的验收。
 
 2026-10-17 nf-core 化改造（`refactor/nf-core-modules` 分支）：约 50 个 process
 替换为 `modules/nf-core/` vendored 官方模块。验证（Nextflow 26.10.0 + Java 21）：
@@ -184,23 +229,45 @@ hybrid 组装器，bioconda 已下架；也可改用 `--hybrid_assembler hybrids
   publish 目录时的旧结果风险，以及按 contig 名直接做跨样本关联的生物学
   可比性，仍需独立处理。
 
-## 与 ABI 实现的差异（已知简化）
+## 实现说明与已知简化
 
-- ABI 的 `plasmid_consensus` handler 实际只拷贝 geNomad/SCAPP 结果；本实现
-  按 DAG 文档化了四种共识策略（intersection/majority_vote/weighted_vote/
-  single_tool）的完整实现，权重阈值取"支持权重占启用工具总权重 ≥ 0.5"。
-- `plasmid_structure` 与 ABI 算法一致（header 环化标记 + 20–1000 bp 精确
-  末端重叠）。
-- 序列相似性宿主关联简化为四核苷酸组成余弦相似度 + GC 惩罚（ABI 还建模
-  密码子使用）；长读桥接基于 Rsamtools 的 SAM/BAM 解析（同一条读段同时
-  比对到质粒与非质粒 contig，默认 MAPQ≥20 过滤）。
+- 共识整合（`plasmid_consensus`）完整实现了四种策略
+  （intersection/majority_vote/weighted_vote/single_tool），权重阈值取
+  "支持权重占参与工具总权重 ≥ 0.5"。默认只启用 geNomad；严格多数要求
+  支持数大于半数，single_tool 取 geNomad 判定。实际参与共识取决于收到的工具
+  结果；启用工具的缺失 contig 记录按未支持处理，不是独立的染色体鉴定。
+- `plasmid_structure` 使用 header 标记，以及 **21 bp** 种子的精确 DTR / ITR
+  与低复杂度过滤；ITR 延伸上限 1000 bp，DTR 并非统一限制在 1000 bp 内。
+  当前通过过滤的 ITR 也产生 `is_circular=true`，存在解释风险；该字段只能作
+  候选结构标记，不能视为已证实完整环状质粒。需要组装图与跨接 reads 等复核。
+- 序列组成宿主关联当前使用 **TETRA 风格的四核苷酸 z-score 向量 Pearson
+  相关**，并非旧版文档的“余弦相似度 + GC 惩罚”，也不建模密码子使用。
+  它是组成启发式，不是宿主后验概率或分类学鉴定。
+- 长读桥接通过 Rsamtools 解析 SAM/BAM，要求同一 read 有 primary 与
+  supplementary 记录，支持质粒与非质粒 contig 连接；默认 MAPQ≥20，并过滤
+  secondary、QC-fail、duplicate、paired 等标记。桥接仍可能来自嵌合、重复或
+  整合，不能单独证明游离质粒的宿主。
+- 共丰度关联输出 Spearman/Pearson、Jaccard、p 值和对所有测试对作 BH 校正的
+  q 值；脚本 `max-qvalue` 默认 1.0，流程未传显著性筛选阈值。即使额外按 q 值
+  筛选，也不消除组成性、混杂或特征不可比问题，仍应按探索性解释。
+- MAG 最终通道当前默认接 MetaBAT2，启用 DAS Tool 时以其输出替换；CONCOCT
+  单开未进入最终通道，SemiBin 输出也未接入最终通道或 DAS Tool 输入。
+  CheckM2 和 GTDB-Tk 都读取最终通道，不能把“启用任一 binner”理解为完整 MAG 链。
 - 差异丰度"内部效应量法"为 Welch t 检验 + Hedges' g + BH 校正，默认按
-  Maaslin2/ANCOM-BC 惯例过滤低流行度 contig（--min-prevalence 0.1）；
-  CoverM 无原始计数，DESeq2/FastSpar 以取整 coverage 作为计数代理（与 ABI
-  DESeq2 脚本相同的约定）。
+  `--min-prevalence 0.1` 过滤低流行度 contig；它不是 MaAsLin2 或 ANCOM-BC 的
+  实现，也未建模配对 / 批次。DESeq2 当前为 `~ group`。
+- CoverM 支持 `count`，但本项目 `conf/nfcore_upstream.config` 只请求
+  `mean tpm rpkm`，合并表的 `raw_count` 为空；DESeq2 / FastSpar 回退到
+  coverage 取整代理。要作计数推断，需先提供可追溯的计数及 read/fragment 分配
+  规则，并验证模型适配性。参见 [CoverM 官方能力](https://github.com/wwood/CoverM)
+  与 [DESeq2 官方输入说明](https://www.bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html)。
+- 多样性当前基于 contig coverage；Bray–Curtis 默认未做 TSS，脚本虽支持
+  `--beta-normalization tss`，流程模块尚未传入。全零样本对的 NaN 被转为 0
+  并警告，不能将此解读为生物学上相同。
 - 报告为汇总版（样本质粒数、环化数、启用的分析板块），HTML 由
   `assets/plasmid_report.Rmd` 模板渲染（rmarkdown+pandoc 缺失时回退为简版
-  静态页），不是 ABI 的完整图文报告。
-- hybrid 平台的跨样本统计使用短读丰度链；contig 覆盖度合并长短读 BAM。
+  静态页）。
+- hybrid 平台的跨样本 **质粒** 表使用短读丰度链；**contig** 覆盖度合并长短读
+  BAM，因此默认多样性 / 内部差异并非仅基于短读。
 - PLASMe/PlasX/COPLA 等工具输出列格式存在版本差异，解析器做了宽松启发式
   处理（按列名候选匹配）。
