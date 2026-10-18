@@ -1,15 +1,14 @@
 /*
- * Plasmid circularity / terminal-overlap detection (DAG node:
- * plasmid_structure; internal handler in ABI, implemented here by
- * bin/plasmid_structure.R with the geNomad/CheckV terminal-repeat
- * convention).
+ * Plasmid circularity / terminal-overlap detection (pipeline step:
+ * plasmid_structure, implemented by bin/plasmid_structure.R with the
+ * geNomad/CheckV terminal-repeat convention).
  */
 process PLASMID_STRUCTURE {
     tag { meta.id }
     label 'process_single'
     conda "${projectDir}/envs/r_analysis.yml"
     // R 包集合以 envs/r_analysis.yml 为准；镜像需提供 data.table/vegan/Biostrings/Rsamtools
-    container 'bioconductor/bioconductor_docker:RELEASE_3_21'
+    container 'autoplasm-r-analysis:latest'
 
     publishDir "${params.outdir}/04_plasmid_detection/structure", mode: params.publish_dir_mode
 

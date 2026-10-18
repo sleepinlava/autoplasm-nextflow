@@ -1,7 +1,7 @@
 /*
- * Long-read bridge evidence host-plasmid linking (DAG node:
- * host_plasmid_link_longread; internal handler in ABI, implemented here by
- * bin/longread_bridge_link.R). Reads spanning a plasmid contig and another
+ * Long-read bridge evidence host-plasmid linking (pipeline step:
+ * host_plasmid_link_longread, implemented by bin/longread_bridge_link.R).
+ * Reads spanning a plasmid contig and another
  * (host) contig in the contig-alignment BAM are counted as bridge evidence.
  * Rsamtools scans the BAM directly, so no samtools step is needed.
  */
@@ -10,7 +10,7 @@ process LINK_LONGREAD {
     label 'process_low'
     conda "${projectDir}/envs/r_analysis.yml"
     // R 包集合以 envs/r_analysis.yml 为准；镜像需提供 data.table/vegan/Biostrings/Rsamtools
-    container 'bioconductor/bioconductor_docker:RELEASE_3_21'
+    container 'autoplasm-r-analysis:latest'
 
     publishDir "${params.outdir}/07_host_prediction/linking/longread", mode: params.publish_dir_mode
 

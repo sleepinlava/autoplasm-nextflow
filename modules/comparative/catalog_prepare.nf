@@ -1,7 +1,7 @@
 /*
- * Prepare the non-redundant plasmid catalog input (DAG node:
- * plasmid_catalog_prepare; internal handler in ABI, implemented here by
- * bin/plasmid_catalog_prepare.R). The input FASTA files are explicit path
+ * Prepare the non-redundant plasmid catalog input (pipeline step:
+ * plasmid_catalog_prepare, implemented by bin/plasmid_catalog_prepare.R).
+ * The input FASTA files are explicit path
  * dependencies from the consensus channel; published output directories are
  * not used as workflow inputs.
  */
@@ -10,7 +10,7 @@ process PLASMID_CATALOG_PREPARE {
     label 'process_single'
     conda "${projectDir}/envs/r_analysis.yml"
     // R 包集合以 envs/r_analysis.yml 为准；镜像需提供 data.table/vegan/Biostrings/Rsamtools
-    container 'bioconductor/bioconductor_docker:RELEASE_3_21'
+    container 'autoplasm-r-analysis:latest'
 
     publishDir "${params.outdir}/09_comparative_genomics", mode: params.publish_dir_mode
 

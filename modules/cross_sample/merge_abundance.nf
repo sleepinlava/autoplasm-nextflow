@@ -8,7 +8,7 @@ process MERGE_ABUNDANCE {
     label 'process_single'
     conda "${projectDir}/envs/r_analysis.yml"
     // R 包集合以 envs/r_analysis.yml 为准；镜像需提供 data.table/vegan/Biostrings/Rsamtools
-    container 'bioconductor/bioconductor_docker:RELEASE_3_21'
+    container 'autoplasm-r-analysis:latest'
 
     publishDir "${params.outdir}/tables", mode: params.publish_dir_mode
 

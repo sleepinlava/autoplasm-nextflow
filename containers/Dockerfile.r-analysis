@@ -7,5 +7,8 @@
 #   docker build -f containers/Dockerfile.r-analysis -t autoplasm-r-analysis:latest .
 FROM bioconductor/bioconductor_docker:RELEASE_3_21
 
-RUN Rscript -e 'install.packages(c("vegan", "jsonlite", "rmarkdown"), repos = "https://cloud.r-project.org")' \
+# The base image ships jsonlite/rmarkdown but NOT data.table/vegan/Biostrings/
+# Rsamtools (verified 2026-10-17), so install the full set explicitly.
+RUN Rscript -e 'install.packages(c("vegan", "data.table", "jsonlite", "rmarkdown"), repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'BiocManager::install(c("Biostrings", "Rsamtools"), update = FALSE)' \
     && Rscript -e 'stopifnot(all(vapply(c("vegan", "data.table", "Biostrings", "Rsamtools", "jsonlite", "rmarkdown"), requireNamespace, logical(1), quietly = TRUE)))'

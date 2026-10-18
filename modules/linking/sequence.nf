@@ -1,7 +1,7 @@
 /*
  * Sequence similarity host-plasmid linking (TETRA tetranucleotide z-scores;
- * DAG node: host_plasmid_link_sequence; internal handler in ABI, implemented
- * here by bin/sequence_similarity_link.R). Reads the actual staged MAG
+ * pipeline step: host_plasmid_link_sequence, implemented by
+ * bin/sequence_similarity_link.R). Reads the actual staged MAG
  * directory; GTDB-Tk taxonomy is attached when available. Missing optional
  * inputs arrive as empty lists.
  */
@@ -10,7 +10,7 @@ process LINK_SEQUENCE {
     label 'process_low'
     conda "${projectDir}/envs/r_analysis.yml"
     // R 包集合以 envs/r_analysis.yml 为准；镜像需提供 data.table/vegan/Biostrings/Rsamtools
-    container 'bioconductor/bioconductor_docker:RELEASE_3_21'
+    container 'autoplasm-r-analysis:latest'
 
     publishDir "${params.outdir}/07_host_prediction/linking/sequence", mode: params.publish_dir_mode
 

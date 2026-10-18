@@ -1,6 +1,6 @@
 /*
- * Alpha/beta diversity analysis (DAG node: multisample_diversity; internal
- * handler in ABI, implemented here by bin/diversity.R with vegan). Runs when
+ * Alpha/beta diversity analysis (pipeline step: multisample_diversity,
+ * implemented by bin/diversity.R with vegan). Runs when
  * at least params.min_diversity_samples samples are present.
  */
 process DIVERSITY {
@@ -8,7 +8,7 @@ process DIVERSITY {
     label 'process_low'
     conda "${projectDir}/envs/r_analysis.yml"
     // R 包集合以 envs/r_analysis.yml 为准；镜像需提供 data.table/vegan/Biostrings/Rsamtools
-    container 'bioconductor/bioconductor_docker:RELEASE_3_21'
+    container 'autoplasm-r-analysis:latest'
 
     publishDir "${params.outdir}/11_diversity", mode: params.publish_dir_mode
 
