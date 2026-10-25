@@ -7,7 +7,7 @@
 #
 # R equivalent of bin/merge_abundance.py: value columns (RPKM/TPM/coverage)
 # are copied verbatim as strings (all columns are read as character), and
-# error messages / exit codes match the Python implementation.
+# coverage is validated as a finite nonnegative measurement before writing.
 
 suppressPackageStartupMessages(library(data.table))
 
@@ -94,8 +94,13 @@ read_table <- function(path, sample, seen_features) {
   fields <- names(dt)
   id_col <- fields[1]
   mean_col <- Find(function(f) endsWith(tolower(f), "mean"), fields)
+  if (is.null(mean_col))
+    die(paste0(path, ": missing Mean coverage column"))
   tpm_col <- Find(function(f) endsWith(tolower(f), "tpm"), fields)
   rpkm_col <- Find(function(f) endsWith(tolower(f), "rpkm"), fields)
+  count_cols <- fields[tolower(fields) == "count" | endsWith(tolower(fields), "read count")]
+  if (length(count_cols) > 1L) die(paste0(path, ": ambiguous Count columns"))
+  count_col <- if (length(count_cols)) count_cols[1L] else NULL
   if (nrow(dt) == 0)
     return(list(rows = data.table(), seen = seen_features))
   rows <- list()
@@ -113,13 +118,25 @@ read_table <- function(path, sample, seen_features) {
       v <- dt[[col]][k]
       if (is.na(v)) "" else v
     }
+    coverage <- get_col(mean_col)
+    numeric_coverage <- suppressWarnings(as.numeric(coverage))
+    if (length(numeric_coverage) != 1L || !is.finite(numeric_coverage) || numeric_coverage < 0)
+      die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=coverage value='%s'; expected finite nonnegative measurement",
+                  path, line_number, sample, feature, coverage))
+    raw_count <- get_col(count_col)
+    if (!is.null(count_col)) {
+      numeric_count <- suppressWarnings(as.numeric(raw_count))
+      if (!is.finite(numeric_count) || numeric_count < 0 || numeric_count != floor(numeric_count))
+        die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=raw_count value='%s'; expected finite nonnegative integer count",
+                    path, line_number, sample, feature, raw_count))
+    }
     rows[[length(rows) + 1]] <- data.table(
       feature = feature,
       sample_id = sample,
       rpkm = get_col(rpkm_col),
       tpm = get_col(tpm_col),
-      coverage = get_col(mean_col),
-      raw_count = "",
+      coverage = coverage,
+      raw_count = raw_count,
       mapper = "")
   }
   list(rows = if (length(rows)) rbindlist(rows) else data.table(), seen = seen_features)

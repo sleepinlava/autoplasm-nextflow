@@ -34,13 +34,20 @@ knitr::kable(data$samples,
 ```{r sections}
 sections <- data$sections
 knitr::kable(data.frame(Section = sections$name,
-                        Present = ifelse(sections$present, "yes", "no")),
+                        Status = ifelse(sections$status == "provided_input", "Provided input",
+                                 ifelse(sections$present, "Outputs observed", "No output recorded"))),
              row.names = FALSE)
 ```
 
+No recorded output can mean a disabled branch or a branch gated by empty inputs;
+it is not a statement that an analysis found no biological hits.
+
 ## Limitations
 
+- TETRA composition scores are not host assignments. Uncalibrated TETRA host links are disabled after the source-host benchmark failed acceptance.
+
 - Sequence-based circularity is predictive and should be confirmed from the assembly graph or read support.
+- The circular count represents candidates, not confirmed topology. Terminal inverted repeats alone do not establish circularity; a negative circularity call does not confirm linearity.
 - Plasmid calls are predictions from automated classifiers; confirm biologically important hits manually.
 
 ## Methods

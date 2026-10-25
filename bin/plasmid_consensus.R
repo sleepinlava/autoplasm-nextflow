@@ -6,12 +6,12 @@
 #
 # geNomad is mandatory; additional tool outputs are passed via repeated
 # ``--extra`` arguments and are identified by filename pattern:
-# ``*.plasme.tsv``, ``*.plasx.tsv``, ``*.platon.tsv``, ``*.scapp.fasta``.
+# ``*.plasme.tsv``, ``*.plasx.tsv``, ``*.platon.tsv``.
 #
 # The consensus table follows the plasmidEC ensemble schema
 # (github.com/lisavader/plasmidEC, maintained at gitlab.com/mmb-umcu/plasmidEC):
 # one row per contig, one fixed column per detection tool
-# (genomad/plasme/plasx/platon/scapp) holding that tool's call
+# (genomad/plasme/plasx/platon) holding that tool's call
 # (``plasmid``/``chromosome``/``NA`` when the tool is disabled), plus
 # ``plasmid_count`` (number of tools calling the contig a plasmid) and
 # ``combined_prediction`` (plain majority vote). The ``plasmid_call`` column
@@ -33,7 +33,7 @@ METHOD_CHOICES <- c("intersection", "majority_vote", "weighted_vote", "single_to
 DEFAULT_WEIGHTS <- "genomad:0.6,platon:0.15,plasme:0.15,plasx:0.1"
 # Fixed ensemble column order in the consensus table (plasmidEC-style); a
 # tool that did not run gets "NA" in its column.
-ENSEMBLE_TOOLS <- c("genomad", "plasme", "plasx", "platon", "scapp")
+ENSEMBLE_TOOLS <- c("genomad", "plasme", "plasx", "platon")
 
 die <- function(msg) {
   cat(msg, "\n", file = stderr(), sep = "")
@@ -142,6 +142,40 @@ to_score <- function(x) {
 
 empty_calls <- function() list(score = list(), is_plasmid = list())
 
+# PlasX emits every contig with a probability, not a positive-only collection.
+# Fixed upstream README recommends score > 0.5; equality is not positive.
+parse_plasx <- function(path) {
+  dt <- sniff_table(path)
+  if (!all(c("contig", "score") %in% names(dt)))
+    die(paste0("PlasX predictions require contig and score columns: ", path))
+  ids <- trimws(dt$contig)
+  check_unique_ids(ids, path, "PlasX prediction data")
+  out <- empty_calls()
+  for (i in seq_len(nrow(dt))) {
+    cid <- ids[i]
+    if (is.na(cid) || !nzchar(cid))
+      die(sprintf("Empty PlasX contig ID at %s:%d", path, i + 1L))
+    score <- suppressWarnings(as.numeric(dt$score[i]))
+    if (!is.finite(score) || score < 0 || score > 1)
+      die(sprintf("Invalid PlasX score %s at %s:%d: expected a finite probability in [0,1]",
+                  py_repr(dt$score[i]), path, i + 1L))
+    out$score[[cid]] <- score
+    out$is_plasmid[[cid]] <- score > 0.5
+  }
+  out
+}
+
+check_unique_ids <- function(ids, path, kind) {
+  nonempty <- which(!is.na(ids) & nzchar(ids))
+  repeated <- anyDuplicated(ids[nonempty])
+  if (repeated) {
+    second <- nonempty[repeated]
+    first <- match(ids[second], ids)
+    die(sprintf("Duplicate ID '%s' in %s: %s record %d; first seen at record %d",
+                ids[second], path, kind, second, first))
+  }
+}
+
 parse_generic_predictions <- function(path, tool_id) {
   dt <- sniff_table(path)
   out <- empty_calls()
@@ -151,6 +185,7 @@ parse_generic_predictions <- function(path, tool_id) {
   if (is.null(id_col)) id_col <- fields[1L]
   score_col <- pick_column(fields, SCORE_COLUMNS)
   class_col <- pick_column(fields, CLASS_COLUMNS)
+  check_unique_ids(trimws(dt[[id_col]]), path, "prediction data")
   for (i in seq_len(nrow(dt))) {
     cid <- trimws(dt[[id_col]][i])
     if (!nzchar(cid)) next
@@ -174,6 +209,7 @@ parse_genomad <- function(path) {
   id_col <- pick_column(fields, "seq_name")
   if (is.null(id_col)) id_col <- fields[1L]
   score_col <- pick_column(fields, "plasmid_score")
+  check_unique_ids(trimws(dt[[id_col]]), path, "geNomad data")
   for (i in seq_len(nrow(dt))) {
     cid <- trimws(dt[[id_col]][i])
     if (!nzchar(cid)) next
@@ -185,10 +221,16 @@ parse_genomad <- function(path) {
 }
 
 read_fasta_dss <- function(path) {
-  tryCatch(
+  dss <- tryCatch(
     readDNAStringSet(path),
     error = function(e) die(paste0("Cannot read FASTA ", path, ": ", conditionMessage(e)))
   )
+  check_unique_ids(fasta_ids(dss), path, "FASTA")
+  empty <- which(width(dss) == 0L)
+  if (length(empty) > 0L)
+    die(sprintf("Empty FASTA sequence '%s' in %s record %d",
+                fasta_ids(dss)[empty[1L]], path, empty[1L]))
+  dss
 }
 
 fasta_ids <- function(dss) {
@@ -198,31 +240,37 @@ fasta_ids <- function(dss) {
   }, character(1), USE.NAMES = FALSE)
 }
 
-parse_scapp <- function(path) {
-  dss <- read_fasta_dss(path)
-  ids <- fasta_ids(dss)
-  list(score = as.list(stats::setNames(rep(1.0, length(ids)), ids)),
-       is_plasmid = as.list(stats::setNames(rep(TRUE, length(ids)), ids)))
-}
-
 identify_extra <- function(path) {
   name <- tolower(basename(path))
-  if (grepl(".plasme.", name, fixed = TRUE)) return("plasme")
-  if (grepl(".plasx.", name, fixed = TRUE)) return("plasx")
-  if (grepl(".platon.", name, fixed = TRUE)) return("platon")
-  if (grepl(".scapp.", name, fixed = TRUE) || grepl("confident_cycs", name, fixed = TRUE)) return("scapp")
+  # Sample IDs may contain tool names; only the producer's final suffix identifies it.
+  if (grepl("\\.plasme\\.(tsv|csv)(\\.gz)?$", name)) return("plasme")
+  if (grepl("\\.plasx\\.(tsv|csv)(\\.gz)?$", name)) return("plasx")
+  if (grepl("\\.platon\\.(tsv|csv)(\\.gz)?$", name)) return("platon")
+  if (grepl("\\.scapp\\.(fa|fna|fasta)(\\.gz)?$", name) ||
+      grepl("(^|[._-])confident_cycs\\.(fa|fna|fasta)(\\.gz)?$", name))
+    die(paste0("SCAPP support has been removed; unsupported prediction source: ", path))
   NULL
 }
 
 parse_weights <- function(spec) {
   weights <- list()
-  if (is.null(spec)) return(weights)
+  if (is.null(spec) || !nzchar(trimws(spec))) return(weights)
+  if (grepl("(^|,)[[:space:]]*(,|$)", spec))
+    die(paste0("Invalid consensus weights: empty item in ", py_repr(spec)))
   for (item in strsplit(spec, ",", fixed = TRUE)[[1L]]) {
-    if (grepl(":", item, fixed = TRUE)) {
-      key <- trimws(sub(":.*$", "", item))
-      val <- suppressWarnings(as.numeric(trimws(sub("^[^:]*:", "", item))))
-      if (!is.na(val)) weights[[key]] <- val
-    }
+    parts <- strsplit(item, ":", fixed = TRUE)[[1L]]
+    if (count_char(item, ":") != 1L || length(parts) != 2L)
+      die(paste0("Invalid consensus weights: expected tool:value in ", py_repr(item)))
+    key <- trimws(parts[1L])
+    if (key == "scapp") die("SCAPP support has been removed; remove scapp from consensus weights")
+    if (!key %in% ENSEMBLE_TOOLS)
+      die(paste0("Invalid consensus weights: unknown tool in ", py_repr(item)))
+    if (key %in% names(weights))
+      die(paste0("Invalid consensus weights: duplicate tool in ", py_repr(item)))
+    val <- suppressWarnings(as.numeric(trimws(parts[2L])))
+    if (!is.finite(val) || val < 0)
+      die(paste0("Invalid consensus weights: expected finite nonnegative value in ", py_repr(item)))
+    weights[[key]] <- val
   }
   weights
 }
@@ -257,11 +305,14 @@ main <- function() {
     method = list(mode = "single", default = "weighted_vote"),
     weights = list(mode = "single", default = DEFAULT_WEIGHTS),
     sample_id = list(mode = "single", default = ""),
+    include_all_contigs = list(mode = "single", default = "false"),
     out_fasta = list(mode = "single", required = TRUE, default = NULL),
     out_predictions = list(mode = "single", required = TRUE, default = NULL),
     out_consensus = list(mode = "single", required = TRUE, default = NULL)
   )
   args <- parse_cli(commandArgs(trailingOnly = TRUE), spec)
+  if (!(args$include_all_contigs %in% c("true", "false")))
+    die("--include-all-contigs must be true or false")
 
   method <- args$method
   if (!(method %in% METHOD_CHOICES)) {
@@ -281,22 +332,38 @@ main <- function() {
 
   calls <- list()
   calls[["genomad"]] <- parse_genomad(args$genomad_summary)
+  sources <- list(genomad = args$genomad_summary)
   for (extra in args$extra) {
     tool <- identify_extra(extra)
     if (is.null(tool)) {
       cat(paste0("warning: unrecognized extra prediction file ", extra, "\n"), file = stderr())
       next
     }
-    if (tool == "scapp") {
-      calls[[tool]] <- parse_scapp(extra)
-    } else {
-      calls[[tool]] <- parse_generic_predictions(extra, tool)
+    if (tool %in% names(sources)) {
+      die(sprintf("Duplicate prediction source for tool %s: %s; first source %s",
+                  tool, extra, sources[[tool]]))
     }
+    sources[[tool]] <- extra
+    calls[[tool]] <- if (tool == "plasx") parse_plasx(extra) else parse_generic_predictions(extra, tool)
+  }
+
+  for (tool in names(calls)) {
+    unresolved <- setdiff(names(calls[[tool]]$score), ids)
+    if (length(unresolved) > 0L)
+      die(sprintf("Unresolved prediction ID '%s' from %s at %s: not found in assembly sequences",
+                  unresolved[1L], tool, sources[[tool]]))
   }
 
   weights <- parse_weights(args$weights)
   active <- names(calls)
+  total_weight <- sum(vapply(active, function(t) weight_of(weights, t), numeric(1)))
+  if (method == "weighted_vote" && (!is.finite(total_weight) || total_weight <= 0))
+    die(sprintf("Invalid consensus weights: active total must be finite and positive for weighted_vote (active: %s; specification: %s)",
+                paste(active, collapse = ","), py_repr(args$weights)))
   all_contigs <- unique(unlist(lapply(calls, function(c) names(c$score)), use.names = FALSE))
+  # The graph-node caller separately verifies the complete geNomad assessment
+  # domain. Apply the same voting rule to every input node in that branch.
+  if (args$include_all_contigs == "true") all_contigs <- ids
   if (is.null(all_contigs)) all_contigs <- character(0)
   all_contigs <- sort(all_contigs, method = "radix")
 
@@ -312,7 +379,7 @@ main <- function() {
       info <- contig_info[[cid]]
       pred_rows[[length(pred_rows) + 1L]] <- c(
         cid, args$sample_id, tool,
-        sprintf("%.4g", sc[[cid]]),
+        sprintf(if (tool == "plasx") "%.17g" else "%.4g", sc[[cid]]),
         if (isTRUE(calls[[tool]]$is_plasmid[[cid]])) "plasmid" else "chromosome",
         fmt_len(info), fmt_gc(info)
       )
@@ -322,7 +389,6 @@ main <- function() {
                                      "classification", "length", "gc_content"))
   write_tsv(pred_df, args$out_predictions)
 
-  total_weight <- sum(vapply(active, function(t) weight_of(weights, t), numeric(1)))
   n_active <- length(active)
 
   cons_rows <- list()
@@ -349,7 +415,7 @@ main <- function() {
     info <- contig_info[[cid]]
     # plasmidEC-style ensemble cells: every active tool reports either
     # "plasmid" or "chromosome" (for positive-only outputs such as
-    # geNomad/Platon/SCAPP, absence of a call is a chromosome call);
+    # geNomad/Platon, absence of a call is a chromosome call);
     # disabled tools keep "NA".
     ensemble <- vapply(ENSEMBLE_TOOLS, function(t) {
       if (!(t %in% names(calls))) return("NA")

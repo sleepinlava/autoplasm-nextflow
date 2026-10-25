@@ -1,3 +1,4 @@
+include { reportEvidence; reportSamples } from '../lib/report_events'
 /*
  * Plasmid abundance subworkflow (stage 10 abundance): map reads to
  * the consensus plasmid contigs and estimate per-contig abundance with
@@ -31,19 +32,25 @@ workflow PLASMID_ABUNDANCE {
     hybrid         // val: boolean — emit short/long labelled outputs
 
     main:
+    ch_report_events = Channel.empty()
     // ---- short-read chain: bowtie2 index build + align (sorted BAM) ----
     ch_short_in = ch_plasmids.join(ch_short_reads)
         .map { meta, contigs, r1, r2 ->
             hybrid ? tuple(meta + [suffix: '.short'], contigs, r1, r2) : tuple(meta, contigs, r1, r2)
         }
     BOWTIE2_BUILD_ABUNDANCE(ch_short_in.map { meta, contigs, _r1, _r2 -> tuple(meta, contigs) })
+    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_BUILD_ABUNDANCE.out], '10_abundance', 'BOWTIE2_BUILD_ABUNDANCE'))
+    // The asynchronous index must join its reads/reference before fan-out.
+    ch_short_matched = ch_short_in.join(BOWTIE2_BUILD_ABUNDANCE.out.index,
+        failOnDuplicate: true, failOnMismatch: true)
     BOWTIE2_ALIGN_ABUNDANCE(
-        ch_short_in.map { meta, _contigs, r1, r2 -> tuple(meta, [r1, r2]) },
-        BOWTIE2_BUILD_ABUNDANCE.out.index,
-        ch_short_in.map { meta, contigs, _r1, _r2 -> tuple(meta, contigs) },
+        ch_short_matched.map { meta, _contigs, r1, r2, _index -> tuple(meta, [r1, r2]) },
+        ch_short_matched.map { meta, _contigs, _r1, _r2, index -> tuple(meta, index) },
+        ch_short_matched.map { meta, contigs, _r1, _r2, _index -> tuple(meta, contigs) },
         false, // save_unaligned
         true   // sort_bam
     )
+    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_ALIGN_ABUNDANCE.out], '10_abundance', 'BOWTIE2_ALIGN_ABUNDANCE'))
     ch_short_abund = COVERM_ABUNDANCE(
         BOWTIE2_ALIGN_ABUNDANCE.out.bam,
         [[], []],
@@ -51,6 +58,7 @@ workflow PLASMID_ABUNDANCE {
         false, // interleaved
         false  // enable_bam_output
     ).coverage.map { meta, tsv -> tuple(stripChainMeta(meta), tsv) }
+    ch_report_events = ch_report_events.mix(reportEvidence([channels: COVERM_ABUNDANCE.out], '10_abundance', 'COVERM_ABUNDANCE'))
 
     // ---- long-read chain: minimap2 (sorted BAM via samtools sort pipe) ----
     ch_long_in = ch_plasmids.join(ch_long_reads)
@@ -63,6 +71,7 @@ workflow PLASMID_ABUNDANCE {
         false, // cigar_paf_format
         false  // cigar_bam
     )
+    ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_ABUNDANCE.out], '10_abundance', 'MINIMAP2_ALIGN_ABUNDANCE'))
     ch_long_abund = COVERM_ABUNDANCE_LONG(
         MINIMAP2_ALIGN_ABUNDANCE.out.bam,
         [[], []],
@@ -70,8 +79,10 @@ workflow PLASMID_ABUNDANCE {
         false, // interleaved
         false  // enable_bam_output
     ).coverage.map { meta, tsv -> tuple(stripChainMeta(meta), tsv) }
+    ch_report_events = ch_report_events.mix(reportEvidence([channels: COVERM_ABUNDANCE_LONG.out], '10_abundance', 'COVERM_ABUNDANCE_LONG'))
 
     emit:
+    report_events = ch_report_events
     short_abundance = ch_short_abund  // tuple(meta, tsv); empty on long-only platforms
     long_abundance  = ch_long_abund   // tuple(meta, tsv); empty on illumina
 }

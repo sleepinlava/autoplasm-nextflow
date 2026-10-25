@@ -8,7 +8,7 @@ process MACSYFINDER_SEARCH {
         'quay.io/biocontainers/macsyfinder:2.1.6--pyhdfd78af_0' }"
 
     input:
-    tuple val(meta), path(proteins)
+    tuple val(meta), path(proteins), path(topology)
     path models
     val model_names
 
@@ -29,7 +29,9 @@ process MACSYFINDER_SEARCH {
     def args = task.ext.args ?: ''
     prefix = task.ext.prefix ?: "${meta.id}"
     def model_arg = model_names ? "--models ${model_names}" : ""
+    def topology_arg = topology ? "--topology-file ${topology}" : ""
     """
+    set -o pipefail
     macsyfinder \\
         --sequence-db ${proteins} \\
         --models-dir ${models} \\
@@ -37,6 +39,7 @@ process MACSYFINDER_SEARCH {
         --out-dir ${prefix} \\
         --worker ${task.cpus} \\
         ${args} \\
+        ${topology_arg} \\
         2>| >( tee macsyfinder.err >&2 ) \\
         | tee macsyfinder.out
 

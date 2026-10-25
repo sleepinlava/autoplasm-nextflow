@@ -13,13 +13,25 @@ process NETWORK_PREPARE {
     publishDir "${params.outdir}/12_network", mode: params.publish_dir_mode
 
     input:
-    path abundance_table
+    path(abundance_table, stageAs: 'abundance/*')
+    path(sample_metadata, stageAs: 'cohort/*')
+
+    path code_assets, stageAs: 'source_assets/*'
 
     output:
     path "fastspar_input.tsv", emit: network_input
+    path "network_status.json", emit: status
+    path "fastspar_eligible.tsv", optional: true, emit: eligible_input
 
     script:
+    def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+    def metadata_arg = sample_metadata ? "--metadata ${quote.call(sample_metadata)}" : ''
+    def minimum_samples = params.network_min_samples == null ? 20 : params.network_min_samples
     """
-    network_prepare.R --abundance ${abundance_table} --out fastspar_input.tsv
+    mkdir -p analysis_code
+    cp -L source_assets/* analysis_code/
+    Rscript analysis_code/network_prepare.R --abundance ${abundance_table} ${metadata_arg} \\
+      --min-samples ${quote.call(minimum_samples)} --out fastspar_input.tsv \\
+      --out-status network_status.json --eligible-out fastspar_eligible.tsv
     """
 }

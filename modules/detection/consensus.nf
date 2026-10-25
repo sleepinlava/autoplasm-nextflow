@@ -23,6 +23,7 @@ process PLASMID_CONSENSUS {
 
     script:
     def extras_args = extras ? (extras in List ? extras.collect { it.toString() } : [extras.toString()]).collect { "--extra ${it}" }.join(' ') : ''
+    def domain_args = meta.analysis_entity == 'gplas_graph_node' ? '--include-all-contigs true' : ''
     """
     plasmid_consensus.R \\
         --assembly ${assembly} \\
@@ -30,6 +31,7 @@ process PLASMID_CONSENSUS {
         ${extras_args} \\
         --method ${params.consensus_method} \\
         --weights "${params.consensus_weights}" \\
+        ${domain_args} \\
         --sample-id ${meta.id} \\
         --out-fasta ${meta.id}.plasmid_contigs.fasta \\
         --out-predictions ${meta.id}.plasmid_predictions.tsv \\

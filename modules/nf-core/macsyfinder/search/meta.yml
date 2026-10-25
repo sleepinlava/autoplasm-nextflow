@@ -35,6 +35,14 @@ input:
         pattern: "*.{fasta,faa,fa}"
         ontologies:
           - edam: "http://edamontology.org/format_1929"
+    - topology:
+        type: file
+        description: |
+          Optional per-replicon topology file, with lines `replicon: circular`
+          or `replicon: linear`. Pass [] to use the command-line default.
+          Staged in the same sample tuple as the protein sequences.
+        pattern: "*.txt"
+        ontologies: []
   - models:
       type: directory
       description: Directory containing MacSyFinder model(s)

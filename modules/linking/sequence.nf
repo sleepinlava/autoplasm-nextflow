@@ -1,5 +1,5 @@
 /*
- * Sequence similarity host-plasmid linking (TETRA tetranucleotide z-scores;
+ * Sequence composition scoring (uncalibrated host links disabled) (TETRA tetranucleotide z-scores;
  * pipeline step: host_plasmid_link_sequence, implemented by
  * bin/sequence_similarity_link.R). Reads the actual staged MAG
  * directory; GTDB-Tk taxonomy is attached when available. Missing optional
@@ -15,10 +15,12 @@ process LINK_SEQUENCE {
     publishDir "${params.outdir}/07_host_prediction/linking/sequence", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(plasmid_contigs), path(mag_bins, stageAs: 'mag_bins/*'), path(host_taxonomy)
+    tuple val(meta), path(plasmid_contigs), path(mag_bins, stageAs: 'mag_bins/*'), path(host_taxonomy, stageAs: 'host_taxonomy??/*')
 
     output:
     tuple val(meta), path("${meta.id}.sequence_links.tsv"), emit: links
+    tuple val(meta), path("${meta.id}.sequence_scores.tsv"), emit: scores
+    tuple val(meta), path("${meta.id}.sequence_method.json"), emit: method
 
     script:
     def binPaths = (mag_bins in List ? mag_bins : (mag_bins ? [mag_bins] : []))
@@ -37,7 +39,8 @@ process LINK_SEQUENCE {
         --plasmid-contigs ${shellQuote.call(plasmid_contigs)} \\
         ${binsArg} ${taxArg} \\
         --sample-id ${shellQuote.call(meta.id)} \\
-        --min-similarity ${params.link_min_similarity} \\
+        --out-scores ${shellQuote.call("${meta.id}.sequence_scores.tsv")} \\
+        --out-profile-status ${shellQuote.call("${meta.id}.sequence_method.json")} \\
         --out ${shellQuote.call("${meta.id}.sequence_links.tsv")}
     """
 }

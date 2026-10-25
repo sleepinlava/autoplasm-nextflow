@@ -31,6 +31,10 @@
 
 suppressPackageStartupMessages(library(data.table))
 
+# Load the shared identity contract alongside the executable, including PATH invocation.
+script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1L])
+source(file.path(dirname(normalizePath(script_file)), "statistics_input_contract.R"))
+
 die <- function(msg) {
   cat(msg, "\n", file = stderr(), sep = "")
   quit(save = "no", status = 2)
@@ -115,26 +119,40 @@ spec <- list(
   out = list(required = TRUE)
 )
 opts <- parse_args(commandArgs(trailingOnly = TRUE), spec)
-min_rep <- as.integer(opts[["min-replicates"]])
+min_rep <- suppressWarnings(as.numeric(opts[["min-replicates"]]))
+if (!is.finite(min_rep) || min_rep < 1 || min_rep != floor(min_rep) ||
+    min_rep > .Machine$integer.max)
+  die("--min-replicates must be a positive integer within R integer range")
 min_prev <- suppressWarnings(as.numeric(opts[["min-prevalence"]]))
 if (is.na(min_prev) || min_prev < 0 || min_prev > 1) {
   die(paste0("argument --min-prevalence: invalid value: '", opts[["min-prevalence"]],
              "' (expected a number between 0 and 1)"))
 }
 
-ab <- fread(opts$abundance)
+ab <- fread(opts$abundance, colClasses = c(sample_id = "character", contig_id = "character"),
+            na.strings = NULL)
+required <- c("sample_id", "contig_id", "coverage")
+if (!all(required %in% names(ab)))
+  die(paste0(opts$abundance, ": missing required columns: ", paste(setdiff(required, names(ab)), collapse = ", ")))
 cov <- suppressWarnings(as.numeric(ab$coverage))
-cov[is.na(cov)] <- 0
+bad <- which(!is.finite(cov) | cov < 0)
+if (length(bad)) {
+  i <- bad[1L]
+  die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=coverage value='%s'; expected finite nonnegative measurement",
+              opts$abundance, i + 1L, ab$sample_id[i], ab$contig_id[i], ab$coverage[i]))
+}
 ab[, coverage := cov]
 
+meta <- read.delim(opts$metadata, colClasses = c(sample_id = "character", group = "character"),
+                   check.names = FALSE, stringsAsFactors = FALSE, na.strings = NULL)
+statistics_input_contract(ab, meta, "contig_id", opts$abundance)
 by_sample <- split(ab, ab$sample_id)
-
-meta <- fread(opts$metadata)
+if ("group" %in% names(meta)) meta$group[!is.na(meta$group) & meta$group == "NA"] <- NA
 grp_samples <- list()
 if (nrow(meta) > 0) {
   sid <- as.character(meta$sample_id)
   grp <- as.character(meta$group)
-  ok <- nzchar(sid) & nzchar(grp)
+  ok <- !is.na(sid) & nzchar(sid) & !is.na(grp) & nzchar(grp)
   for (i in which(ok)) grp_samples[[grp[i]]] <- c(grp_samples[[grp[i]]], sid[i])
 }
 eligible <- grp_samples[vapply(grp_samples, function(s)
@@ -170,8 +188,7 @@ if (length(egroups) >= 2) {
                     numeric(1))
         b <- vapply(s2, function(s) by_sample[[s]][by_sample[[s]]$contig_id == cid, coverage][1],
                     numeric(1))
-        a[is.na(a)] <- 0
-        b[is.na(b)] <- 0
+        if (anyNA(a) || anyNA(b)) die("incomplete sample-feature rectangle; missing measurements are not zero")
         ma <- sum(a) / length(a)
         mb <- sum(b) / length(b)
         log2fc <- log2((ma + PSEUDOCOUNT) / (mb + PSEUDOCOUNT))
@@ -201,6 +218,6 @@ if (length(rows)) {
 }
 setcolorder(out, c("contig_id", "group1", "group2", "log2fc", "pvalue",
                    "padj", "effect_size", "method"))
-fwrite(out, opts$out, sep = "\t", quote = FALSE, na = "")
+fwrite(out, opts$out, sep = "\t", quote = "auto", na = "")
 cat(sprintf("differential abundance: %d test(s), %d eligible group(s)\n",
             nrow(out), length(eligible)))

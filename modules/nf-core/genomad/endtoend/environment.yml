@@ -5,3 +5,7 @@ channels:
   - bioconda
 dependencies:
   - bioconda::genomad=1.12.0
+  # Local compatibility pins: Click8.5 introspection reports rich-click's
+  # version instead of geNomad's version with rich-click1.9.9.
+  - conda-forge::click=8.1.8
+  - conda-forge::rich-click=1.8.3

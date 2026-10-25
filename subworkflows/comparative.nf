@@ -1,3 +1,6 @@
+include { reportEvidence; reportSamples } from '../lib/report_events'
+include { selectedTools } from '../lib/tool_selection'
+
 /*
  * Comparative genomics subworkflow (stage 09 comparative_genomics):
  * catalog preparation (bin/plasmid_catalog_prepare.R) + MMseqs2 cross-sample
@@ -22,18 +25,21 @@ workflow COMPARATIVE {
     ch_bakta_dir // tuple(meta, bakta out dir); may be empty
 
     main:
-    if (params.comparative_tools.contains('mmseqs2')) {
+    ch_report_events = Channel.empty()
+    if (selectedTools(params.comparative_tools).contains('mmseqs2')) {
         ch_catalog_files = ch_plasmids
             .map { meta, fasta -> fasta }
             .collect()
             .filter { files -> !files.isEmpty() }
         PLASMID_CATALOG_PREPARE(ch_catalog_files)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMID_CATALOG_PREPARE.out], '09_comparative_genomics', 'PLASMID_CATALOG_PREPARE'))
         // The nf-core module takes a meta-tagged sequence channel; the meta id
         // doubles as the easy-cluster output prefix, so published file names
         // stay plasmid_catalog_cluster.tsv / plasmid_catalog_rep_seq.fasta.
         MMSEQS2(PLASMID_CATALOG_PREPARE.out.combined.map { fasta -> tuple([id: 'plasmid_catalog'], fasta) })
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: MMSEQS2.out], '09_comparative_genomics', 'MMSEQS2'))
     }
-    if (params.comparative_optional_tools.contains('blast')) {
+    if (selectedTools(params.comparative_optional_tools).contains('blast')) {
         BLASTN(
             ch_plasmids,
             Channel.value(tuple([id: 'blast_db'], file(params.blast_db, checkIfExists: true))),
@@ -41,11 +47,16 @@ workflow COMPARATIVE {
             [],     // taxids
             false   // negative_tax
         )
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: BLASTN.out], '09_comparative_genomics', 'BLASTN'))
     }
-    if (params.comparative_optional_tools.contains('mummer')) {
+    if (selectedTools(params.comparative_optional_tools).contains('mummer')) {
         MUMMER(ch_plasmids, Channel.value(file(params.reference_plasmids, checkIfExists: true)))
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: MUMMER.out], '09_comparative_genomics', 'MUMMER'))
     }
-    if (params.comparative_optional_tools.contains('clinker')) {
+    if (selectedTools(params.comparative_optional_tools).contains('clinker')) {
         CLINKER(ch_bakta_dir)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: CLINKER.out], '09_comparative_genomics', 'CLINKER'))
     }
+    emit:
+    report_events = ch_report_events
 }

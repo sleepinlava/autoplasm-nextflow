@@ -1,7 +1,8 @@
 /*
  * Plasmid circularity / terminal-overlap detection (pipeline step:
  * plasmid_structure, implemented by bin/plasmid_structure.R with the
- * geNomad/CheckV terminal-repeat convention).
+ * candidate circularity from explicit headers or direct terminal repeats).
+ * Inverted repeats are retained as structural evidence, not circular calls.
  */
 process PLASMID_STRUCTURE {
     tag { meta.id }

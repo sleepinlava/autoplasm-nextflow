@@ -1,4 +1,5 @@
 process GTDBTK_CLASSIFYWF {
+    cache 'deep'
     tag "${meta.id}"
     label 'process_high_memory'
 
@@ -11,6 +12,8 @@ process GTDBTK_CLASSIFYWF {
     tuple val(meta)   , path("bins/*")
     tuple val(db_name), path(db)
     val use_pplacer_scratch_dir
+    // Explicit regular files: helper changes participate in deep caching.
+    path(autoplasm_helper_0, stageAs: 'normalize_gtdb_bins.py')
 
     output:
     tuple val(meta), path("${prefix}")                               , emit: gtdb_outdir
@@ -23,6 +26,7 @@ process GTDBTK_CLASSIFYWF {
     tuple val(meta), path("${prefix}/identify/*.failed_genomes.tsv") , emit: failed     , optional: true
     tuple val(meta), path("${prefix}/${prefix}.log")                 , emit: log
     tuple val(meta), path("${prefix}/${prefix}.warnings.log")        , emit: warnings
+    tuple val(meta), path("${prefix}.genome_inputs.json")            , emit: genome_inputs
     tuple val("${task.process}"), val('gtdbtk'), eval("gtdbtk --version 2>&1 | grep -Eo '[0-9]+(\\.[0-9]+)+' | head -1") , topic: versions, emit: versions_gtdbtk
     tuple val("${task.process}"), val('gtdb_db'), eval('grep VERSION_DATA \$GTDBTK_DATA_PATH/metadata/metadata.txt | sed "s/VERSION_DATA=//"'), topic: versions, emit: versions_gtdbtk_db
 
@@ -36,13 +40,19 @@ process GTDBTK_CLASSIFYWF {
     """
     export GTDBTK_DATA_PATH="\$(find -L ${db} -name 'metadata' -type d -exec dirname {} \\;)"
 
+    python3 normalize_gtdb_bins.py \\
+        --input-dir bins \\
+        --output-dir gtdbtk_input \\
+        --manifest "${prefix}.genome_inputs.json"
+
     if [ "${pplacer_scratch}" != "" ] ; then
         mkdir pplacer_tmp
     fi
 
     gtdbtk classify_wf \\
         ${args} \\
-        --genome_dir bins \\
+        --genome_dir gtdbtk_input \\
+        --extension fna \\
         --prefix "${prefix}" \\
         --out_dir ${prefix} \\
         --cpus ${task.cpus} \\
@@ -78,5 +88,6 @@ process GTDBTK_CLASSIFYWF {
     touch ${prefix}/${prefix}.log
     touch ${prefix}/${prefix}.warnings.log
     touch ${prefix}/${prefix}.failed_genomes.tsv
+    echo '{"status":"stub_not_validated"}' > "${prefix}.genome_inputs.json"
     """
 }

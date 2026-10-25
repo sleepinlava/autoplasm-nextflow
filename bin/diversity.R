@@ -29,6 +29,10 @@ suppressPackageStartupMessages({
   library(data.table)
 })
 
+# Load the shared identity contract alongside the executable, including PATH invocation.
+script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1L])
+source(file.path(dirname(normalizePath(script_file)), "statistics_input_contract.R"))
+
 die <- function(msg) {
   cat(msg, "\n", file = stderr(), sep = "")
   quit(save = "no", status = 2)
@@ -88,7 +92,8 @@ spec <- list(
   metadata = list(required = TRUE),
   "out-metrics" = list(required = TRUE),
   "out-beta" = list(required = TRUE),
-  "beta-normalization" = list(default = "none")
+  "beta-normalization" = list(default = "none"),
+  "out-status" = list(required = FALSE)
 )
 opts <- parse_args(commandArgs(trailingOnly = TRUE), spec)
 beta_norm <- opts[["beta-normalization"]]
@@ -97,33 +102,52 @@ if (!(beta_norm %in% c("none", "tss"))) {
              "' (choose from 'none', 'tss')"))
 }
 
-ab <- fread(opts$abundance)
+ab <- fread(opts$abundance, colClasses = c(sample_id = "character", contig_id = "character"),
+            na.strings = NULL)
+required <- c("sample_id", "contig_id", "coverage")
+if (!all(required %in% names(ab)))
+  die(paste0(opts$abundance, ": missing required columns: ", paste(setdiff(required, names(ab)), collapse = ", ")))
 cov <- suppressWarnings(as.numeric(ab$coverage))
-cov[is.na(cov)] <- 0
+bad <- which(!is.finite(cov) | cov < 0)
+if (length(bad)) {
+  i <- bad[1L]
+  die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=coverage value='%s'; expected finite nonnegative measurement",
+              opts$abundance, i + 1L, ab$sample_id[i], ab$contig_id[i], ab$coverage[i]))
+}
 ab[, coverage := cov]
 
-meta <- fread(opts$metadata)
-groups <- character(0)
-if (nrow(meta) > 0) {
-  groups <- stats::setNames(meta$group, meta$sample_id)
-  # Python dict semantics: a repeated sample_id keeps the last row's group
-  groups <- groups[!duplicated(names(groups), fromLast = TRUE)]
+meta <- read.delim(opts$metadata, colClasses = c(sample_id = "character", group = "character"),
+                   check.names = FALSE, stringsAsFactors = FALSE, na.strings = NULL)
+# Preserve the existing missing-group policy without decoding identifier tokens.
+if ("group" %in% names(meta)) meta$group[!is.na(meta$group) & meta$group == "NA"] <- NA
+identity <- statistics_input_contract(ab, meta, "contig_id", opts$abundance)
+groups <- if ("group" %in% names(meta)) stats::setNames(meta$group, meta$sample_id) else character(0)
+samples <- identity$samples
+contigs <- identity$features
+if (length(contigs)) {
+  wide <- dcast(ab, contig_id ~ sample_id, value.var = "coverage")
+  setorder(wide, contig_id)
+  mat <- as.matrix(wide[, -1, with = FALSE])
+  rownames(mat) <- wide$contig_id
+  mat <- mat[contigs, samples, drop = FALSE]
+} else {
+  mat <- matrix(0, nrow=0L, ncol=length(samples), dimnames=list(character(), samples))
 }
 
-samples <- sort(unique(ab$sample_id))
-contigs <- sort(unique(ab$contig_id))
-
-wide <- dcast(ab, contig_id ~ sample_id, value.var = "coverage",
-              fun.aggregate = function(x) x[length(x)], fill = 0)
-setorder(wide, contig_id)
-mat <- as.matrix(wide[, -1, with = FALSE])
-rownames(mat) <- wide$contig_id
-mat <- mat[contigs, samples, drop = FALSE]
-
 site_mat <- t(mat)
-rich <- specnumber(site_mat)
-sh <- diversity(site_mat, index = "shannon")
-simp <- diversity(site_mat, index = "simpson")
+# Explicit sample names are essential: vegan may simplify a one-column matrix
+# to an unnamed scalar/vector. Empty samples have alpha0 by existing policy.
+rich <- stats::setNames(rowSums(site_mat > 0), samples)
+sh <- simp <- stats::setNames(numeric(length(samples)), samples)
+nonempty <- rowSums(site_mat) > 0
+if (any(nonempty)) {
+  # One-column matrices are treated as one vector by vegan, pooling samples.
+  # Evaluate each community row explicitly, including the one-feature case.
+  sh[nonempty] <- vapply(which(nonempty), function(i)
+    diversity(as.numeric(site_mat[i, ]), index="shannon"), numeric(1))
+  simp[nonempty] <- vapply(which(nonempty), function(i)
+    diversity(as.numeric(site_mat[i, ]), index="simpson"), numeric(1))
+}
 pielou <- vapply(seq_along(samples), function(i) {
   s_i <- rich[i]
   h_i <- sh[i]
@@ -141,14 +165,16 @@ metrics <- rbindlist(lapply(samples, function(s) data.table(
 )))
 metrics[is.na(group), group := ""]
 
-fwrite(metrics, opts[["out-metrics"]], sep = "\t", quote = FALSE, na = "")
+fwrite(metrics, opts[["out-metrics"]], sep = "\t", quote = "auto", na = "")
 
 beta_mat <- site_mat
 if (beta_norm == "tss") {
   rs <- rowSums(beta_mat)
   beta_mat <- beta_mat / ifelse(rs > 0, rs, 1)
 }
-if (nrow(beta_mat) >= 2) {
+if (ncol(beta_mat) == 0) {
+  bd <- matrix(0, nrow=length(samples), ncol=length(samples), dimnames=list(samples, samples))
+} else if (nrow(beta_mat) >= 2) {
   bd <- suppressWarnings(as.matrix(vegdist(beta_mat, method = "bray")))
   n_coerced <- sum(is.nan(bd[upper.tri(bd)]))
   if (n_coerced > 0) {
@@ -165,3 +191,10 @@ beta <- data.frame(sample_id = rownames(bd), bd, check.names = FALSE,
 for (j in seq_len(ncol(bd))) beta[[j + 1]] <- sprintf("%.6f", bd[, j])
 write.table(beta, file = opts[["out-beta"]], sep = "\t", quote = FALSE,
             row.names = FALSE, col.names = c("sample_id", colnames(bd)))
+
+if (!is.null(opts[["out-status"]])) {
+  jsonlite::write_json(list(status=if (!length(contigs)) "zero_feature_input" else if (all(rowSums(site_mat)==0)) "measured_all_zero" else "measured",
+    sample_ids=as.list(samples), feature_count=length(contigs), zero_samples=as.list(samples[rowSums(site_mat)==0]),
+    alpha_empty_policy="richness/shannon/simpson/pielou0", beta_zero_pair_policy="Bray-Curtis undefined for two zeros; compatibility convention0, not measured similarity",
+    beta_normalization=beta_norm), opts[["out-status"]], auto_unbox=TRUE, pretty=TRUE)
+}

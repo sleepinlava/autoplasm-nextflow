@@ -8,6 +8,9 @@
  */
 nextflow.enable.dsl = 2
 
+include { selectedTools } from './lib/tool_selection'
+include { magSelectionError } from './lib/mag_selection'
+
 include { ILLUMINA } from './subworkflows/illumina'
 include { ONT } from './subworkflows/ont'
 include { PACBIO_HIFI } from './subworkflows/pacbio_hifi'
@@ -29,9 +32,53 @@ def optFile(s) {
     return (s != null && s.toString().trim()) ? file(s.toString().trim()) : null
 }
 
-// Accept comma-separated strings from the CLI for list params
-def asList(v) {
-    return (v in List) ? v : (v ? v.toString().split(',').collect { it.trim() } : [])
+// Names are validated independently of platform/DB eligibility. Keep declared
+// capabilities and supported aliases here, including explicitly rejected CRISPR.
+def toolChoices() {
+    return [
+        polishing_tools: ['medaka'],
+        plasmid_detection_tools: ['genomad','plasme','plasx','platon'],
+        plasmid_binning_tools: ['plasmaag','gplas2','mob_recon','mob_suite','recycler'],
+        typing_tools: ['plasmidfinder','mob_typer'],
+        typing_optional_tools: ['copla','conjscan','macsyfinder'],
+        host_prediction_tools: ['metaphlan','kraken2','plasmidhostfinder'],
+        mag_tools: ['metabat2','concoct','semibin','das_tool','checkm2','gtdbtk'],
+        host_linking_methods: ['co_abundance','sequence','long_read'],
+        host_linking_optional_methods: ['crispr','hotspot'],
+        annotation_tools: ['bakta','amrfinderplus','abricate','isescan','integronfinder','prodigal'],
+        annotation_optional_tools: ['prodigal','abricate','rgi','eggnog_mapper','mob_suite'],
+        comparative_tools: ['mmseqs2'],
+        comparative_optional_tools: ['blast','mummer','clinker']
+    ]
+}
+
+def normalizeToolSelections() {
+    toolChoices().each { key, allowed ->
+        def raw = params[key]
+        def values
+        if (raw == null) {
+            values = []
+        } else if (raw instanceof List) {
+            values = raw
+        } else if (raw instanceof CharSequence) {
+            values = raw.toString().trim() ? raw.toString().split(',', -1) as List : []
+        } else {
+            paramError("--${key} must be a list of tool names or a comma-separated string")
+        }
+        values.eachWithIndex { value, index ->
+            if (!(value instanceof CharSequence)) {
+                paramError("--${key} has an invalid tool name at entry ${index + 1}: ${value} (expected a string)")
+            }
+            def name = value.toString().trim()
+            if (name == 'scapp' && (key in ['plasmid_detection_tools','plasmid_binning_tools']))
+                paramError("SCAPP nodes have been removed; remove 'scapp' from --${key}")
+            if (!name) paramError("--${key} has an empty tool name at entry ${index + 1}")
+            if (!allowed.contains(name)) {
+                paramError("--${key} has unknown tool '${name}' (choose from ${allowed})")
+            }
+        }
+        // Consumers normalize their own copied params; do not mutate ParamsMap.
+    }
 }
 
 def col(header, name) {
@@ -53,10 +100,12 @@ def cell(header, row, name) {
 }
 
 def validateParams() {
-    if (params.host_plasmid_linking && params.host_linking_optional_methods.contains('crispr')) {
+    def magError = magSelectionError(params.mag_tools)
+    if (magError) paramError(magError)
+    if (params.host_plasmid_linking && selectedTools(params.host_linking_optional_methods).contains('crispr')) {
         paramError("CRISPR host-plasmid linking is not implemented; remove 'crispr' from --host_linking_optional_methods")
     }
-    if (params.host_plasmid_linking && params.host_linking_optional_methods.contains('hotspot')) {
+    if (params.host_plasmid_linking && selectedTools(params.host_linking_optional_methods).contains('hotspot')) {
         ['hotspot_home', 'hotspot_db', 'hotspot_models'].each { p ->
             if (!params[p]) {
                 paramError("host_linking_optional_methods 'hotspot' requires --${p} (cloned HOTSPOT repo + database/models folders)")
@@ -79,39 +128,97 @@ def validateParams() {
     }
     // Every enabled tool that needs a database must have it configured
     def required = []
-    if (params.plasmid_detection_tools.contains('plasme')) required << ['plasme_db', params.plasme_db]
-    if (params.plasmid_detection_tools.contains('platon')) required << ['platon_db', params.platon_db]
-    if (params.plasmid_detection_tools.contains('plasx')) {
-        required << ['plasx_annotations', params.plasx_annotations]
+    if (selectedTools(params.plasmid_detection_tools).contains('plasme')) {
+        required << ['plasme_db', params.plasme_db]
+        required << ['plasme_dir', params.plasme_dir]
+    }
+    if (selectedTools(params.plasmid_detection_tools).contains('platon')) required << ['platon_db', params.platon_db]
+    if (selectedTools(params.plasmid_binning_tools).contains('gplas2')) required << ['gplas_source', params.gplas_source]
+    if (selectedTools(params.plasmid_binning_tools).contains('plasmaag')) required << ['plasmaag_source', params.plasmaag_source]
+    if (selectedTools(params.plasmid_detection_tools).contains('plasx')) {
+        if (params.plasx_annotations) paramError('--plasx_annotations is retired: PlasX now generates complete annotations for each sample')
+        required << ['plasx_anvio_source', params.plasx_anvio_source]
+        required << ['plasx_source', params.plasx_source]
+        required << ['plasx_cog_db', params.plasx_cog_db]
+        required << ['plasx_pfam_db', params.plasx_pfam_db]
+        required << ['plasx_profiles', params.plasx_profiles]
         required << ['plasx_model', params.plasx_model]
+        if (!(params.plasx_splits.toString() ==~ /[0-9]+/)) paramError('--plasx_splits must be a nonnegative integer')
     }
     // nf-core plasmidfinder / mobsuite-recon use their packaged databases
-    if (params.typing_tools.contains('mob_typer')) required << ['mob_suite_db', params.mob_suite_db]
-    if (params.typing_optional_tools.contains('copla')) {
+    if (selectedTools(params.typing_tools).contains('mob_typer')) required << ['mob_suite_db', params.mob_suite_db]
+    if (selectedTools(params.typing_optional_tools).contains('copla')) {
         required << ['copla_refgraph', params.copla_refgraph]
         required << ['copla_reflist', params.copla_reflist]
+        required << ['copla_dir', params.copla_dir]
+        required << ['copla_macsyfinder_dir', params.copla_macsyfinder_dir]
     }
-    if (params.annotation_tools.contains('bakta')) required << ['bakta_db', params.bakta_db]
-    if (params.annotation_tools.contains('amrfinderplus')) required << ['amrfinderplus_db', params.amrfinderplus_db]
-    if (params.annotation_optional_tools.contains('rgi')) required << ['card_db', params.card_db]
-    if (params.annotation_optional_tools.contains('eggnog_mapper')) required << ['eggnog_db', params.eggnog_db]
-    if (params.host_prediction_tools.contains('metaphlan') && params.platform != 'assembly') {
+    if (selectedTools(params.annotation_tools).contains('bakta')) required << ['bakta_db', params.bakta_db]
+    if (selectedTools(params.annotation_tools).contains('amrfinderplus')) required << ['amrfinderplus_db', params.amrfinderplus_db]
+    if (selectedTools(params.annotation_optional_tools).contains('rgi')) required << ['card_db', params.card_db]
+    if (selectedTools(params.annotation_optional_tools).contains('eggnog_mapper')) required << ['eggnog_db', params.eggnog_db]
+    if (selectedTools(params.host_prediction_tools).contains('metaphlan') && params.platform != 'assembly') {
         required << ['metaphlan_db', params.metaphlan_db]
     }
-    if (params.host_prediction_tools.contains('kraken2')) required << ['kraken2_db', params.kraken2_db]
-    if (params.host_prediction_tools.contains('plasmidhostfinder') && params.platform == 'assembly') {
+    if (selectedTools(params.host_prediction_tools).contains('kraken2')) required << ['kraken2_db', params.kraken2_db]
+    if (selectedTools(params.host_prediction_tools).contains('plasmidhostfinder') && params.platform == 'assembly') {
         required << ['plasmidhostfinder_db', params.plasmidhostfinder_db]
     }
-    if (params.mag_tools.contains('gtdbtk')) required << ['gtdbtk_db', params.gtdbtk_db]
-    if (params.mag_tools.contains('checkm2')) required << ['checkm2_db', params.checkm2_db]
-    if (params.comparative_optional_tools.contains('blast')) required << ['blast_db', params.blast_db]
-    if (params.comparative_optional_tools.contains('mummer')) required << ['reference_plasmids', params.reference_plasmids]
-    if (params.comparative_optional_tools.contains('clinker') && !params.annotation_tools.contains('bakta')) {
+    if (selectedTools(params.mag_tools).contains('gtdbtk')) required << ['gtdbtk_db', params.gtdbtk_db]
+    if (selectedTools(params.mag_tools).contains('checkm2')) required << ['checkm2_db', params.checkm2_db]
+    if (selectedTools(params.comparative_optional_tools).contains('blast')) required << ['blast_db', params.blast_db]
+    if (selectedTools(params.comparative_optional_tools).contains('mummer')) required << ['reference_plasmids', params.reference_plasmids]
+    if (selectedTools(params.comparative_optional_tools).contains('clinker') && !selectedTools(params.annotation_tools).contains('bakta')) {
         paramError("comparative_optional_tools 'clinker' requires annotation_tools 'bakta'")
     }
     required.each { entry ->
         if (!entry[1]) {
             paramError("an enabled tool requires --${entry[0]}")
+        }
+    }
+    if (selectedTools(params.plasmid_detection_tools).contains('plasx')) {
+        ['plasx_anvio_source', 'plasx_source', 'plasx_cog_db', 'plasx_pfam_db', 'plasx_profiles'].each { name ->
+            if (!new File(params[name].toString()).isDirectory()) paramError("--${name} must be a directory")
+        }
+        if (!new File(params.plasx_model.toString()).isFile()) paramError('--plasx_model must be a coefficient table file')
+        ['anvio/__init__.py', 'bin/anvi-gen-contigs-database', 'bin/anvi-export-gene-calls',
+         'bin/anvi-run-ncbi-cogs', 'bin/anvi-run-pfams', 'bin/anvi-export-functions'].each { name ->
+            if (!new File(params.plasx_anvio_source.toString(), name).isFile()) paramError("--plasx_anvio_source missing source file ${name}")
+        }
+        ['plasx/model.py', 'plasx/mmseqs.py', 'plasx/plasx_script.py'].each { name ->
+            if (!new File(params.plasx_source.toString(), name).isFile()) paramError("--plasx_source missing source file ${name}")
+        }
+    }
+    if (selectedTools(params.plasmid_detection_tools).contains('plasme')) {
+        def source = new File(params.plasme_dir.toString())
+        if (!source.isDirectory()) paramError('--plasme_dir must be a source directory')
+        ['PLASMe.py', 'bio_script.py', 'trans_data.py', 'trans_model.py'].each { name ->
+            if (!new File(source, name).isFile()) paramError("--plasme_dir missing source file ${name}")
+        }
+    }
+    if (selectedTools(params.plasmid_binning_tools).contains('plasmaag')) {
+        ['PlasMAAG/__main__.py', 'snakefile.smk', 'snakefile_megahit.smk', 'config/config.yaml'].each { name ->
+            if (!new File(params.plasmaag_source.toString(), name).isFile()) paramError("--plasmaag_source missing fixed source file ${name}")
+        }
+        if (!(params.plasmaag_genomad_splits.toString() ==~ /[0-9]+/)) paramError('--plasmaag_genomad_splits must be a nonnegative integer')
+        if (params.plasmaag_conda_prefix && params.plasmaag_conda_prefix.toString().find(/\s/)) paramError('--plasmaag_conda_prefix must not contain whitespace')
+    }
+    if (selectedTools(params.plasmid_binning_tools).contains('gplas2')) {
+        ['gplas/gplas.py', 'gplas/version.py', 'gplas/snakefiles/otherclassifiers.smk'].each { name ->
+            if (!new File(params.gplas_source.toString(), name).isFile()) paramError("--gplas_source missing fixed source file ${name}")
+        }
+    }
+    if (selectedTools(params.typing_optional_tools).contains('copla')) {
+        def installation = new File(params.copla_dir.toString())
+        if (!installation.isDirectory()) paramError('--copla_dir must be a prepared installation directory')
+        ['bin/copla.py', 'bin/ani.rb'].each { name ->
+            if (!new File(installation, name).isFile()) paramError("--copla_dir missing source file ${name}")
+        }
+        ['MOBscan_171004', 'MacSyFinder_190530/Conjugation', 'PlasmidFinder_190731', 'CARD_201015'].each { name ->
+            if (!new File(installation, 'databases/' + name).isDirectory()) paramError("--copla_dir missing database directory ${name}")
+        }
+        if (!new File(params.copla_macsyfinder_dir.toString(), 'bin/macsyfinder').isFile()) {
+            paramError('--copla_macsyfinder_dir missing bin/macsyfinder')
         }
     }
     if (!['megahit', 'metaspades'].contains(params.short_read_assembler)) {
@@ -120,17 +227,23 @@ def validateParams() {
     if (!['opera_ms', 'hybridspades'].contains(params.hybrid_assembler)) {
         paramError("hybrid_assembler must be opera_ms or hybridspades")
     }
+    if (selectedTools(params.plasmid_binning_tools).contains('plasmaag') && params.platform != 'illumina') {
+        paramError('PlasMAAG requires illumina with metaspades or megahit complete assemblies and paired reads')
+    }
+    if (selectedTools(params.plasmid_binning_tools).contains('recycler') &&
+        !((params.platform == 'illumina' && params.short_read_assembler == 'metaspades') ||
+          (params.platform == 'hybrid' && params.hybrid_assembler == 'hybridspades'))) {
+        paramError("Recycler requires illumina with --short_read_assembler metaspades or hybrid with --hybrid_assembler hybridspades (same-run SPAdes FASTG/k provenance and original short-read pairs)")
+    }
+    if (selectedTools(params.plasmid_binning_tools).contains('gplas2') &&
+        !((params.platform == 'illumina' && params.short_read_assembler == 'metaspades') ||
+          (params.platform == 'hybrid' && params.hybrid_assembler == 'hybridspades'))) {
+        paramError("gplas2 requires illumina/metaspades or hybrid/hybridspades with same-run SPAdes GFA; graph nodes are classified independently")
+    }
 }
 
 workflow {
-    // Accept comma-separated strings from the CLI for all list params
-    ['polishing_tools', 'plasmid_detection_tools', 'plasmid_binning_tools',
-     'typing_tools', 'typing_optional_tools', 'host_prediction_tools',
-     'mag_tools', 'host_linking_methods', 'host_linking_optional_methods',
-     'annotation_tools', 'annotation_optional_tools',
-     'comparative_tools', 'comparative_optional_tools'].each { k ->
-        params[k] = asList(params[k])
-    }
+    normalizeToolSelections()
 
     validateParams()
 
@@ -155,6 +268,7 @@ workflow {
     ch_plasmids = Channel.empty()
     ch_contig_tables = Channel.empty()
     ch_plasmid_tables = Channel.empty()
+    ch_quantification_states = Channel.empty()
 
     if (params.platform == 'illumina') {
         ch_samples = ch_rows.map { row ->
@@ -167,6 +281,7 @@ workflow {
         ch_plasmids = ILLUMINA.out.plasmids
         ch_contig_tables = ILLUMINA.out.contig_tables
         ch_plasmid_tables = ILLUMINA.out.plasmid_tables
+        ch_quantification_states = ILLUMINA.out.quantification_states
         ch_done = ILLUMINA.out.done
     } else if (params.platform == 'ont') {
         ch_samples = ch_rows.map { row ->
@@ -179,6 +294,7 @@ workflow {
         ch_plasmids = ONT.out.plasmids
         ch_contig_tables = ONT.out.contig_tables
         ch_plasmid_tables = ONT.out.plasmid_tables
+        ch_quantification_states = ONT.out.quantification_states
         ch_done = ONT.out.done
     } else if (params.platform == 'pacbio_hifi') {
         ch_samples = ch_rows.map { row ->
@@ -191,6 +307,7 @@ workflow {
         ch_plasmids = PACBIO_HIFI.out.plasmids
         ch_contig_tables = PACBIO_HIFI.out.contig_tables
         ch_plasmid_tables = PACBIO_HIFI.out.plasmid_tables
+        ch_quantification_states = PACBIO_HIFI.out.quantification_states
         ch_done = PACBIO_HIFI.out.done
     } else if (params.platform == 'hybrid') {
         ch_samples = ch_rows.map { row ->
@@ -205,6 +322,7 @@ workflow {
         ch_plasmids = HYBRID.out.plasmids
         ch_contig_tables = HYBRID.out.contig_tables
         ch_plasmid_tables = HYBRID.out.plasmid_tables
+        ch_quantification_states = HYBRID.out.quantification_states
         ch_done = HYBRID.out.done
     } else if (params.platform == 'assembly') {
         ch_samples = ch_rows.map { row ->
@@ -221,6 +339,7 @@ workflow {
     CROSS_SAMPLE(
         ch_contig_tables,
         ch_plasmid_tables,
+        ch_quantification_states,
         ch_plasmids,
         ch_done,
         n_samples,

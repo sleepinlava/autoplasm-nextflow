@@ -1,29 +1,28 @@
 #!/usr/bin/env Rscript
-# Link plasmid contigs to first-level MAG FASTA files by sequence composition.
+# Score plasmid/MAG sequence composition; uncalibrated host linking is disabled.
 #
-# Score: TETRA (Teeling et al. 2004, Env. Microbiol. 6(9):938-947), the
-# canonical tetranucleotide-signature method also used by pyani. Instead of a
-# raw cosine on composition frequencies (which retains compositional bias), the
-# z-score math is ported EXACTLY from pyani's MIT-licensed implementation
-# (pyani/tetra.py, https://github.com/widdowquinn/pyani): expected frequencies
-# from the maximal-order (3rd) Markov model over di/tri-nucleotide counts,
-# sd per Teeling's approximation, z = (observed - expected) / sd, with pyani's
-# zero-variance fallback. Pairwise similarity is the Pearson correlation
-# between the two z-vectors over canonical tetranucleotide classes; undefined
-# or zero-variance z-vectors (e.g. homopolymers) yield similarity 0.
-#
-# This remains a composition-based heuristic linker; it is not a taxonomic or
-# whole-genome alignment method.
+# TETRA per Teeling et al. (2004), doi:10.1186/1471-2105-5-163:
+# sum every overlapping ACGT di/tri/tetranucleotide on BOTH strands of each
+# FASTA record separately, then calculate Markov expected counts and z-scores.
+# Pearson correlation uses all 256 ordered words, including both RC slots and
+# doubled palindromic counts. Records are never joined across contig boundaries.
+# This is an independent implementation of the published formula, not an exact
+# port of pyani (which has different sequence-end handling and sparse defaults).
+# Undefined/zero variance profiles are ineligible, not fabricated correlations.
+# No host links are emitted: the independent source-host threshold benchmark
+# failed its acceptance criteria. Scores are composition similarities only.
 
 suppressPackageStartupMessages({
   library(Biostrings)
 })
 
 PROG <- "sequence_similarity_link.R"
+METHOD <- "tetra_markov256_v1"
 USAGE <- paste(
   "usage: sequence_similarity_link.R [-h] --plasmid-contigs PLASMID_CONTIGS",
   "[--host-genomes HOST_GENOMES] [--taxonomy TAXONOMY] [--sample-id SAMPLE_ID]",
-  "[--min-similarity MIN_SIMILARITY] --out OUT"
+  "[--min-similarity MIN_SIMILARITY] --out OUT",
+  "[--out-scores OUT_SCORES] [--out-profile-status OUT_PROFILE_STATUS]"
 )
 
 die <- function(msg) {
@@ -38,7 +37,9 @@ parse_cli <- function(argv) {
     "taxonomy" = list(mode = "single", required = FALSE),
     "sample-id" = list(mode = "single", required = FALSE),
     "min-similarity" = list(mode = "single", required = FALSE),
-    "out" = list(mode = "single", required = TRUE)
+    "out" = list(mode = "single", required = TRUE),
+    "out-scores" = list(mode = "single", required = FALSE),
+    "out-profile-status" = list(mode = "single", required = FALSE)
   )
   values <- list()
   seen <- character(0)
@@ -99,7 +100,7 @@ parse_cli <- function(argv) {
   if (!("host-genomes" %in% seen)) values[["host-genomes"]] <- NULL
   if (!("taxonomy" %in% seen)) values[["taxonomy"]] <- NULL
   if (!("sample-id" %in% seen)) values[["sample-id"]] <- ""
-  if (!("min-similarity" %in% seen)) values[["min-similarity"]] <- "0.7"
+  if (!("min-similarity" %in% seen)) values[["min-similarity"]] <- NULL
   values
 }
 
@@ -157,71 +158,62 @@ read_fasta <- function(path) {
   records
 }
 
-# K-mer spaces and canonical (both-strands, reverse-complement-folded) counts.
-# Canonical slot k holds oligonucleotideFrequency(k) + oligonucleotideFrequency(rc(k));
-# palindromic words are counted once, non-canonical slots are zero. This matches
-# counting every double-stranded window once under min(kmer, revcomp(kmer)).
+# Ordered word spaces. No canonical folding: reverse complements retain their
+# own slot, and palindromes are counted once per physical strand (twice total).
 kmer_space <- function(width) {
   grid <- expand.grid(rep(list(c("A", "C", "G", "T")), width))
   words <- do.call(paste0, unname(as.list(grid[, seq.int(width, 1L)])))
   rc <- match(as.character(reverseComplement(DNAStringSet(words))), words)
   list(words = words, rc = rc, n = length(words), width = width)
 }
-
 SPACE2 <- kmer_space(2L)
 SPACE3 <- kmer_space(3L)
 SPACE4 <- kmer_space(4L)
-REP4 <- which(SPACE4$rc >= seq_len(SPACE4$n))
-CANON2 <- pmin(seq_len(SPACE2$n), SPACE2$rc)
-CANON3 <- pmin(seq_len(SPACE3$n), SPACE3$rc)
-TETRA_PREFIX3 <- CANON3[match(substr(SPACE4$words, 1L, 3L), SPACE3$words)]
-TETRA_SUFFIX3 <- CANON3[match(substr(SPACE4$words, 2L, 4L), SPACE3$words)]
-TETRA_MIDDLE2 <- CANON2[match(substr(SPACE4$words, 2L, 3L), SPACE2$words)]
+TETRA_PREFIX3 <- match(substr(SPACE4$words, 1L, 3L), SPACE3$words)
+TETRA_SUFFIX3 <- match(substr(SPACE4$words, 2L, 4L), SPACE3$words)
+TETRA_MIDDLE2 <- match(substr(SPACE4$words, 2L, 3L), SPACE2$words)
 
-canonical_counts <- function(clean, space) {
-  raw <- as.numeric(oligonucleotideFrequency(DNAString(clean), width = space$width)[space$words])
-  canon <- raw + raw[space$rc]
-  idx <- seq_len(space$n)
-  canon[idx > space$rc] <- 0
-  canon[idx == space$rc] <- raw[idx == space$rc]
-  canon
+strand_counts <- function(sequences, space) {
+  counts <- numeric(space$n)
+  for (sequence in sequences) {
+    clean <- gsub("[^ACGTN]", "N", toupper(sequence))
+    raw <- as.numeric(oligonucleotideFrequency(DNAString(clean), width = space$width)[space$words])
+    counts <- counts + raw + raw[space$rc]
+  }
+  stats::setNames(counts, space$words)
 }
 
-# TETRA z-scores per Teeling et al. (2004) as implemented by pyani/tetra.py
-# (MIT License, (c) 2017-2019 James Hutton Institute / 2019-2024 University of
-# Strathclyde): for each tetranucleotide, expected count under the
-# maximal-order Markov model E = tri[prefix] * tri[suffix] / di[middle] and
-# sd = sqrt(E * (den - tri[prefix]) * (den - tri[suffix]) / den^2) with
-# den = di[middle]; z = (observed - E) / sd. pyani's zero-sd fallback
-# z = 1 / den^2 applies when sd == 0 and den > 0; undefined expectations
-# (den == 0) leave z as NA. Returns the 136 canonical z-scores.
-tetra_zscores <- function(seq) {
-  clean <- gsub("[^ACGTN]", "N", toupper(seq))
-  di <- canonical_counts(clean, SPACE2)
-  tri <- canonical_counts(clean, SPACE3)
-  tet <- canonical_counts(clean, SPACE4)
+# E(XYZW) = N(XYZ) N(YZW) / N(YZ)
+# Var = E (N(YZ)-N(XYZ)) (N(YZ)-N(YZW)) / N(YZ)^2
+# All legal windows including the last one are counted. Ambiguity symbols break
+# a window; they are not deleted. Sum per-record counts BEFORE expectations.
+tetra_zscores <- function(sequences) {
+  di <- strand_counts(sequences, SPACE2)
+  tri <- strand_counts(sequences, SPACE3)
+  tet <- strand_counts(sequences, SPACE4)
   den <- di[TETRA_MIDDLE2]
   tpre <- tri[TETRA_PREFIX3]
   tsuf <- tri[TETRA_SUFFIX3]
-  exp <- tpre * tsuf / den
-  var <- exp * (den - tpre) * (den - tsuf) / (den * den)
-  sdv <- suppressWarnings(sqrt(var))
-  z <- suppressWarnings((tet - exp) / sdv)
-  zero_sd <- !is.na(sdv) & sdv == 0 & den > 0
-  z[zero_sd] <- 1 / (den[zero_sd] * den[zero_sd])
-  z[!is.finite(z)] <- NA_real_
-  z[REP4]
+  expected <- tpre * tsuf / den
+  variance <- expected * (den - tpre) * (den - tsuf) / (den * den)
+  z <- rep(NA_real_, SPACE4$n)
+  valid <- is.finite(variance) & variance > 0 & is.finite(expected)
+  z[valid] <- (tet[valid] - expected[valid]) / sqrt(variance[valid])
+  stats::setNames(z, SPACE4$words)
 }
 
-# Pearson correlation between the two z-vectors over their jointly defined
-# (finite) canonical slots. Degenerate cases - fewer than two shared defined
-# slots, zero variance, or undefined values (e.g. homopolymer sequences where
-# the Markov expectations are degenerate) - yield similarity 0.
+profile_status <- function(z) {
+  if (length(z) != 256L || any(!is.finite(z))) return("undefined_markov_variance")
+  if (stats::sd(z) == 0) return("constant_zscores")
+  "complete256"
+}
+
+# A partial finite subset is not the published 256-dimensional comparison.
+# No usable profile means no numeric similarity, even at threshold zero.
 similarity <- function(z1, z2) {
-  ok <- is.finite(z1) & is.finite(z2)
-  if (sum(ok) < 2L) return(0)
-  r <- suppressWarnings(stats::cor(z1[ok], z2[ok]))
-  if (!is.finite(r)) 0 else r
+  if (profile_status(z1) != "complete256" || profile_status(z2) != "complete256") return(NA_real_)
+  r <- stats::cor(z1, z2)
+  if (!is.finite(r)) NA_real_ else max(-1, min(1, r))
 }
 
 load_taxonomy <- function(path) {
@@ -282,18 +274,19 @@ load_bins <- function(files) {
       die(sprintf("Duplicate MAG host_id '%s': %s and %s", host_id, owners[host_id], path))
     }
     owners[host_id] <- path
-    seq <- paste(vapply(read_fasta(path), function(r) r$seq, character(1)), collapse = "")
-    if (nzchar(seq)) {
-      features[[host_id]] <- tetra_zscores(seq)
+    sequences <- vapply(read_fasta(path), function(r) r$seq, character(1))
+    if (any(nzchar(sequences))) {
+      features[[host_id]] <- tetra_zscores(sequences)
     }
   }
   features
 }
 
 run <- function(args) {
-  min_similarity <- parse_float(args[["min-similarity"]], "--min-similarity")
-  if (!is.finite(min_similarity) || min_similarity < 0 || min_similarity > 1) {
-    die("--min-similarity must be between 0 and 1")
+  if (!is.null(args[["min-similarity"]])) {
+    legacy <- parse_float(args[["min-similarity"]], "--min-similarity")
+    if (!is.finite(legacy) || legacy < 0 || legacy > 1) die("--min-similarity must be between 0 and 1")
+    cat("--min-similarity is deprecated and ignored; uncalibrated host links are disabled\n", file=stderr())
   }
   have_mags <- !is.null(args[["host-genomes"]]) && nzchar(args[["host-genomes"]])
   if (have_mags) {
@@ -308,48 +301,54 @@ run <- function(args) {
 
   plasmids <- read_fasta(args[["plasmid-contigs"]])
   participating <- Filter(function(r) nchar(r$seq) >= 1000L, plasmids)
-  collected <- list()
+  scored <- list()
+  plasmid_profiles <- list()
   if (length(bins)) {
     for (rec in participating) {
       pz <- tetra_zscores(rec$seq)
+      plasmid_profiles[[rec$name]] <- profile_status(pz)
       for (bname in names(bins)) {
         score <- similarity(pz, bins[[bname]])
-        if (score >= min_similarity) {
-          tax_string <- if (bname %in% names(taxonomy)) taxonomy[bname][[1L]] else "NA"
-          collected[[length(collected) + 1L]] <- list(
-            plasmid_id = rec$name,
-            host_id = bname,
-            sample_id = args[["sample-id"]],
-            score = score,
-            supporting_data = sprintf("taxonomy=%s;method=tetra_zscore", tax_string)
-          )
-        }
+        status <- if (is.finite(score)) "complete256" else "ineligible_profile"
+        tax_string <- if (bname %in% names(taxonomy)) taxonomy[bname][[1L]] else "NA"
+        scored[[length(scored) + 1L]] <- data.frame(plasmid_id = rec$name,
+          host_id = bname, sample_id = args[["sample-id"]], method = METHOD,
+          score = if (is.finite(score)) sprintf("%.17g", score) else "",
+          profile_status = status, host_taxonomy = tax_string,
+          threshold_status = "not_applied_uncalibrated",
+          association_status = "disabled_uncalibrated", stringsAsFactors = FALSE)
       }
     }
   }
 
-  cols <- c("plasmid_id", "host_id", "sample_id", "evidence_type", "score", "supporting_data")
   df <- data.frame(plasmid_id = character(), host_id = character(), sample_id = character(),
                    evidence_type = character(), score = character(), supporting_data = character())
-  if (length(collected)) {
-    pls <- vapply(collected, function(r) r$plasmid_id, character(1))
-    hos <- vapply(collected, function(r) r$host_id, character(1))
-    scs <- vapply(collected, function(r) r$score, numeric(1))
-    ord <- order(pls, -scs, hos, method = "radix")
-    df <- data.frame(
-      plasmid_id = pls[ord],
-      host_id = hos[ord],
-      sample_id = vapply(collected, function(r) r$sample_id, character(1))[ord],
-      evidence_type = "sequence_similarity",
-      score = sprintf("%.4f", scs[ord]),
-      supporting_data = vapply(collected, function(r) r$supporting_data, character(1))[ord],
-      stringsAsFactors = FALSE
-    )
-  }
   tryCatch(
     write.table(df, file = args[["out"]], sep = "\t", quote = FALSE, row.names = FALSE),
     error = function(e) die(conditionMessage(e))
   )
+  if (!is.null(args[["out-scores"]])) {
+    score_table <- if (length(scored)) do.call(rbind, scored) else data.frame(
+      plasmid_id=character(), host_id=character(), sample_id=character(), method=character(),
+      score=character(), profile_status=character(), host_taxonomy=character(),
+      threshold_status=character(), association_status=character())
+    if (nrow(score_table)) score_table <- score_table[order(score_table$plasmid_id, score_table$host_id, method="radix"), ]
+    write.table(score_table, args[["out-scores"]], sep="\t", quote=FALSE, row.names=FALSE)
+  }
+  if (!is.null(args[["out-profile-status"]])) {
+    jsonlite::write_json(list(method=METHOD, dimensions=256L, strands="both",
+      boundaries="sum_per_record_counts_before_expectations",
+      threshold_status="not_applied_uncalibrated", host_links_enabled=FALSE,
+      association_status="disabled_uncalibrated",
+      association_reason="independent source-host threshold benchmark failed acceptance; composition scores are not host assignments",
+      ignored_min_similarity=args[["min-similarity"]], ineligible="undefined variance or constant full vector; no fabricated score",
+      sample_id=args[["sample-id"]],
+      mag_profiles=lapply(bins, profile_status), plasmid_profiles=plasmid_profiles,
+      short_plasmids=vapply(Filter(function(r) nchar(r$seq) < 1000L, plasmids), function(r) r$name, character(1))),
+      args[["out-profile-status"]], auto_unbox=TRUE, pretty=TRUE)
+  }
+  cat(sprintf("method=%s; dimensions=256; host_links=disabled_uncalibrated; complete MAG profiles=%d/%d\n",
+      METHOD, sum(vapply(bins, profile_status, character(1)) == "complete256"), length(bins)), file=stderr())
   mag_path <- if (have_mags) args[["host-genomes"]] else "not provided"
   cat(sprintf(
     "MAG path: %s; candidate FASTA files: %d; valid bins: %d; plasmids compared: %d; links: %d%s\n",

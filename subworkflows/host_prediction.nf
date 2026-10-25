@@ -1,3 +1,6 @@
+include { reportEvidence; reportSamples } from '../lib/report_events'
+include { selectedTools } from '../lib/tool_selection'
+
 /*
  * Host prediction subworkflow (stage 07 host_prediction): MetaPhlAn4
  * (default) on cleaned reads, Kraken2 (optional, illumina only),
@@ -37,28 +40,33 @@ workflow HOST_PREDICTION {
     is_assembly     // val boolean
 
     main:
+    ch_report_events = Channel.empty()
     ch_host_profile = Channel.empty()
-    if (params.host_prediction_tools.contains('metaphlan') && !is_assembly) {
+    if (selectedTools(params.host_prediction_tools).contains('metaphlan') && !is_assembly) {
         HOST_PROFILE_READS(ch_short_reads, ch_long_reads)
         METAPHLAN(
             HOST_PROFILE_READS.out.reads,
             Channel.value(file(params.metaphlan_db, checkIfExists: true)),
             false   // save_samfile
         )
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: METAPHLAN.out], '07_host_prediction', 'METAPHLAN'))
         ch_host_profile = METAPHLAN.out.profile
     }
-    if (params.host_prediction_tools.contains('kraken2') && is_illumina) {
+    if (selectedTools(params.host_prediction_tools).contains('kraken2') && is_illumina) {
         KRAKEN2(
             ch_short_reads.map { meta, r1, r2 -> tuple(meta + [single_end: false], [r1, r2]) },
             Channel.value(file(params.kraken2_db, checkIfExists: true)),
             false,  // save_output_fastqs
             false   // save_reads_assignment
         )
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: KRAKEN2.out], '07_host_prediction', 'KRAKEN2'))
     }
-    if (params.host_prediction_tools.contains('plasmidhostfinder') && is_assembly) {
+    if (selectedTools(params.host_prediction_tools).contains('plasmidhostfinder') && is_assembly) {
         PLASMIDHOSTFINDER(ch_plasmids, Channel.value(file(params.plasmidhostfinder_db, checkIfExists: true)))
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMIDHOSTFINDER.out], '07_host_prediction', 'PLASMIDHOSTFINDER'))
     }
 
     emit:
+    report_events = ch_report_events
     host_profile = ch_host_profile  // tuple(meta, metaphlan profile txt); may be empty
 }

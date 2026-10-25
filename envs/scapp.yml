@@ -1,6 +1,0 @@
-name: autoplasm-scapp
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - scapp>=0.1.5

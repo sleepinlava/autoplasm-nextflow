@@ -13,17 +13,22 @@ process DIVERSITY {
     publishDir "${params.outdir}/11_diversity", mode: params.publish_dir_mode
 
     input:
-    path abundance_table
-    path sample_metadata
+    path(abundance_table, stageAs: 'abundance/*')
+    path(sample_metadata, stageAs: 'cohort/*')
+
+    path code_assets, stageAs: 'source_assets/*'
 
     output:
     path "diversity_metrics.tsv", emit: metrics
     path "bray_curtis_matrix.tsv", emit: beta
+    path "diversity_status.json", emit: status
 
     script:
     """
-    diversity.R --abundance ${abundance_table} --metadata ${sample_metadata} \\
+    mkdir -p analysis_code
+    cp -L source_assets/* analysis_code/
+    Rscript analysis_code/diversity.R --abundance ${abundance_table} --metadata ${sample_metadata} \\
         --out-metrics diversity_metrics.tsv \\
-        --out-beta bray_curtis_matrix.tsv
+        --out-beta bray_curtis_matrix.tsv --out-status diversity_status.json
     """
 }

@@ -1,3 +1,6 @@
+include { reportEvidence; reportSamples } from '../lib/report_events'
+include { selectedTools } from '../lib/tool_selection'
+
 /*
  * Shared per-sample downstream subworkflow over consensus plasmid contigs:
  * typing (06), annotation (08) and plasmid binning (05). All optional tools
@@ -22,115 +25,145 @@ include { ABRICATE_RUN as ABRICATE } from '../modules/nf-core/abricate/run'
 include { ISESCAN } from '../modules/annotation/isescan'
 include { INTEGRONFINDER } from '../modules/nf-core/integronfinder'
 include { PRODIGAL } from '../modules/nf-core/prodigal'
+include { PROTEIN_INPUTS } from '../modules/annotation/protein_inputs'
 include { MOBSUITE_RECON as MOB_SUITE_ANNOT } from '../modules/nf-core/mobsuite/recon'
 include { RGI_MAIN as RGI } from '../modules/nf-core/rgi/main'
 include { EGGNOGMAPPER as EGGNOG_MAPPER } from '../modules/nf-core/eggnogmapper'
-include { PLASMAAG } from '../modules/binning/plasmaag'
-include { GPLAS2 } from '../modules/binning/gplas2'
 include { MOBSUITE_RECON as MOB_RECON } from '../modules/nf-core/mobsuite/recon'
-include { SCAPP_BIN } from '../modules/binning/scapp_bin'
 include { RECYCLER } from '../modules/binning/recycler'
+include { RECYCLER_INPUTS } from '../modules/binning/recycler_inputs'
 
 workflow PLASMID_DOWNSTREAM {
     take:
     ch_plasmids      // tuple(meta, plasmid_contigs.fasta) — non-empty only
-    ch_graph         // tuple(meta, graph) or empty
+    ch_graph         // legacy input; graph-node binning now runs beside assembly
     ch_contig_bam    // tuple(meta, bam) or empty
     ch_contig_table  // tuple(meta, coverm tsv) or empty
-    ch_short_reads   // tuple(meta, r1, r2) or empty (SCAPP binning)
+    ch_short_reads   // tuple(meta, r1, r2) or empty (Recycler graph-node alignment)
+    ch_recycler_graph // tuple(meta, FASTG, graph_provenance.json) from same SPAdes task
 
     main:
+    ch_report_events = Channel.empty()
+    def run_conjscan    = selectedTools(params.typing_optional_tools).contains('conjscan')
+    def run_macsyfinder = selectedTools(params.typing_optional_tools).contains('macsyfinder')
+    def run_eggnog = selectedTools(params.annotation_optional_tools).contains('eggnog_mapper')
+    def needs_proteins = run_conjscan || run_macsyfinder || run_eggnog
+    ch_proteins = Channel.empty()
+    if (needs_proteins || selectedTools(params.annotation_tools).contains('prodigal') || selectedTools(params.annotation_optional_tools).contains('prodigal')) {
+        // One gene call supplies annotation and all protein consumers.
+        PRODIGAL(ch_plasmids, Channel.value('gff'))
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: PRODIGAL.out], '08_annotation', 'PRODIGAL'))
+    }
+    if (needs_proteins) {
+        ch_gene_inputs = ch_plasmids
+            .join(PRODIGAL.out.gene_annotations, failOnDuplicate: true, failOnMismatch: true)
+            .join(PRODIGAL.out.amino_acid_fasta, failOnDuplicate: true, failOnMismatch: true)
+            .join(PRODIGAL.out.nucleotide_fasta, failOnDuplicate: true, failOnMismatch: true)
+        PROTEIN_INPUTS(ch_gene_inputs, Channel.value(file("${moduleDir}/../bin/prepare_prodigal_inputs.py", checkIfExists: true)))
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: PROTEIN_INPUTS.out], '08_annotation', 'PROTEIN_INPUTS'))
+        // Empty gene calls retain their manifest/state; protein tools do not
+        // run on header-only input or report a biological negative for it.
+        ch_proteins = PROTEIN_INPUTS.out.proteins.filter { meta, proteins, topology -> proteins.size() > 0 }
+    }
     // ---------------- typing (06) ----------------
-    if (params.typing_tools.contains('plasmidfinder')) {
+    if (selectedTools(params.typing_tools).contains('plasmidfinder')) {
         // nf-core module: bundled PlasmidFinder db (params.plasmidfinder_db no longer used)
         PLASMIDFINDER(ch_plasmids)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMIDFINDER.out], '06_plasmid_typing', 'PLASMIDFINDER'))
     }
-    if (params.typing_tools.contains('mob_typer')) {
+    if (selectedTools(params.typing_tools).contains('mob_typer')) {
         // optional per-file db inputs (mash/meta/replicons/mask/mob/mpf/orit) left empty
         MOB_TYPER(ch_plasmids,
                   Channel.value(file(params.mob_suite_db, checkIfExists: true)),
                   [], [], [], [], [], [], [],
                   false, false)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_TYPER.out], '06_plasmid_typing', 'MOB_TYPER'))
     }
-    if (params.typing_optional_tools.contains('copla')) {
+    if (selectedTools(params.typing_optional_tools).contains('copla')) {
         COPLA(ch_plasmids,
               Channel.value(file(params.copla_refgraph, checkIfExists: true)),
-              Channel.value(file(params.copla_reflist, checkIfExists: true)))
+              Channel.value(file(params.copla_reflist, checkIfExists: true)),
+              Channel.value(file(params.copla_dir, checkIfExists: true)),
+              Channel.value(file(params.copla_macsyfinder_dir, checkIfExists: true)), Channel.value(file("${moduleDir}/../bin/run_copla_candidates.py", checkIfExists: true)))
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: COPLA.out], '06_plasmid_typing', 'COPLA'))
     }
-    def run_conjscan    = params.typing_optional_tools.contains('conjscan')
-    def run_macsyfinder = params.typing_optional_tools.contains('macsyfinder')
     if (run_conjscan || run_macsyfinder) {
-        // CONJScan models via macsydata (macsyfinder >= 2.1.2 no longer ships them)
-        MACSYFINDER_DOWNLOAD(Channel.value('CONJ'))
+        // Match the model release already declared in the project's test data.
+        // Request once, only after at least one sample has actual proteins.
+        MACSYFINDER_DOWNLOAD(ch_proteins.map { meta, proteins, topology -> 'CONJScan==2.1.0' }.first())
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER_DOWNLOAD.out], '06_plasmid_typing', 'MACSYFINDER_DOWNLOAD'))
     }
     if (run_conjscan) {
-        CONJSCAN(ch_plasmids, MACSYFINDER_DOWNLOAD.out.models, 'CONJ')
+        CONJSCAN(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJScan/Plasmids all')
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: CONJSCAN.out], '06_plasmid_typing', 'CONJSCAN'))
     }
     if (run_macsyfinder) {
-        MACSYFINDER(ch_plasmids, MACSYFINDER_DOWNLOAD.out.models, 'CONJ')
+        MACSYFINDER(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJScan/Plasmids all')
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER.out], '06_plasmid_typing', 'MACSYFINDER'))
     }
 
     // ---------------- annotation (08) ----------------
     ch_bakta_dir = Channel.empty()
-    if (params.annotation_tools.contains('bakta')) {
+    if (selectedTools(params.annotation_tools).contains('bakta')) {
         // optional proteins/prodigal-tf/regions/hmms inputs left empty
         BAKTA(ch_plasmids,
               Channel.value(file(params.bakta_db, checkIfExists: true)),
               [], [], [], [])
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: BAKTA.out], '08_annotation', 'BAKTA'))
         // clinker consumes the directory holding the *.gbff files (the task dir itself)
         ch_bakta_dir = BAKTA.out.gbff.map { meta, gbff -> tuple(meta, gbff.parent) }
     }
-    if (params.annotation_tools.contains('amrfinderplus')) {
+    if (selectedTools(params.annotation_tools).contains('amrfinderplus')) {
         AMRFINDERPLUS(ch_plasmids, Channel.value(file(params.amrfinderplus_db, checkIfExists: true)))
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: AMRFINDERPLUS.out], '08_annotation', 'AMRFINDERPLUS'))
     }
-    if (params.annotation_tools.contains('abricate')) {
+    if (selectedTools(params.annotation_tools).contains('abricate') || selectedTools(params.annotation_optional_tools).contains('abricate')) {
         // optional --datadir left empty; --db selected via ext.args
         ABRICATE(ch_plasmids, [])
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: ABRICATE.out], '08_annotation', 'ABRICATE'))
     }
-    if (params.annotation_tools.contains('isescan')) {
+    if (selectedTools(params.annotation_tools).contains('isescan')) {
         ISESCAN(ch_plasmids)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: ISESCAN.out], '08_annotation', 'ISESCAN'))
     }
-    if (params.annotation_tools.contains('integronfinder')) {
+    if (selectedTools(params.annotation_tools).contains('integronfinder')) {
         INTEGRONFINDER(ch_plasmids)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: INTEGRONFINDER.out], '08_annotation', 'INTEGRONFINDER'))
     }
-    if (params.annotation_tools.contains('prodigal') || params.annotation_optional_tools.contains('prodigal')) {
-        PRODIGAL(ch_plasmids, Channel.value('gff'))
-    }
-    if (params.annotation_optional_tools.contains('mob_suite')) {
+    if (selectedTools(params.annotation_optional_tools).contains('mob_suite')) {
         // nf-core module: no db input (uses mob_suite 3.1.9 bundled db)
         MOB_SUITE_ANNOT(ch_plasmids)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_SUITE_ANNOT.out], '08_annotation', 'MOB_SUITE_ANNOT'))
     }
-    if (params.annotation_optional_tools.contains('rgi')) {
+    if (selectedTools(params.annotation_optional_tools).contains('rgi')) {
         // card = directory with card.json + card_database_v*.fasta; wildcard optional
         RGI(ch_plasmids,
             Channel.value(file(params.card_db, checkIfExists: true)),
-            [])
+            [], Channel.value(file("${moduleDir}/../bin/validate_rgi_card.py", checkIfExists: true)))
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: RGI.out], '08_annotation', 'RGI'))
     }
-    if (params.annotation_optional_tools.contains('eggnog_mapper')) {
+    if (run_eggnog) {
         // search_mode=diamond with no explicit dmnd db (falls back to --data_dir)
-        EGGNOG_MAPPER(ch_plasmids,
+        EGGNOG_MAPPER(ch_proteins.map { meta, proteins, topology -> tuple(meta, proteins) },
                       Channel.value(['diamond', []]),
                       Channel.value(file(params.eggnog_db, checkIfExists: true)))
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: EGGNOG_MAPPER.out], '08_annotation', 'EGGNOG_MAPPER'))
     }
 
     // ---------------- plasmid binning (05) ----------------
-    if (params.plasmid_binning_tools.contains('plasmaag')) {
-        PLASMAAG(ch_plasmids.join(ch_contig_table))
-    }
-    if (params.plasmid_binning_tools.contains('gplas2')) {
-        GPLAS2(ch_plasmids.join(ch_graph))
-    }
-    if (params.plasmid_binning_tools.contains('mob_suite') || params.plasmid_binning_tools.contains('mob_recon')) {
+    if (selectedTools(params.plasmid_binning_tools).contains('mob_suite') || selectedTools(params.plasmid_binning_tools).contains('mob_recon')) {
         // nf-core module: no db input (uses mob_suite 3.1.9 bundled db)
         MOB_RECON(ch_plasmids)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_RECON.out], '05_plasmid_binning', 'MOB_RECON'))
     }
-    if (params.plasmid_binning_tools.contains('scapp')) {
-        SCAPP_BIN(ch_graph.join(ch_short_reads))
-    }
-    if (params.plasmid_binning_tools.contains('recycler')) {
-        RECYCLER(ch_graph.join(ch_contig_bam))
+    if (selectedTools(params.plasmid_binning_tools).contains('recycler')) {
+        RECYCLER_INPUTS(ch_recycler_graph.join(ch_short_reads,
+            failOnDuplicate: true, failOnMismatch: true))
+        RECYCLER(RECYCLER_INPUTS.out.bam, Channel.value(tuple(file("${moduleDir}/../bin/validate_recycler_inputs.py", checkIfExists: true), file("${moduleDir}/../bin/run_recycler_checked.py", checkIfExists: true))))
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: RECYCLER.out], '05_plasmid_binning', 'RECYCLER'))
     }
 
     emit:
+    report_events = ch_report_events
     bakta_dir = ch_bakta_dir  // tuple(meta, dir containing *.gbff) for clinker; may be empty
 }
