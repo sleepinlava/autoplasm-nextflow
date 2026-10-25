@@ -1,4 +1,5 @@
 process SEMIBIN_SINGLEEASYBIN {
+    cache 'deep'
     tag "${meta.id}"
     label 'process_medium'
     label 'process_gpu'
@@ -14,12 +15,15 @@ process SEMIBIN_SINGLEEASYBIN {
 
     input:
     tuple val(meta), path(fasta), path(bam)
+    // Explicit regular files: helper changes participate in deep caching.
+    path(autoplasm_helper_0, stageAs: 'semibin_output_state.py')
 
     output:
     tuple val(meta), path("${prefix}/*.csv"), emit: csv
-    tuple val(meta), path("${prefix}/*.h5"), emit: model, optional: true
+    tuple val(meta), path("${prefix}/*.pt"), emit: model, optional: true
     tuple val(meta), path("${prefix}/*.tsv"), emit: tsv
-    tuple val(meta), path("${prefix}/output_bins/*.fa.gz"), emit: output_fasta
+    tuple val(meta), path("${prefix}/output_bins/*.fa.gz"), emit: output_fasta, optional: true
+    tuple val(meta), path("${prefix}/binning_status.json"), emit: state
     tuple val("${task.process}"), val('SemiBin'), eval("SemiBin2 --version"), emit: versions_semibin, topic: versions
     tuple val("${task.process}"), val('cuda'), eval('python -c "import torch; print(torch.version.cuda or \'no CUDA available\')"'), emit: versions_cuda, topic: versions
 
@@ -42,6 +46,8 @@ process SEMIBIN_SINGLEEASYBIN {
         -t ${task.cpus} \\
         --engine ${engine} \\
         ${args2}
+
+    python3 semibin_output_state.py --output "${prefix}"
     """
 
     stub:
@@ -51,7 +57,6 @@ process SEMIBIN_SINGLEEASYBIN {
     touch ${prefix}/{contig_bins,recluster_bins_info}.tsv
     touch ${prefix}/{data,data_split}.csv
     mkdir ${prefix}/output_bins
-    touch ${prefix}/output_bins/SemiBin_{0,1,2,3}.fa
-    gzip  ${prefix}/output_bins/SemiBin*
+    echo '{"schema":1,"state":"stub_not_validated","bin_count":null,"bins":[]}' > ${prefix}/binning_status.json
     """
 }

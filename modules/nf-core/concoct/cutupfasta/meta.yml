@@ -27,13 +27,17 @@ input:
           e.g. [ id:'test', single_end:false ]
     - fasta:
         type: file
-        description: (Uncompressed) FASTA file containing contigs
-        pattern: "*.{fasta,fna,fa,fas}"
+        description: Plain or gzip-compressed FASTA containing contigs; compressed inputs are decoded in the task
+        pattern: "*.{fasta,fna,fa,fas,fasta.gz,fna.gz,fa.gz,fas.gz,fasta.GZ,fna.GZ,fa.GZ,fas.GZ}"
         ontologies: []
   - bed:
       type: boolean
       description: Specify whether to generate a BED file describing where each
         contig was cut up
+  - autoplasm_helper_0:
+      type: file
+      description: Local checked adapter bin/run_concoct_cut_checked.py; staged as run_concoct_cut_checked.py. Explicit file content participates in deep task caching.
+      pattern: "*.py"
 output:
   fasta:
     - - meta:

@@ -29,6 +29,10 @@ input:
         description: BAM/CRAM/SAM file
         pattern: "*.{bam,cram}"
         ontologies: []
+  - autoplasm_helper_0:
+      type: file
+      description: Local checked adapter bin/semibin_output_state.py; staged as semibin_output_state.py. Explicit file content participates in deep task caching.
+      pattern: "*.py"
 output:
   csv:
     - - meta:
@@ -48,10 +52,10 @@ output:
           description: |
             Groovy Map containing sample information
             e.g. [ id:'test' ]
-      - ${prefix}/*.h5:
+      - ${prefix}/*.pt:
           type: file
           description: model file
-          pattern: "*.h5"
+          pattern: "*.pt"
           ontologies: []
   tsv:
     - - meta:
@@ -73,8 +77,17 @@ output:
             e.g. [ id:'test' ]
       - ${prefix}/output_bins/*.fa.gz:
           type: file
-          description: precluster fasta files
-          pattern: "*.fa"
+          description: Optional final bin FASTAs after filtering and reclustering; absent for a valid no-bin result
+          pattern: "*.fa.gz"
+          ontologies: []
+  state:
+    - - meta:
+          type: map
+          description: Sample information
+      - ${prefix}/binning_status.json:
+          type: file
+          description: Explicit final bins_ready/no_bins status; stub_not_validated for stubs
+          pattern: "binning_status.json"
           ontologies: []
   versions_semibin:
     - - ${task.process}:

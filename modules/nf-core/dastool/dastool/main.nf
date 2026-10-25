@@ -9,7 +9,7 @@ process DASTOOL_DASTOOL {
 
     input:
     tuple val(meta), path(contigs), path(bins, arity: '1..*'), path(proteins)
-    path db_directory
+    path db_directory, stageAs: 'dastool_db'
 
     output:
     tuple val(meta), path("*.log")                                      , emit: log
@@ -33,13 +33,28 @@ process DASTOOL_DASTOOL {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     def bin_list = bins.join(",")
-    def db_dir = db_directory ? "--db_directory ${db_directory}" : ""
+    // The upstream bash launcher and R-generated helper commands split paths
+    // on whitespace. Use a fixed task-local name for the optional directory.
+    def db_dir = db_directory ? '--dbDirectory dastool_db' : ''
+    def check_db = db_directory ? '''
+    if [ ! -d dastool_db ]; then
+        echo 'DAS Tool custom database must be a directory' >&2
+        exit 1
+    fi
+    for db_file in bac.all.faa bac.scg.faa bac.scg.lookup arc.all.faa arc.scg.faa arc.scg.lookup; do
+        if [ ! -s "dastool_db/$db_file" ]; then
+            echo "DAS Tool custom database is missing or empty: $db_file" >&2
+            exit 1
+        fi
+    done
+    ''' : ''
     def clean_contigs = contigs.toString() - ".gz"
     def decompress_contigs = contigs.toString() == clean_contigs ? "" : "gunzip -q -f ${contigs}"
     def clean_proteins = proteins ? proteins.toString() - ".gz" : ""
     def decompress_proteins = proteins && (proteins.toString() != clean_proteins) ? "gunzip -f ${proteins}" : ""
     def proteins_pred = proteins ? "-p ${clean_proteins}" : ""
     """
+    ${check_db}
     ${decompress_proteins}
     ${decompress_contigs}
 

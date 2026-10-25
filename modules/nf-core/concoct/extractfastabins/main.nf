@@ -11,7 +11,7 @@ process CONCOCT_EXTRACTFASTABINS {
     tuple val(meta), path(original_fasta), path(csv)
 
     output:
-    tuple val(meta), path("${prefix}/*.fa.gz"), emit: fasta
+    tuple val(meta), path("${prefix}/*.fa.gz"), emit: fasta, optional: true
     tuple val("${task.process}"), val('concoct'), eval("concoct --version 2>&1 | sed -n 's/concoct //p'"), topic: versions, emit: versions_concoct
 
     when:
@@ -20,16 +20,24 @@ process CONCOCT_EXTRACTFASTABINS {
     script:
     def args = task.ext.args ?: ''
     prefix = task.ext.prefix ?: "${meta.id}"
+    def compressed = original_fasta.name.toLowerCase().endsWith('.gz')
+    def input_fasta = compressed ? '.concoct_input/assembly.fna' : original_fasta
     """
     mkdir ${prefix}
 
+    if ${compressed}; then
+        mkdir -p .concoct_input
+        gzip -cd -- ${original_fasta} > .concoct_input/assembly.fna
+    fi
+
     extract_fasta_bins.py \\
         ${args} \\
-        ${original_fasta} \\
+        ${input_fasta} \\
         ${csv} \\
         --output_path ${prefix}
 
     ## Add prefix to each file to disambiguate one sample's 1.fa, 2.fa from sample2
+    shopt -s nullglob
     for i in ${prefix}/*.fa; do
         mv \${i} \${i/\\///${prefix}_}
         gzip \${i/\\///${prefix}_}
