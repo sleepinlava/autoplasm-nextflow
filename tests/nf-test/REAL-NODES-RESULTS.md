@@ -1,5 +1,7 @@
 # 全节点真实小数据测试：2026-10-17
 
+> 2026-10-21 更新：SCAPP 检测与 binning 已按用户要求移除，相关旧运行仅作历史证据，旧套件不再存在。当前状态见 `docs/tool-audit/status.md`。
+
 目标：对流水线所有节点用开源真实小数据做真实执行测试，复用 vendored nf-core
 测试与 nf-core/test-datasets/ENA/官方数据库，不造合成数据、不用 stub 冒充。
 执行后端：podman 容器为主（SELinux shim 见 env.sh），R/native 节点用系统 R 4.6.1
@@ -33,7 +35,7 @@ W1（vendored 套件）结果单独见 `results/nf-test/w1-vendored-results.md`�
 | SAMTOOLS_INDEX | 真实 bam | 通过 | w2-samtools-index.xml |
 | HIFIASM_META | gallus pacbio | 通过（执行契约；fixture 过稀疏无 contig） | w2-hifiasm.xml |
 | DORADO_BASECALL | HG002 pod5 | 通过（10 条真实 reads basecall） | w2-dorado.xml |
-| PLATON | pUTI89 + 官方 db | 通过（真实分类输出） | w3-platon.xml |
+| PLATON | pUTI89 + 官方 db | 历史w3单例缺源码hash；当前固定1.7/完整库的原生plain/gzip两个P3通过 | w3-platon.xml（历史）；results/tool-audit/20261024-platon-native/receipt.json（当前有界） |
 | METABAT2 + JGISUMMARIZE | binning fixture（真实 contigs+BAM） | 通过 | w3-mag-blast.xml |
 | BLAST_BLASTN | pUTI89 自建小库 | 通过（真实自比对命中） | w3-blastn.xml |
 
@@ -92,3 +94,7 @@ DESEQ2（空质粒表优雅降级）→ 报告。质粒检出为零（裁剪 geN
 - vendored 套件（W1）的快照差异逐类记录于 w1-vendored-results.md；未更新任何
   上游快照，未修改 vendored 测试。
 - 所有 JUnit/log/trace 在 results/nf-test/；测试、锁文件、本文档入 Git，数据不入。
+
+## 2026-10-24 Platon当前原生增量
+
+固定提交3cce2dd2完整79blob/安装7Python文件、完整31文件官方库和85包；默认accuracy+meta保持，四处零命中汇总日志在内存修正。当前nf-test0.9.5原P3两个用例以native overlay通过；静态backend-podman标签不证明镜像执行。完整库原CLI与修复包装的阳性/无检出TSV、FASTA字节及JSON语义相同；子工具失败、future异常、同size/mtime资源缓存和长度未评估状态另有原/新真实对照。阴性软件fixture不是独立性能真值，不将重复pUTI89执行算多份生物学证据。详见 docs/tool-audit/contracts/platon-native.md 及本批receipt，其他历史行不被本批认证。

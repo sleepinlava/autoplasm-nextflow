@@ -20,10 +20,12 @@ workflow {
     ch_longread_bam = Channel.empty()
     ch_plasmid_abundance = Channel.empty()
     ch_host_profile = Channel.empty()
-    ch_mag_bins = params.omit_mag ? Channel.empty() : Channel.fromList(['S1', 'S3'].collect { id ->
+    def magIds = params.duplicate_mag_keys ? ['S1', 'S1', 'S3'] : ['S1', 'S3']
+    def taxonomyIds = params.duplicate_taxonomy_keys ? ['S1', 'S1', 'S4'] : ['S1', 'S4']
+    ch_mag_bins = params.omit_mag ? Channel.empty() : Channel.fromList(magIds.collect { id ->
         tuple([id: id], file("${root}/${id}.metabat2_bins", checkIfExists: true))
     })
-    ch_taxonomy = params.omit_taxonomy ? Channel.empty() : Channel.fromList(['S1', 'S4'].collect { id ->
+    ch_taxonomy = params.omit_taxonomy ? Channel.empty() : Channel.fromList(taxonomyIds.collect { id ->
         tuple([id: id], file("${root}/${id}.taxonomy.tsv", checkIfExists: true))
     })
     HOST_LINKING(ch_plasmids, ch_assembly, ch_longread_bam, ch_plasmid_abundance,

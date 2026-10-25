@@ -1,5 +1,5 @@
 // P3 real-data node chain: NETWORK_PREPARE -> FASTSPAR (cross_sample domain).
-// Input: real ENA contig abundance table (P4 product; 482 contigs x 6 real
+// Input: regenerated ENA measured raw-count contig abundance table (P4 product; 482 contigs x 6 real
 // samples). The P4 run itself skips this branch legitimately (zero plasmid
 // calls), hence this dedicated chain test.
 // Backend: podman.
@@ -14,6 +14,7 @@ nextflow_pipeline {
         when {
             params {
                 test_data = "${System.getenv('ENA_TEST_DATA')}"
+                network_min_samples = 6 // explicit execution-only six-sample fixture, below production20
                 outdir = "$outputDir"
             }
         }
@@ -29,6 +30,18 @@ nextflow_pipeline {
             def lines = corr[0].text.readLines()
             assert lines.size() > 2
             assert lines[0].split('\t').size() == lines[1].split('\t').size()
+            def state = new groovy.json.JsonSlurper().parse(path("${params.outdir}/12_network/network_status.json").toFile())
+            assert state.eligible
+            assert state.features_after >= 4
+            assert state.included_sample_ids.size() >= 6
+            def matrix = lines.drop(1).collect { it.split('\t', -1) }
+            def ids = lines[0].split('\t', -1).drop(1).toSet()
+            assert matrix.collect { it[0] }.toSet() == ids
+            assert matrix.size() == ids.size()
+            assert matrix.every { row -> row.drop(1).every { value ->
+                def number = Double.parseDouble(value)
+                Double.isFinite(number) && number >= -1.000001 && number <= 1.000001
+            } }
         }
     }
 }

@@ -1,0 +1,22 @@
+{
+  "tool_version": "6.0.8",
+  "archives": {
+    "3.3.0": {
+      "url": "https://card.mcmaster.ca/download/0/broadstreet-v3.3.0.tar.bz2",
+      "sha256": "a5e7c73795b5a89b8707ef8de098b4e31414a042d3c004cf62ec6712705c4be5"
+    },
+    "3.2.8": {
+      "url": "https://card.mcmaster.ca/download/0/broadstreet-v3.2.8.tar.bz2",
+      "sha256": "1d6eb5557a9fb11be0d126d514b7cfb97d5e8d4bf2ca9bbec80d37b2a012987c"
+    }
+  },
+  "plasmid": {
+    "url": "https://raw.githubusercontent.com/arpcard/rgi/6.0.8/tests/inputs/NC_020818.1.fasta",
+    "git_blob": "0414119053449a58750e1ffaa93fbfc0690f3fc4",
+    "sha256": "7a0ef882cec26cc6e61b05ead3806b17fb5735937a04a8442bf6e0dd0a1ba211"
+  },
+  "new_model_id": "6038",
+  "new_sequence_id": "8858",
+  "new_model_name": "VIM-77",
+  "upstream_oracle": "https://github.com/arpcard/rgi/blob/6.0.8/tests/test_1.py#L122"
+}

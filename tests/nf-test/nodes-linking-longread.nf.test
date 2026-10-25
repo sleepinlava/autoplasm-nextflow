@@ -1,7 +1,9 @@
 // P3 real-data node test: LINK_LONGREAD (host-plasmid linking domain).
-// Real minigut ONT reads are aligned to the real minigut assembly with
+// Fixed upstream synthetic minigut reads are aligned to its assembly with
 // minimap2+samtools (test scaffolding workflow), then the R bridge counter runs.
-// Backend: podman (scaffolding in minimap2_samtools image; LINK_LONGREAD runs in its declared bioconductor image).
+// First-five contigs are an explicit partition, not biological plasmid truth.
+// A separate constructed split-read case guarantees a known nonempty counter.
+// Native and podman deployment evidence must be recorded separately.
 nextflow_pipeline {
     name 'P3 real node: LINK_LONGREAD on real minigut ONT alignment'
     script 'tests/nf-test/workflows/link_longread_real.nf'
@@ -26,7 +28,43 @@ nextflow_pipeline {
             def links = getAllFilesFromDir(params.outdir,
                 include: ['07_host_prediction/linking/longread/*.longread_bridge_links.tsv'])
             assert links.size() == 1
-            assert links[0].text.readLines()[0].split('\t').size() >= 2
+            def root = System.getenv('AUTOPLASM_TEST_DATA')
+            def command = ['python3', new File('tests/check_longread_native.py').absolutePath,
+                '--assembly', "${root}/minigut.fasta", '--reads', "${root}/test_data/minigut_reads.fastq.gz",
+                '--plasmids', "${params.outdir}/test_inputs/longread/plasmid_contigs.fasta",
+                '--sam', "${params.outdir}/test_inputs/longread/minigut_ont.sam.gz",
+                '--links', links[0].toString(), '--output', "${params.outdir}/independent-longread.json"]
+            def oracle = new ProcessBuilder(command.collect { it.toString() }).redirectErrorStream(true).start()
+            def log = oracle.inputStream.text
+            assert oracle.waitFor() == 0: log
+            assert new groovy.json.JsonSlurper().parse(new File(params.outdir, 'independent-longread.json')).pass
+        }
+    }
+
+    test('explicit synthetic split-read control reaches a nonempty native bridge count') {
+        when {
+            params {
+                test_data = "${System.getenv('AUTOPLASM_LONGREAD_CONTROL_DATA')}"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            assert workflow.trace.succeeded().size() == 2
+            def root = System.getenv('AUTOPLASM_LONGREAD_CONTROL_DATA')
+            def command = ['python3', new File('tests/check_longread_native.py').absolutePath,
+                '--assembly', "${root}/minigut.fasta", '--reads', "${root}/test_data/minigut_reads.fastq.gz",
+                '--plasmids', "${params.outdir}/test_inputs/longread/plasmid_contigs.fasta",
+                '--sam', "${params.outdir}/test_inputs/longread/minigut_ont.sam.gz",
+                '--links', "${params.outdir}/07_host_prediction/linking/longread/minigut_ont.longread_bridge_links.tsv",
+                '--control-manifest', "${root}/control.json", '--output', "${params.outdir}/independent-longread.json"]
+            def oracle = new ProcessBuilder(command.collect { it.toString() }).redirectErrorStream(true).start()
+            def log = oracle.inputStream.text
+            assert oracle.waitFor() == 0: log
+            def checked = new groovy.json.JsonSlurper().parse(new File(params.outdir, 'independent-longread.json'))
+            assert checked.pass && checked.known_positive_control
+            assert checked.expected_links.size() == 1 && checked.expected_links[0].reads == 2
         }
     }
 }

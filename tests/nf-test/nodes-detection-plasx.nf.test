@@ -1,0 +1,63 @@
+// Actual complete two-stage method, full locked databases and dependency-only
+// Conda environments. The upstream example is a software fixture, not an
+// independent biological benchmark. AUTOPLASM_PLASX_ROOT supplies locked assets.
+nextflow_pipeline {
+    name 'P3 real nodes: full automatic PlasX annotation and scoring'
+    script 'tests/nextflow/plasx_native.nf'
+    tag 'P3'
+    tag 'detection'
+    tag 'backend-conda'
+
+    test('all three family sources come from this sample and original model arithmetic agrees') {
+        when {
+            params {
+                sample_id = 'S.1'
+                assembly = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/primary/test/test-contigs.fa"
+                plasx_anvio_source = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/anvio-primary-complete"
+                plasx_source = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/primary"
+                plasx_cog_db = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/COG_2014"
+                plasx_pfam_db = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/Pfam_v32"
+                plasx_profiles = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/profiles"
+                plasx_model = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/PlasX_coefficients_and_gene_enrichments.txt"
+                plasx_splits = 32
+                annotation_only = false
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            assert workflow.trace.succeeded().size() == 2
+            def base = new File(params.outdir, '04_plasmid_detection/plasx')
+            def identity = new groovy.json.JsonSlurper().parse(new File(base, 'S.1.plasx_identity.json'))
+            assert identity.sample_id == 'S.1'
+            assert identity.genes > 0 && identity.cog_pfam_annotations > 0 && identity.de_novo_annotations > 0
+            assert identity.scored_contigs > 0 && identity.unassessed_contigs > 0
+            for (step in ['genes', 'export_genes', 'cogs', 'pfams', 'export_functions']) {
+                def audit = new groovy.json.JsonSlurper().parse(new File(base, "S.1.anvio_${step}.json"))
+                assert audit.success
+                assert audit.source_commit == '258991a5bc0f483c958040a55d339e1f447429ac'
+                assert !audit.children.any { it.exit_code != 0 }
+            }
+            for (step in ['search', 'predict']) {
+                def audit = new groovy.json.JsonSlurper().parse(new File(base, "S.1.plasx_${step}.json"))
+                assert audit.success
+                assert audit.source_commit == '5c9acfd00a597da27ef5261acf72dbaf2117b645'
+                assert audit.source_sha256.size() == 11
+                assert !audit.children.any { it.exit_code != 0 }
+            }
+            def command = ['python3', new File('tests/run_plasx_native.py').absolutePath,
+                           '--products', base.absolutePath, '--model', params.plasx_model.toString(),
+                           '--source', params.plasx_source.toString(), '--output', new File(params.outdir, 'independent-oracle').absolutePath]
+            def process = new ProcessBuilder(command).redirectErrorStream(true).start()
+            def log = process.inputStream.text
+            assert process.waitFor() == 0: log
+            def result = new groovy.json.JsonSlurper().parse(new File(params.outdir, 'independent-oracle/run.json'))
+            assert result.pass
+            assert result.score_maximum_absolute_difference <= 1e-12
+            assert result.official_fixture_arithmetic_error <= 1e-12
+            assert result.state_counts.scored == identity.scored_contigs
+            // Do not snapshot automatic scores as independent biological truth.
+        }
+    }
+}

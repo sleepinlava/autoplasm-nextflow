@@ -1,0 +1,87 @@
+// P3 original PLASME node with the complete locked official DB and model inference.
+// Requires AUTOPLASM_PLASME_SOURCE, AUTOPLASM_PLASME_DB and AUTOPLASM_PLASME_INPUTS.
+// Plain/gzip are one biological specimen; neither proves sensitivity/specificity.
+nextflow_process {
+    name 'P3 real node: PLASME'
+    script '../../modules/detection/plasme.nf'
+    process 'PLASME'
+    tag 'P3'
+    tag 'detection'
+    tag 'backend-native'
+
+    test('complete pUTI89 plain runs the real Transformer') {
+        when {
+            process {
+                """
+                input[3] = [file("${new File('bin/normalize_plasme_outputs.py').absolutePath}", checkIfExists: true), file("${new File('bin/plasme_runtime.py').absolutePath}", checkIfExists: true)]
+                input[0] = [[id: 'pUTI89'], file("${System.getenv('AUTOPLASM_PLASME_INPUTS')}/pUTI89.fna", checkIfExists: true)]
+                input[1] = file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true)
+                input[2] = file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true)
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.predictions.size() == 1
+            assert process.out.plasmid_fasta.size() == 1
+            assert process.out.report.size() == 1
+            assert process.out.runtime.size() == 1
+            assert process.out.predictions[0][0].id == 'pUTI89'
+            def rows = path(process.out.predictions[0][1]).text.readLines()
+            assert rows.size() == 2
+            assert rows[0].startsWith('contig_id\t')
+            assert rows[1].startsWith('NC_007941.1\t')
+            def raw = path(process.out.report[0][1]).text.readLines()
+            assert raw.size() == 2
+            assert raw[1].startsWith('NC_007941.1\t')
+            def observed = path(process.out.plasmid_fasta[0][1]).text.readLines()
+            def original = new File(System.getenv('AUTOPLASM_PLASME_INPUTS'), 'pUTI89.fna').readLines()
+            assert observed.findAll { !it.startsWith('>') }.join('') == original.findAll { !it.startsWith('>') }.join('')
+            assert observed[0].tokenize(' ')[0] == '>NC_007941.1'
+            def runtime = new groovy.json.JsonSlurper().parseText(path(process.out.runtime[0][1]).text)
+            assert runtime.exit_code == 0
+            assert runtime.versions.torch == '1.11.0'
+            assert runtime.local_source_patch.applied
+            assert runtime.candidate_records == 1
+            assert runtime.transformer_scores == 1
+        }
+    }
+
+    test('complete pUTI89 gzip runs the real Transformer') {
+        when {
+            process {
+                """
+                input[3] = [file("${new File('bin/normalize_plasme_outputs.py').absolutePath}", checkIfExists: true), file("${new File('bin/plasme_runtime.py').absolutePath}", checkIfExists: true)]
+                input[0] = [[id: 'pUTI89'], file("${System.getenv('AUTOPLASM_PLASME_INPUTS')}/pUTI89.fna.gz", checkIfExists: true)]
+                input[1] = file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true)
+                input[2] = file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true)
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.predictions.size() == 1
+            assert process.out.plasmid_fasta.size() == 1
+            assert process.out.report.size() == 1
+            assert process.out.runtime.size() == 1
+            assert process.out.predictions[0][0].id == 'pUTI89'
+            def rows = path(process.out.predictions[0][1]).text.readLines()
+            assert rows.size() == 2
+            assert rows[0].startsWith('contig_id\t')
+            assert rows[1].startsWith('NC_007941.1\t')
+            def raw = path(process.out.report[0][1]).text.readLines()
+            assert raw.size() == 2
+            assert raw[1].startsWith('NC_007941.1\t')
+            def observed = path(process.out.plasmid_fasta[0][1]).text.readLines()
+            def original = new File(System.getenv('AUTOPLASM_PLASME_INPUTS'), 'pUTI89.fna').readLines()
+            assert observed.findAll { !it.startsWith('>') }.join('') == original.findAll { !it.startsWith('>') }.join('')
+            assert observed[0].tokenize(' ')[0] == '>NC_007941.1'
+            def runtime = new groovy.json.JsonSlurper().parseText(path(process.out.runtime[0][1]).text)
+            assert runtime.exit_code == 0
+            assert runtime.versions.torch == '1.11.0'
+            assert runtime.local_source_patch.applied
+            assert runtime.candidate_records == 1
+            assert runtime.transformer_scores == 1
+        }
+    }
+}

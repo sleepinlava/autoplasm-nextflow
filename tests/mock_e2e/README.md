@@ -12,8 +12,10 @@
 和长读 FASTQ。共 7,798 对短读，输入约 614 KiB。
 
 序列为随机合成 DNA；**真实 geNomad 不保证将其识别为质粒**。本测试由 mock
-geNomad 给出预设阳性/阴性结果，mock CoverM 给出已知丰度，检验后续传递。
-mock 比对文件是测试占位内容，不是可用于其他软件的 SAM/BAM。
+geNomad 给出预设阳性/阴性结果。六个样本的12条DNA均不同，本地contig ID仍重叠，
+用于检测把不同序列误当同一特征的错误。mock比对器只做精确匹配，并将实际read ID、
+DNA摘要、参考序列、坐标和方向写入JSON；mock CoverM据这些匹配计算计数、覆盖与丰度，
+不再根据输出文件名制造预期值。JSON不是可用于其他软件的SAM/BAM，也不代表原生比对效果。
 每个样本附 40 条 2 kb 长读。`--long-input mixed` 会加入明确标识为 mock 的
 BAM/POD5 JSON 占位文件，以验证输入路由；这些文件不能交给真实 samtools/Dorado。
 
@@ -27,7 +29,7 @@ python3 tests/mock_e2e/run.py --outdir results/mock-positive
 python3 tests/mock_e2e/run.py --outdir results/mock-empty --empty-plasmids
 ```
 
-平台参数为 `--platform illumina|ont|pacbio_hifi|hybrid`，默认 `illumina`。
+平台参数为 `--platform illumina|ont|pacbio_hifi|hybrid|assembly`，默认 `illumina`。
 例如（同样要求每次使用全新目录）：
 
 ```bash
@@ -67,26 +69,35 @@ python3 tests/mock_e2e/generate.py --outdir data/mock-input
 ## 检查内容与覆盖边界
 
 - Illumina、ONT、PacBio HiFi、hybrid 默认工具链；短读额外开启 raw/clean FastQC。
-- hybrid 覆盖默认 OPERA-MS 和替代 hybridSPAdes，生产主入口完整执行。
-- 校验每类进程数量和 `COMPLETED` 状态，不将跳过、缓存或空跑计为通过。
-- 校验 12 行 contig 丰度、6 行质粒丰度（空场景 0 行）及逐样本精确数值。
-- 校验共识、带样本前缀的 catalog、12 行多样性指标、2 行差异结果、报告样本数。
+- hybrid可选择OPERA-MS或hybridSPAdes；支持选项不等于两种实现都已有本轮完整运行证据。
+- 校验实际trace中的每类进程数量、退出0及COMPLETED/CACHED状态；缓存另记，不计作新执行。
+- 统一参考目录含12条不同DNA特征，跨六个样本完整重映射，产生72行contig丰度及36行质粒丰度（空场景0行）。
+- 逐项核对read来源、实际计数/覆盖/丰度、参考DNA摘要、共识DNA、统计特征域与报告样本数。
 - 空质粒时跳过分型、注释、质粒定量和 catalog，但保留全样本报告和空丰度表。
 - 长读 minimap2 检查 ONT/hybrid 使用 `map-ont`，HiFi 使用 `map-hifi`。
-- 长读丰度设为短读的两倍；hybrid contig 合并值为两路之和，质粒保留两路表，
-  跨样本质粒表须使用短读值。merge 命令检查两路 BAM 实际进入合并。
+- 丰度由实际匹配的read数和碱基数决定，不能预设固定倍数；hybrid合并两路匹配，
+  质粒保留两路表，跨样本质粒表使用短读值。merge检查两路数据、参考身份及重复read。
 - 各平台宿主 profile 每样本一份；hybrid 必须只使用短读输入。
 - ONT/hybrid MultiQC 暂存目录必须保留全部 6 份 NanoPlot 报告。
 
-未覆盖 assembly 平台、其他短读组装器、宿主去除、medaka、MAG、binning、
-宿主关联、DESeq2 和网络分支；未验证真实外部工具运行、数据库、分类性能及
+本轮五场景为Illumina阳性160任务、ONT空91、HiFi mixed137、assembly63、
+hybrid宿主去除201，共652条当前trace，含明确记录的缓存；无样本丢失。
+hybrid中6个长读宿主任务使用真实Minimap2/SAMtools，逐read核对保留结果；
+短读宿主过滤仍是传递全部成对reads的命名观察替身，不能宣称真实去宿主。
+9项来源反例单元方法检查换reads、换index、混合mates、到达顺序、修改参考及过期任务证据。
+保留的失败/中断尝试另列，重放和只读重新核验不增加实际成功任务数。
+
+未验证其他短读组装器、medaka、MAG、binning、宿主关联、DESeq2和网络等可选分支；
+未验证全部真实外部工具运行、数据库、分类性能及
 新增 hifiasm_meta Conda 环境的实际安装。HiFi 生产分支当前没有接入 MultiQC，
 不会将该任务计为已验证。默认未启用的可选分析不计入通过的任务数。
 
-报告仍扫描 publish 目录。此次补上跨样本统计完成依赖，但其他可选分支的
-等待依赖、异步发布和复用旧 outdir 的风险尚未彻底解决；测试强制使用新目录。
+报告读取显式传入的本轮产物，测试仍强制新输出目录。验证器仅读取当前trace对应的
+工作目录，过期尝试不能弥补本轮缺失的来源证据。详见docs/tool-audit/contracts/mock-provenance.md。
 
 ## 2026-10-16 实测
+
+以下为历史结果，不能作为当前来源/计数/通过状态；本轮2026-10-24记录见上述契约及对应receipt。
 
 追加平台场景全部通过（数字为完成任务数）：
 
@@ -124,3 +135,5 @@ FastQC/MultiQC、samtools 未运行，未计为通过。
 
 失败基线及成功结果保留在仓库 `results/mock-e2e/`，详见
 `docs/mock-e2e-validation.md`。
+
+SPAdes 外部命令 observer 只提供组装 FASTA 等本测试所需接口，不再写入伪 FASTG；它没有实际执行计划与最终迭代来源，不能通过真实图来源校验。Recycler/gplas 图路径由独立原生测试验证；本 mock 不认证图分箱。

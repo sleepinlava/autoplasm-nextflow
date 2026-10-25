@@ -13,7 +13,7 @@ nextflow_process {
 
     setup {
         run("UNTAR") {
-            script "../../../untar/main.nf"
+            script "tests/nf-test/prerequisites/nf-core/untar/main.nf"
             process {
             """
             input[0] = [
@@ -38,6 +38,7 @@ nextflow_process {
 
             process {
                 """
+                input[3] = file("${new File('bin/normalize_gtdb_bins.py').absolutePath}", checkIfExists: true)
                 input[0] = [
                     [ id:'test', single_end:false, assembler:'SPADES' ],
                     [file(params.modules_testdata_base_path + 'genomics/prokaryotes/escherichia_coli/genome/genome.fa', checkIfExists: true)]
@@ -70,6 +71,7 @@ nextflow_process {
 
             process {
                 """
+                input[3] = file("${new File('bin/normalize_gtdb_bins.py').absolutePath}", checkIfExists: true)
                 input[0] = [
                     [ id:'test', single_end:false, assembler:'SPADES' ],
                     [file(params.modules_testdata_base_path + 'genomics/prokaryotes/escherichia_coli/genome/genome.fa', checkIfExists: true)]

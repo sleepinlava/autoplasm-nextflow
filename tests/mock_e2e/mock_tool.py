@@ -9,6 +9,7 @@ Adapted to the nf-core module command shapes of branch refactor/nf-core-modules
 (version probes, stdout SAM pipes, gzipped assembly inputs, renamed outputs).
 """
 import gzip
+import hashlib
 import json
 import os
 import shutil
@@ -19,6 +20,11 @@ from pathlib import Path
 
 args = sys.argv[1:]
 tool = Path(sys.argv[0]).name
+if tool == 'perl':
+    # Production OPERA-MS explicitly uses perl -S. This dispatcher is an
+    # interpreter/CLI observer only, not Perl or OPERA-MS execution evidence.
+    assert args[:2] == ['-S', 'OPERA-MS.pl'], args
+    tool, args = 'OPERA-MS.pl', args[2:]
 
 
 def arg(flag):
@@ -70,6 +76,55 @@ def fasta(path):
                 records[name] += line
     assert records and all(records.values()), path
     return records
+
+
+def fasta_text(records):
+    return ''.join(f'>{name}\n{sequence}\n' for name, sequence in records.items())
+
+
+def reference_for_reads(paths):
+    """Assembler observer selects truth by read provenance, never output name."""
+    truth = json.loads((fixture / 'truth.json').read_text())
+    origins = truth['read_origins']
+    owners = set()
+    for path in paths:
+        lines = fastq(path).splitlines()
+        owners.update(origins[lines[i][1:].split()[0]]['sample_id'] for i in range(0, len(lines), 4))
+    if len(owners) != 1:
+        raise ValueError('Assembler observer received mixed or missing sample reads')
+    return truth['reference_sequences'][owners.pop()]
+
+
+def exact_payload(records, inputs, mapper):
+    """Toy primary alignments for unique exact matches, not a native mapper."""
+    reads, alignments = [], []
+    seen = set()
+    for text in inputs:
+        lines = text.splitlines()
+        for i in range(0, len(lines), 4):
+            rid, dna = lines[i][1:].split()[0], lines[i + 1]
+            if rid in seen:
+                raise ValueError('Duplicate input read in alignment observer: ' + rid)
+            seen.add(rid)
+            digest = hashlib.sha256(dna.encode()).hexdigest()
+            reads.append({'read_id': rid, 'length': len(dna), 'dna_sha256': digest})
+            reverse = dna.translate(str.maketrans('ACGT', 'TGCA'))[::-1]
+            matches = {}
+            for contig, sequence in records.items():
+                for query, strand in [(dna, '+'), (reverse, '-')]:
+                    start = sequence.find(query)
+                    if start >= 0:
+                        if sequence.find(query, start + 1) >= 0:
+                            raise ValueError('Observer only supports unambiguous exact-match fixtures')
+                        matches.setdefault((contig, start), strand)
+            if len(matches) > 1:
+                raise ValueError('Observer only supports unambiguous exact-match fixtures')
+            if matches:
+                (contig, start), strand = next(iter(matches.items()))
+                alignments.append({'read_id': rid, 'contig': contig, 'start': start,
+                                   'end': start + len(dna), 'strand': strand, 'mapper': mapper})
+    return {'mock': True, 'scope': 'unique exact-match toy alignments, no native mapper inference',
+            'records': records, 'mappers': [mapper], 'input_reads': reads, 'alignments': alignments}
 
 
 def positionals(tokens, flags_with_value=()):
@@ -152,16 +207,16 @@ elif tool == 'megahit':
     if args == ['-v']:
         print('MEGAHIT v1.2.9')
     else:
-        fastq(arg('-1')); fastq(arg('-2'))
+        records = reference_for_reads([arg('-1'), arg('-2')])
         # nf-core megahit: no -o; the tool writes ./megahit_out and the module
         # pigz's the *.fa files and moves them up afterwards.
         prefix = arg('--out-prefix')
         write(Path('megahit_out') / (prefix + '.contigs.fa'),
-              (fixture / 'reference.fasta').read_text())
+              fasta_text(records))
         write(Path('megahit_out') / (prefix + '.log'), 'MOCK megahit log\n')
         for suffix in ['contigs.fa', 'addi.fa', 'local.fa', 'final.contigs.fa']:
             write(Path('megahit_out/intermediate_contigs') / f'k21.{suffix}',
-                  (fixture / 'reference.fasta').read_text())
+                  fasta_text(records))
 elif tool == 'quast.py':
     if '--version' in args:
         print('QUAST v5.3.0')
@@ -218,15 +273,18 @@ elif tool == 'bowtie2':
     else:
         # nf-core bowtie2/align: SAM goes to stdout through a samtools pipe;
         # host removal additionally requests --un-conc-gz unmapped pairs.
-        fastq(arg('-1')); fastq(arg('-2'))
+        read_data = [fastq(arg('-1')), fastq(arg('-2'))]
         if '--un-conc-gz' in args:
             target = arg('--un-conc-gz')
-            with gzip.open(target + '.1.gz', 'wt') as fh:
-                fh.write(fastq(arg('-1')))
-            with gzip.open(target + '.2.gz', 'wt') as fh:
-                fh.write(fastq(arg('-2')))
-        print(json.dumps({'records': json.loads(require(arg('-x') + '.mock.json').read_text()),
-                          'mappers': ['short']}))
+            # Bowtie2 2.5.4 wrapper replaces %, otherwise inserts .1/.2
+            # before the final extension (it does not append another .gz).
+            for mate in ['1', '2']:
+                path = Path(target)
+                name = (path.name.replace('%', mate) if '%' in path.name else
+                        path.stem + '.' + mate + path.suffix if path.suffix else path.name + '.' + mate)
+                with gzip.open(path.with_name(name), 'wt') as fh:
+                    fh.write(fastq(arg('-' + mate)))
+        print(json.dumps(exact_payload(json.loads(require(arg('-x') + '.mock.json').read_text()), read_data, 'short')))
         print('mock bowtie2 alignment stats', file=sys.stderr)
 elif tool == 'minimap2':
     if '--version' in args:
@@ -239,7 +297,9 @@ elif tool == 'minimap2':
         fasta_ref, reads = positional[0], positional[1]
         data = fastq(reads)
         assert arg('-ax') == ('map-hifi' if os.environ['AUTOPLASM_MOCK_PLATFORM'] == 'pacbio_hifi' else 'map-ont')
-        print(json.dumps({'records': fasta(fasta_ref), 'mappers': ['long'], 'fastq': data}))
+        payload = exact_payload(fasta(fasta_ref), [data], 'long')
+        payload.update(unpaired=True, fastq=data)
+        print(json.dumps(payload))
 elif tool == 'samtools':
     if args[0] == 'version':
         print('samtools 1.24')
@@ -251,6 +311,7 @@ elif tool == 'samtools':
         bam = next(a for a in args if a.endswith('.bam'))
         source = json.loads(require(bam).read_text())
         assert source['mock']
+        assert source.get('unpaired'), 'This observer models unpaired long-read records only'
         if source.get('format') == 'bam':
             # uBAM double: the reads live in a fixture FASTQ path
             data = fastq(source['fastq'])
@@ -259,13 +320,15 @@ elif tool == 'samtools':
             data = source['fastq']
         else:
             raise ValueError(f'{tool}: unsupported fastq payload: {source}')
-        if '-1' in args:
-            # separate mode (basecalling uBAM): unpaired records land in -0
-            with gzip.open(arg('-0'), 'wt') as fh:
-                fh.write(data)
-        else:
-            # interleave mode: stdout redirect to <prefix>_interleaved.fastq
-            print(data, end='')
+        # Category 0 is determined by READ1/READ2 flags, not the presence of
+        # -1 or stdout interleaving. Every modeled input is unpaired.
+        assert '-0' in args
+        with gzip.open(arg('-0'), 'wt') as fh:
+            fh.write(data)
+        for flag in ['-1', '-2', '-s']:
+            if flag in args:
+                with gzip.open(arg(flag), 'wt') as fh:
+                    fh.write('')
     elif args[0] == 'sort':
         # `samtools sort [args] -T prefix --threads N -o <out> [-]`; input is
         # stdin when the only positional is '-' (or none, e.g. minimap2 pipe).
@@ -284,12 +347,15 @@ elif tool == 'samtools':
             'short' if os.environ['AUTOPLASM_MOCK_PLATFORM'] == 'illumina' else 'long']
         assert sorted(mappers) == sorted(expected), f'Merge lost or duplicated a mapper: {mappers}'
         assert all(payload['records'] == payloads[0]['records'] for payload in payloads)
-        write(output, json.dumps({'records': payloads[0]['records'], 'mappers': mappers}))
+        reads = [read for payload in payloads for read in payload['input_reads']]
+        assert len(reads) == len({read['read_id'] for read in reads}), 'Merge duplicated input reads'
+        write(output, json.dumps({'mock': True, 'records': payloads[0]['records'], 'mappers': mappers,
+                                  'input_reads': reads, 'alignments': [row for payload in payloads for row in payload['alignments']]}))
     elif args[0] == 'view':
         # view either copies a payload BAM (`-f 4` host filtering) or collects
         # the aligner's stdout pipe (host-removal bowtie2 chain, input '-').
         tokens = positionals(args[1:], ('--threads', '-@', '-o', '-f', '-F', '-q', '-L', '--qname-file',
-                                        '--output-unselected', '--reference'))
+                                        '--output-unselected', '--reference', '-e'))
         data = sys.stdin.read() if not tokens or tokens[-1] == '-' else require(tokens[-1]).read_text()
         write(arg('-o'), data)
     elif args[0] == 'index':
@@ -304,14 +370,30 @@ elif tool == 'coverm':
     else:
         payload = json.loads(require(arg('--bam-files')).read_text())
         records = payload['records']
-        scale = sum(1 if mapper == 'short' else 2 for mapper in payload['mappers'])
         output = arg('--output-file')
-        samples = json.loads((fixture / 'truth.json').read_text())['samples']
-        index = next(i for i, sid in enumerate(samples) if output.startswith(sid + '.'))
-        rows = ['Contig\tMOCK Mean\tMOCK TPM\tMOCK RPKM']
-        for name in records:
-            value = (10 + 2 * index if name == 'plasmid_1' else 30 - index) * scale
-            rows.append(f'{name}\t{value}\t{value * 100}\t{value * 10}')
+        counted = 'count' in args
+        rows = ['Contig\tMOCK Mean\tMOCK TPM\tMOCK RPKM' + ('\tMOCK Read Count' if counted else '')]
+        reads = {row['read_id']: row for row in payload['input_reads']}
+        assert len(reads) == len(payload['input_reads']), 'Duplicate input reads in BAM observer'
+        statistics = {name: {'count': 0, 'bases': 0} for name in records}
+        aligned = set()
+        for alignment in payload['alignments']:
+            rid, name = alignment['read_id'], alignment['contig']
+            assert rid not in aligned and rid in reads and name in records, 'Invalid or duplicate primary alignment'
+            aligned.add(rid)
+            sequence = records[name][alignment['start']:alignment['end']]
+            if alignment['strand'] == '-':sequence = sequence.translate(str.maketrans('ACGT', 'TGCA'))[::-1]
+            assert len(sequence) == reads[rid]['length'] and hashlib.sha256(sequence.encode()).hexdigest() == reads[rid]['dna_sha256'], 'Alignment reference differs from actual input read DNA'
+            statistics[name]['count'] += 1
+            statistics[name]['bases'] += len(sequence)
+        rpk_sum = sum(row['count'] * 1000 / len(records[name]) for name, row in statistics.items())
+        for name, dna in records.items():
+            count = statistics[name]['count']
+            mean = statistics[name]['bases'] / len(dna)
+            rpk = count * 1000 / len(dna)
+            tpm = rpk * 1e6 / rpk_sum if rpk_sum else 0
+            rpkm = rpk * 1e6 / len(reads) if reads else 0
+            rows.append(f'{name}\t{mean:.17g}\t{tpm:.17g}\t{rpkm:.17g}' + (f'\t{count}' if counted else ''))
         write(output, '\n'.join(rows) + '\n')
 elif tool == 'plasmidfinder.py':
     # nf-core plasmidfinder: `plasmidfinder.py --legacy -i <fasta> -o ./ -x`;
@@ -434,19 +516,19 @@ elif tool == 'flye':
     if '--version' in args:
         print('2.9.5')
     else:
-        fastq(arg('--nano-raw'))
+        records = reference_for_reads([arg('--nano-raw')])
         assert '--meta' in args
         out = Path(arg('--out-dir'))
-        write(out / 'assembly.fasta', (fixture / 'reference.fasta').read_text())
+        write(out / 'assembly.fasta', fasta_text(records))
         write(out / 'assembly_graph.gfa', 'H\tVN:Z:1.0\nS\tcontig_1\t*\n')
         write(out / 'assembly_graph.gv', 'digraph { }\n')
         write(out / 'assembly_info.txt', '#seq_name\tlength\tcov.\tcircular\ncontig_1\t1000\t10\tN\n')
         write(out / 'flye.log', 'MOCK flye log\n')
         write(out / 'params.json', '{"mock": true}\n')
 elif tool in ['hifiasm', 'hifiasm_meta']:
-    fastq(args[-1])
+    records = reference_for_reads([args[-1]])
     suffix = '.p_ctg.gfa' if tool == 'hifiasm_meta' else '.bp.p_ctg.gfa'
-    write(arg('-o') + suffix, ''.join(f'S\t{name}\t{seq}\n' for name, seq in fasta(fixture / 'reference.fasta').items()))
+    write(arg('-o') + suffix, ''.join(f'S\t{name}\t{seq}\n' for name, seq in records.items()))
 elif tool in ['OPERA-MS.pl', 'spades.py']:
     if '--version' in args:
         print('SPAdes genome assembler v4.1.0')
@@ -455,17 +537,21 @@ elif tool in ['OPERA-MS.pl', 'spades.py']:
         for flag in flags:
             if flag in args:
                 fastq(arg(flag))
+        records = reference_for_reads([arg(flag) for flag in flags if flag in args])
         if tool == 'OPERA-MS.pl':
             assert int(arg('--num-processors')) >= 2, 'OPERA-MS requires at least two processors'
+            assert not arg('--long-read').lower().endswith('.gz'), 'OPERA-MS0.8.3 requires decoded long reads'
         else:
             assert '--meta' in args
         # nf-core spades writes into -o ./ and the module renames/gzips the
-        # products; the FASTG copy is a local patch for SCAPP.
+        # products. This assembler observer emits no graph: graph provenance
+        # and graph consumers require their separately locked native tests.
         output = Path(arg('--out-dir') if tool == 'OPERA-MS.pl' else arg('-o'))
-        write(output / 'contigs.fasta', (fixture / 'reference.fasta').read_text())
-        write(output / 'scaffolds.fasta', (fixture / 'reference.fasta').read_text())
+        write(output / 'contigs.fasta', fasta_text(records))
+        if tool == 'OPERA-MS.pl':
+            write(output / 'intermediate_files/coverage_estimation/short_read_analysis.err', 'Explicit CLI observer; no native coverage estimation\n')
+        write(output / 'scaffolds.fasta', fasta_text(records))
         write(output / 'spades.log', 'MOCK spades log\n')
-        write(output / 'assembly_graph.fastg', '### mock fastg\n')
         write(output / 'assembly_graph_with_scaffolds.gfa', 'H\tVN:Z:1.0\n')
 elif tool == 'dorado':
     assert args[0] == 'basecaller' and '--emit-fastq' in args

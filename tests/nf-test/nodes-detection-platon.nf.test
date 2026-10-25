@@ -16,11 +16,13 @@ nextflow_process {
         when {
             process {
                 """
+                input[2] = file("${new File('bin/platon_checked.py').absolutePath}", checkIfExists: true)
                 input[0] = [
                     [id: 'pUTI89'],
                     file("${System.getenv('AUTOPLASM_TEST_DATA')}/pUTI89.fasta", checkIfExists: true)
                 ]
-                input[1] = file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true)
+                input[1] = [file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true),
+                            files("${System.getenv('AUTOPLASM_DB')}/platon/db/**", type: 'file', hidden: true)]
                 """
             }
         }
@@ -34,6 +36,52 @@ nextflow_process {
             def rows = lines.drop(1).findAll { it.startsWith('NC_007941.1\t') }
             assert rows.size() == 1
             assert rows[0].split('\t', -1).length > 5
+            assert rows[0].split('\t', -1).length == 14
+            assert process.out.plasmid_fasta.size() == 1
+            def state = new groovy.json.JsonSlurper().parseText(path(process.out.state[0][1]).text)
+            assert state.sample_id == 'pUTI89'
+            assert state.state == 'plasmids_found'
+            assert state.plasmid_ids == ['NC_007941.1']
+            def audit = new groovy.json.JsonSlurper().parseText(path(process.out.runtime[0][1]).text)
+            assert audit.source_commit == '3cce2dd295348e25be4b5bd64f3622c2603d6ba0'
+            assert audit.failed_children == []
+            assert audit.worker_errors == []
+        }
+    }
+
+    test('platon classifies gzip pUTI89 from the locked upstream artifact') {
+        when {
+            process {
+                """
+                input[2] = file("${new File('bin/platon_checked.py').absolutePath}", checkIfExists: true)
+                input[0] = [
+                    [id: 'pUTI89_gzip'],
+                    file("${System.getenv('AUTOPLASM_TEST_DATA')}/data/genomics/prokaryotes/plasmids/pUTI89/pUTI89.fna.gz", checkIfExists: true)
+                ]
+                input[1] = [file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true),
+                            files("${System.getenv('AUTOPLASM_DB')}/platon/db/**", type: 'file', hidden: true)]
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.predictions.size() == 1
+            def lines = path(process.out.predictions[0][1]).text.readLines()
+            assert lines.size() >= 2
+            assert lines[0].contains('ID')
+            def rows = lines.drop(1).findAll { it.startsWith('NC_007941.1\t') }
+            assert rows.size() == 1
+            assert rows[0].split('\t', -1).length > 5
+            assert process.out.plasmid_fasta.size() == 1
+            assert path(process.out.plasmid_fasta[0][1]).text.contains('>NC_007941.1')
+            assert rows[0].split('\t', -1).length == 14
+            def state = new groovy.json.JsonSlurper().parseText(path(process.out.state[0][1]).text)
+            assert state.sample_id == 'pUTI89_gzip'
+            assert state.state == 'plasmids_found'
+            assert state.plasmid_ids == ['NC_007941.1']
+            def audit = new groovy.json.JsonSlurper().parseText(path(process.out.runtime[0][1]).text)
+            assert audit.failed_children == []
+            assert audit.worker_errors == []
         }
     }
 }

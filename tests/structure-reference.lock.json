@@ -1,0 +1,31 @@
+{
+  "retrieved": "2026-10-21",
+  "references": [
+    {
+      "accession": "NC_003903.1",
+      "length": 356023,
+      "topology": "linear",
+      "sequence_sha256": "909d85ee50c1ba31928fddf6559b0b221370e6ad7272ed80218509d316d882f8",
+      "files": {
+        "gb": "462ca3ab2dbbd598c90f2e9c28a45f6f000220304133199da420a2beb8a7a071",
+        "fasta": "ec8bf52a876914bcaeb212b0948177d6c78c98f4f0a8dc8f0fe9612876c74467"
+      },
+      "genbank_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_003903.1&rettype=gbwithparts&retmode=text",
+      "fasta_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_003903.1&rettype=fasta&retmode=text"
+    },
+    {
+      "accession": "NC_007941.1",
+      "length": 114230,
+      "topology": "circular",
+      "sequence_sha256": "4966cccce7f09029ffcdd712418d8aa844d452b206eab563a295997726f65b15",
+      "files": {
+        "gb": "0fbb58f15da521ba9ba38a5a19ba02b9d4d4d8d1db6c51cfa791ab2481393b9b",
+        "fasta": "f48980b3e15eb733333493755a432de7e2380b71abf8ac682d92e94353ad8431"
+      },
+      "genbank_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_007941.1&rettype=gbwithparts&retmode=text",
+      "fasta_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_007941.1&rettype=fasta&retmode=text"
+    }
+  ],
+  "independent_linear_topology": "https://pmc.ncbi.nlm.nih.gov/articles/PMC207291/",
+  "limits": "SCP1 independently known linear. pUTI89 raw FASTA is not expected to carry circularity evidence; metadata-derived header is explicitly a separate input."
+}

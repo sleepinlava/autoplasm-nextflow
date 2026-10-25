@@ -5,7 +5,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = ["pytest>=8,<9"]
 
 [project.optional-dependencies]
-pipeline = ["genomad==1.12.0", "quast==5.3.0", "multiqc==1.33"]
+pipeline = ["genomad==1.12.0", "quast==5.3.0", "multiqc==1.35"]
 
 [tool.uv]
 package = false

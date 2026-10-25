@@ -1,6 +1,14 @@
 {
   "schema_version": 1,
   "source": "ENA PRJNA848809 (Sugarbeet leaf bacteriome, BCTV infected vs control, day 6)",
+  "documented_assay": "16S rRNA PCR amplicon sequencing; not shotgun plasmid validation",
+  "assay_evidence": {
+    "experiment": "https://www.ebi.ac.uk/ena/browser/api/xml/SRX15688496",
+    "publication": "https://doi.org/10.3390/ijms23158073",
+    "publication_section": "4.2 Genomic DNA Extraction, PCR Amplification, and 16S rRNA Sequencing",
+    "metadata_conflict": "ENA LIBRARY_STRATEGY=WGS and LIBRARY_SELECTION=RANDOM conflict with the explicit 16S experiment design and paper",
+    "validation_scope": "legacy execution contracts only; no plasmid absence, abundance, differential or network biological claim"
+  },
   "ena_groups": {
     "SRR19638267": "infected",
     "SRR19638268": "infected",

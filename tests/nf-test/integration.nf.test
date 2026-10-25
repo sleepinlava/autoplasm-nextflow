@@ -43,6 +43,10 @@ nextflow_pipeline {
                     assert abundance.text.readLines().size() > 1
                     assert abundance.text.contains('sample_id')
                     assert path("${params.outdir}/tables/plasmid_abundance.tsv").text.contains('plasmid_id')
+                    def cohort = new groovy.json.JsonSlurper().parse(path("${params.outdir}/tables/statistics_inputs/validation.json").toFile())
+                    assert cohort.status == 'validated'
+                    assert cohort.sample_ids.size() == expectedSamples
+                    assert cohort.tables.contigs.samples == expectedSamples
                 }
                 // No differential or network claims from <3 biological replicates/group.
                 assert !path("${params.outdir}/11_diversity/differential_abundance.tsv").exists()

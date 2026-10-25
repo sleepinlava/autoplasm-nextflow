@@ -1,0 +1,49 @@
+// Official fixed GFA and supplied node classifications: native software/IO
+// fixture, not classification accuracy. Full source prepared from locked archive.
+nextflow_process {
+    name 'P3 native gplas graph binning'
+    script '../../modules/binning/gplas2.nf'
+    process 'GPLAS2'
+    tag 'P3'
+    tag 'binning'
+    tag 'backend-native'
+
+    test('fixed graph bins retain native membership and original node DNA') {
+        when {
+            process {
+                """
+                input[2] = file("${new File('bin/gplas_checked.py').absolutePath}", checkIfExists: true)
+                def root = System.getenv('AUTOPLASM_GPLAS_ROOT')
+                input[0] = [
+                    [id: 'native_ecoli_nodes', gplas_original_meta: [id: 'ecoli', group: 'preserved']],
+                    file(root + '/test/test_ecoli.gfa', checkIfExists: true),
+                    file(root + '/gplas/independent_prediction/test_ecoli_plasmid_prediction.tab', checkIfExists: true),
+                    file(root + '/resource_provenance.json', checkIfExists: true)
+                ]
+                input[1] = [file(root, checkIfExists: true), files(root + '/**', type: 'file', hidden: true)]
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.bins.size() == 1
+            def product = path(process.out.bins[0][1])
+            def audit = new groovy.json.JsonSlurper().parseText(path(process.out.runtime[0][1]).text)
+            assert audit.source_commit == '00cf37bec5e44b05ee30c8a4c99e987abbbb4c4f'
+            assert audit.source_sha256.size() == 46
+            assert audit.native_exit_code == 0
+            assert audit.children.size() > 0 && !audit.children.any { it.exit_code != 0 }
+            assert audit.coverage_standard_deviation > 0
+            assert audit.products.bins > 0 && audit.products.memberships > 0
+            def checkFile = new File(product.parent.toString(), 'independent-gplas.json')
+            def cmd = ['python3', new File('tests/check_gplas_native.py').absolutePath,
+                       '--graph', "${System.getenv('AUTOPLASM_GPLAS_ROOT')}/test/test_ecoli.gfa",
+                       '--products', product.toString(), '--name', 'ecoli', '--output', checkFile.absolutePath].collect { it.toString() }
+            def nativeCheck = new ProcessBuilder(cmd).redirectErrorStream(true).start()
+            def log = nativeCheck.inputStream.text
+            assert nativeCheck.waitFor() == 0: log
+            def result = new groovy.json.JsonSlurper().parse(checkFile)
+            assert result.pass && result.memberships == audit.products.memberships
+        }
+    }
+}

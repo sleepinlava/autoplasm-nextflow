@@ -98,4 +98,86 @@ nextflow_pipeline {
             }
         }
     }
+
+    [
+        ['Recycler with MEGAHIT', [platform:'illumina', short_read_assembler:'megahit']],
+        ['Recycler with OPERA-MS', [platform:'hybrid', hybrid_assembler:'opera_ms']],
+        ['Recycler with assembly input', [platform:'assembly']],
+        ['Recycler with ONT', [platform:'ont']],
+        ['Recycler with HiFi', [platform:'pacbio_hifi']]
+    ].each { caseName, overrides ->
+        test(caseName) {
+            when {
+                params {
+                    samplesheet = new File('tests/nf-test/fixtures/duplicate.tsv').absolutePath
+                    outdir = "$outputDir"
+                    plasmid_binning_tools = ['recycler']
+                    overrides.each { key, value -> delegate.setProperty(key, value) }
+                }
+            }
+            then {
+                assert workflow.failed
+                assert workflow.stderr.join('\n').contains('Recycler requires illumina with --short_read_assembler metaspades or hybrid with --hybrid_assembler hybridspades')
+                assert workflow.trace.succeeded().isEmpty()
+                assert workflow.trace.failed().isEmpty()
+            }
+        }
+    }
+
+    ['plasmid_detection_tools', 'plasmid_binning_tools'].each { key ->
+        test("removed SCAPP is rejected in ${key}") {
+            when {
+                params {
+                    samplesheet = new File('tests/nf-test/fixtures/duplicate.tsv').absolutePath
+                    outdir = "$outputDir"
+                    delegate.setProperty(key, ['scapp'])
+                }
+            }
+            then {
+                assert workflow.failed
+                assert workflow.stderr.join('\n').contains("SCAPP nodes have been removed; remove 'scapp' from --${key}")
+                assert workflow.trace.succeeded().isEmpty()
+                assert workflow.trace.failed().isEmpty()
+            }
+        }
+    }
+
+    // Selection errors must win over later samplesheet/database guards.
+    [
+        ['unknown polishing_tools', [polishing_tools: ['__unknown_tool__']], "--polishing_tools has unknown tool '__unknown_tool__'"],
+        ['unknown plasmid_detection_tools', [plasmid_detection_tools: ['__unknown_tool__']], "--plasmid_detection_tools has unknown tool '__unknown_tool__'"],
+        ['unknown plasmid_binning_tools', [plasmid_binning_tools: ['__unknown_tool__']], "--plasmid_binning_tools has unknown tool '__unknown_tool__'"],
+        ['unknown typing_tools', [typing_tools: ['__unknown_tool__']], "--typing_tools has unknown tool '__unknown_tool__'"],
+        ['unknown typing_optional_tools', [typing_optional_tools: ['__unknown_tool__']], "--typing_optional_tools has unknown tool '__unknown_tool__'"],
+        ['unknown host_prediction_tools', [host_prediction_tools: ['__unknown_tool__']], "--host_prediction_tools has unknown tool '__unknown_tool__'"],
+        ['unknown mag_tools', [mag_tools: ['__unknown_tool__']], "--mag_tools has unknown tool '__unknown_tool__'"],
+        ['unknown host_linking_methods', [host_linking_methods: ['__unknown_tool__']], "--host_linking_methods has unknown tool '__unknown_tool__'"],
+        ['unknown host_linking_optional_methods', [host_linking_optional_methods: ['__unknown_tool__']], "--host_linking_optional_methods has unknown tool '__unknown_tool__'"],
+        ['unknown annotation_tools', [annotation_tools: ['__unknown_tool__']], "--annotation_tools has unknown tool '__unknown_tool__'"],
+        ['unknown annotation_optional_tools', [annotation_optional_tools: ['__unknown_tool__']], "--annotation_optional_tools has unknown tool '__unknown_tool__'"],
+        ['unknown comparative_tools', [comparative_tools: ['__unknown_tool__']], "--comparative_tools has unknown tool '__unknown_tool__'"],
+        ['unknown comparative_optional_tools', [comparative_optional_tools: ['__unknown_tool__']], "--comparative_optional_tools has unknown tool '__unknown_tool__'"],
+        ['empty comma entry', [plasmid_detection_tools: 'genomad,,platon'], '--plasmid_detection_tools has an empty tool name'],
+        ['trailing comma entry', [plasmid_detection_tools: 'genomad,'], '--plasmid_detection_tools has an empty tool name'],
+        ['empty list entry', [plasmid_detection_tools: ['']], '--plasmid_detection_tools has an empty tool name'],
+        ['null list entry', [plasmid_detection_tools: [null]], '--plasmid_detection_tools has an invalid tool name'],
+        ['nested list entry', [plasmid_detection_tools: [['platon']]], '--plasmid_detection_tools has an invalid tool name'],
+        ['map selection', [plasmid_detection_tools: [platon: true]], '--plasmid_detection_tools must be a list of tool names']
+    ].each { caseName, overrides, diagnostic ->
+        test(caseName) {
+            when {
+                params {
+                    samplesheet = new File('tests/nf-test/fixtures/duplicate.tsv').absolutePath
+                    outdir = "$outputDir"
+                    overrides.each { key, value -> delegate.setProperty(key, value) }
+                }
+            }
+            then {
+                assert workflow.failed
+                assert workflow.stderr.join('\n').contains(diagnostic)
+                assert workflow.trace.succeeded().isEmpty()
+                assert workflow.trace.failed().isEmpty()
+            }
+        }
+    }
 }

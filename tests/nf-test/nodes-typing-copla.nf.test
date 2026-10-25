@@ -1,0 +1,55 @@
+// Complete archived official RS84 reference graph/model and all9894 FASTAs.
+// One official known-PTU plasmid, not a sensitivity/specificity benchmark.
+nextflow_process {
+    name 'P3 real node: COPLA'
+    script '../../modules/typing/copla.nf'
+    process 'COPLA'
+    tag 'P3'
+    tag 'typing'
+    tag 'backend-native'
+
+    test('complete compressed official plasmid is PTU-Lab26') {
+        when {
+            process {
+                """
+                input[5] = file("${new File('bin/run_copla_candidates.py').absolutePath}", checkIfExists: true)
+                input[0] = [[id:'Lab26'], file("${System.getenv('AUTOPLASM_COPLA_DATA')}/Lab26.fna.gz",checkIfExists:true)]
+                input[1] = file("${System.getenv('AUTOPLASM_COPLA_GRAPH')}",checkIfExists:true)
+                input[2] = file("${System.getenv('AUTOPLASM_COPLA_REFLIST')}",checkIfExists:true)
+                input[3] = file("${System.getenv('AUTOPLASM_COPLA_INSTALLATION')}",checkIfExists:true)
+                input[4] = file("${System.getenv('AUTOPLASM_COPLA_MACSYFINDER')}",checkIfExists:true)
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.typing.size()==1
+            assert process.out.raw.size()==1
+            assert process.out.typing[0][0].id=='Lab26'
+            def rows=path(process.out.typing[0][1]).text.readLines()
+            assert rows.size()==2
+            assert rows[0]=='contig_id\tlength\ttopology\tentity_scope\tpredicted_ptu\thost_range\tscore\tnotes'
+            def row=rows[1].split('\t',-1)
+            assert row[0]=='NZ_CP028329.1' && row[1]=='49442'
+            assert row[2]=='linear' && row[3]=='candidate_record' && row[4]=='PTU-Lab26'
+            assert Double.isFinite(Double.parseDouble(row[6]))
+            assert Double.parseDouble(row[6])>=0.9 && Double.parseDouble(row[6])<=1
+            def raw=path(process.out.raw[0][1])
+            def manifest=new groovy.json.JsonSlurper().parseText(path("${raw}/entities.json").text)
+            assert manifest.source_patch.applied
+            assert manifest.reference_count==9894
+            assert manifest.reference_graph_vertices==9894
+            assert manifest.runtime_versions.graph_tool.startsWith('2.35')
+            assert manifest.entities.size()==1
+            assert manifest.entities[0].id=='NZ_CP028329.1'
+            def key=manifest.entities[0].key
+            def query=path("${raw}/results/${key}/${key}.fna").text.readLines()
+            def original=new File(System.getenv('AUTOPLASM_COPLA_DATA'),'Lab26.fna').readLines()
+            assert query.findAll{!it.startsWith('>')}.join('')==original.findAll{!it.startsWith('>')}.join('')
+            def assessment=path("${raw}/results/${key}/${key}.fna.ani_evaluation.tsv").text.readLines()
+            assert assessment.size()==9895
+            assert assessment[0]=='reference\tstatus'
+            assert !path("${raw}/databases").exists()
+        }
+    }
+}

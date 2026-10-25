@@ -1,4 +1,5 @@
 import csv
+import gzip
 import subprocess
 import tempfile
 import unittest
@@ -134,7 +135,7 @@ class PlasmidConsensusTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(f"Unsupported classification label 'unknown' from plasme at {extra}:2", result.stderr)
 
-    def run_consensus(self, assembly_text, summary_text, extras, weights=None, method="weighted_vote"):
+    def run_consensus(self, assembly_text, summary_text, extras, weights=None, method="weighted_vote", sample_id="S1"):
         assembly = self.root / "assembly.fasta"
         summary = self.root / "genomad.tsv"
         out_fasta = self.root / "plasmids.fasta"
@@ -143,7 +144,7 @@ class PlasmidConsensusTests(unittest.TestCase):
         assembly.write_text(assembly_text)
         summary.write_text(summary_text)
         args = ["--assembly", assembly, "--genomad-summary", summary,
-                "--method", method, "--sample-id", "S1",
+                "--method", method, "--sample-id", sample_id,
                 "--out-fasta", out_fasta, "--out-predictions", predictions,
                 "--out-consensus", consensus]
         for extra in extras:
@@ -156,6 +157,65 @@ class PlasmidConsensusTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         with consensus.open() as fh:
             return list(csv.DictReader(fh, delimiter="\t"))
+
+    def test_tool_identity_and_calls_survive_tool_tokens_in_sample_id(self):
+        sample = "S.plasme.plasx.platon.scapp.confident_cycs"
+        sequence = "ACGT" * 300
+        tools = ("plasme", "plasx", "platon")
+        for tool in tools:
+            with self.subTest(tool=tool):
+                suffix = "tsv"
+                prediction = "contig_id\tclassification\tscore\np1\tplasmid\t0.9\n"
+                if tool == "plasx":
+                    prediction = "contig\tscore\np1\t0.9\n"
+                weights = "genomad:0.4," + ",".join(
+                    f"{name}:{0.6 if name == tool else 0.1}" for name in tools
+                )
+                rows = self.run_consensus(
+                    f">p1\n{sequence}\n", "seq_name\tplasmid_score\n",
+                    [(f"{sample}.{tool}.{suffix}", prediction)],
+                    weights=weights, sample_id=sample,
+                )
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["sample_id"], sample)
+                self.assertEqual(rows[0]["supporting_tools"], tool)
+                self.assertEqual(rows[0]["plasmid_call"], "plasmid")
+                with (self.root / "predictions.tsv").open() as fh:
+                    calls = list(csv.DictReader(fh, delimiter="\t"))
+                self.assertEqual([row["tool_id"] for row in calls], [tool])
+                fasta = (self.root / "plasmids.fasta").read_text().splitlines()
+                self.assertEqual(fasta[0], ">p1")
+                self.assertEqual("".join(fasta[1:]), sequence)
+
+    def test_terminal_csv_gzip_remain_supported(self):
+        sequence = "ACGT" * 300
+        assembly = self.root / "assembly.fasta"
+        assembly.write_text(f">p1\n{sequence}\n")
+        summary = self.root / "genomad.tsv"
+        summary.write_text("seq_name\tplasmid_score\n")
+        cases = [
+            ("S.plasme.X.PLATON.CSV", "contig_id,score\np1,0.9\n", "platon"),
+            ("S.plasme.X.platon.tsv.gz", "contig_id\tscore\np1\t0.9\n", "platon"),
+        ]
+        for name, content, tool in cases:
+            with self.subTest(name=name):
+                extra = self.root / name
+                if name.endswith(".gz"):
+                    with gzip.open(extra, "wt") as fh:
+                        fh.write(content)
+                else:
+                    extra.write_text(content)
+                result = self.run_script(
+                    "--assembly", assembly, "--genomad-summary", summary,
+                    "--extra", extra, "--weights", "genomad:0.4,platon:0.6",
+                    "--out-fasta", self.root / "out.fa",
+                    "--out-predictions", self.root / "pred.tsv",
+                    "--out-consensus", self.root / "cons.tsv",
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                with (self.root / "pred.tsv").open() as fh:
+                    self.assertEqual([row["tool_id"] for row in csv.DictReader(fh, delimiter="\t")], [tool])
+                self.assertTrue((self.root / "out.fa").read_text().startswith(">p1\n"))
 
     def test_ensemble_columns_track_per_tool_calls(self):
         rows = self.run_consensus(
@@ -195,7 +255,7 @@ class PlasmidConsensusTests(unittest.TestCase):
             [],
         )
         row = rows[0]
-        for tool in ("plasme", "plasx", "platon", "scapp"):
+        for tool in ("plasme", "plasx", "platon"):
             self.assertEqual(row[tool], "NA")
         self.assertEqual(row["genomad"], "plasmid")
         self.assertEqual(row["plasmid_count"], "1")
@@ -207,7 +267,7 @@ class PlasmidConsensusTests(unittest.TestCase):
                          ["contig_id", "sample_id", "plasmid_call", "supporting_tools",
                           "conflicting_tools", "consensus_method", "length", "gc_content",
                           "plasmid_count", "combined_prediction",
-                          "genomad", "plasme", "plasx", "platon", "scapp"])
+                          "genomad", "plasme", "plasx", "platon"])
 
 
 if __name__ == "__main__":

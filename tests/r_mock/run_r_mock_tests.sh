@@ -28,13 +28,13 @@ check_grep() { # check_grep <label> <file> <pattern>
 SAMPLES="S1 S2 S3 S4 S5 S6"
 
 # ---------- shared mock inputs ----------
-# CoverM-style per-sample tables (Contig / Length / Count Mean / RPKM / TPM)
+# Controlled CoverM-style tables; Count is specified separately from coverage.
 i=0
 for s in $SAMPLES; do
   i=$((i + 1))
-  { printf 'Contig\tLength\tCount Mean\tRPKM\tTPM\n'
-    printf 'plasmid_1\t5000\t%s\t%s\t%s\n' "$((10 * i))" "$((20 + i))" "$((30 + i))"
-    printf 'chrom_1\t50000\t%s\t%s\t%s\n' "$((100 - i))" "$((50 + i))" "$((60 + i))"
+  { printf 'Contig\tLength\tCount Mean\tRPKM\tTPM\tRead Count\n'
+    printf 'plasmid_1\t5000\t%s\t%s\t%s\t%s\n' "$((10 * i))" "$((20 + i))" "$((30 + i))" "$((13 * i))"
+    printf 'chrom_1\t50000\t%s\t%s\t%s\t%s\n' "$((100 - i))" "$((50 + i))" "$((60 + i))" "$((200 - i))"
   } > "${s}.coverm.tsv"
 done
 # Metadata: two groups of three
@@ -148,11 +148,12 @@ check_grep "jaccard field" coabundance_links.tsv "jaccard="
 # ---------- 7. sequence_similarity_link.R ----------
 Rscript "$BIN/sequence_similarity_link.R" --plasmid-contigs S1.plasmid_contigs.fasta \
   --host-genomes mag_bins --taxonomy taxonomy.tsv --sample-id S1 \
-  --min-similarity 0.7 --out sequence_links.tsv 2>seq.err
+  --min-similarity 0.7 --out sequence_links.tsv --out-scores sequence_scores.tsv 2>seq.err
 check "sequence_similarity_link exits 0" test $? -eq 0
-check_grep "identical sequence links to bin.1" sequence_links.tsv $'	bin.1	'
-check_grep "taxonomy attached" sequence_links.tsv "d__Bacteria"
-check_grep "TETRA method label" sequence_links.tsv "method=tetra_zscore"
+check_grep "identical sequence scores bin.1" sequence_scores.tsv $'	bin.1	'
+check_grep "taxonomy attached" sequence_scores.tsv "d__Bacteria"
+check_grep "TETRA method label" sequence_scores.tsv "tetra_markov256_v1"
+check "uncalibrated host links disabled" test "$(wc -l < sequence_links.tsv)" -eq 1
 
 # ---------- 8. longread_bridge_link.R ----------
 Rscript "$BIN/longread_bridge_link.R" --sam alignments.sam --plasmid-contigs S1.plasmid_contigs.fasta \
@@ -173,7 +174,7 @@ Rscript "$BIN/plasmid_consensus.R" --assembly assembly.fasta --genomad-summary g
   --out-fasta plasmids.fasta --out-predictions predictions.tsv --out-consensus consensus.tsv 2>consensus.err
 check "plasmid_consensus exits 0" test $? -eq 0
 check_grep "consensus call" consensus.tsv $'plasmid_1	S1	plasmid'
-check_grep "ensemble column genomad" consensus.tsv $'genomad	plasme	plasx	platon	scapp'
+check "exact four-tool consensus header" test "$(head -n 1 consensus.tsv)" = $'contig_id\tsample_id\tplasmid_call\tsupporting_tools\tconflicting_tools\tconsensus_method\tlength\tgc_content\tplasmid_count\tcombined_prediction\tgenomad\tplasme\tplasx\tplaton'
 check_grep "plasmid fasta written" plasmids.fasta ">plasmid_1"
 
 # ---------- 10. plasmid_structure.R ----------
@@ -200,8 +201,19 @@ mkdir -p results/04_plasmid_detection/consensus results/04_plasmid_detection/str
 cp plasmids.fasta results/04_plasmid_detection/consensus/S1.plasmid_contigs.fasta
 cp consensus.tsv results/04_plasmid_detection/consensus/S1.plasmid_consensus.tsv
 cp plasmid_structure.tsv results/04_plasmid_detection/structure/S1.plasmid_structure.tsv
-Rscript "$BIN/generate_report.R" --outdir results --platform illumina \
-  --project-name mock_run --template "$ROOT/assets/plasmid_report.Rmd" --out-prefix . 2>report.err
+# Production structure consumes the selected plasmids, not the full assembly.
+Rscript "$BIN/plasmid_structure.R" --contigs plasmids.fasta --sample-id S1 --out report_structure.tsv 2>report_structure.err
+Rscript - <<'RS'
+records <- lapply(c("plasmid_fasta", "consensus", "structure"), function(kind) {
+  path <- switch(kind, plasmid_fasta="plasmids.fasta", consensus="consensus.tsv", structure="report_structure.tsv")
+  list(kind=kind, producer="R_SMOKE", section="04_plasmid_detection", sample_id="S1", files=list(normalizePath(path)))
+})
+records <- c(records, list(list(kind="evidence", section="11_diversity", producer="DIVERSITY", output="metrics", evidence="controlled smoke output", files=list())))
+writeLines(jsonlite::toJSON(list(schema_version=1L, settings=list(platform="illumina", project_name="mock_run"), records=records), auto_unbox=TRUE), "report_inputs.json")
+writeLines(c("sample_id", "S1"), "report_samples.tsv")
+RS
+Rscript "$BIN/generate_report.R" --manifest report_inputs.json --samplesheet report_samples.tsv \
+  --template "$ROOT/assets/plasmid_report.Rmd" --out-prefix . 2>report.err
 check "generate_report exits 0" test $? -eq 0
 check_grep "report title" report.md "# AutoPlasm report — mock_run"
 check_grep "detection table row" report.md "| S1 | 1 | 1 |"
@@ -211,8 +223,8 @@ check_grep "template-rendered html (pandoc table)" report.html "<table"
 check_grep "methods written" methods.md "# Methods"
 check_grep "data layer json" report_data.json '"project_name": "mock_run"'
 # fallback path without --template
-mkdir -p fallback && Rscript "$BIN/generate_report.R" --outdir results --platform illumina \
-  --project-name mock_run --out-prefix fallback 2>/dev/null
+mkdir -p fallback && Rscript "$BIN/generate_report.R" --manifest report_inputs.json \
+  --samplesheet report_samples.tsv --out-prefix fallback 2>/dev/null
 check "generate_report fallback exits 0" test $? -eq 0
 check_grep "fallback html" fallback/report.html "<pre>"
 

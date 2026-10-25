@@ -1,8 +1,8 @@
-// Real minimap2+samtools alignment feeding LINK_LONGREAD.
+// Native minimap2+samtools alignment feeding LINK_LONGREAD.
 // Data: pinned nf-core/test-datasets minigut assembly and ONT reads,
 // prepared by prepare_data.py (AUTOPLASM_TEST_DATA).
-// Scaffolding runs in the same container family as the vendored modules
-// (native minimap2/samtools are not installed on this host).
+// The upstream minigut fixture is synthetic; first-five partition membership
+// is an execution control, not independent biological plasmid/host truth.
 nextflow.enable.dsl = 2
 
 include { LINK_LONGREAD } from '../../../modules/linking/longread'
@@ -14,6 +14,7 @@ process ALIGN_FOR_LINK {
     // name, real sequence content).
     label 'process_low'
     container 'community.wave.seqera.io/library/minimap2_samtools:b09096fc890429ce'
+    publishDir "${params.outdir}/test_inputs/longread", mode: 'copy'
 
     input:
     tuple val(meta), path(assembly), path(reads)
@@ -21,10 +22,13 @@ process ALIGN_FOR_LINK {
     output:
     tuple val(meta), path("${meta.id}.bam"), emit: bam
     path "plasmid_contigs.fasta", emit: contigs
+    path "${meta.id}.sam.gz", emit: sam
 
     script:
     """
+    set -o pipefail
     minimap2 -ax map-ont ${assembly} ${reads} | samtools sort -o ${meta.id}.bam
+    samtools view -h ${meta.id}.bam | gzip -c > ${meta.id}.sam.gz
     n=0
     while IFS= read -r line; do
         case "\$line" in

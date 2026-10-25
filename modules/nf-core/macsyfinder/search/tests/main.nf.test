@@ -30,7 +30,7 @@ nextflow_process {
                 """
                 input[0] = [
                     [ id:'test' ],
-                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/candidatus_portiera_aleyrodidarum/genome/proteome.fasta', checkIfExists: true)
+                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/candidatus_portiera_aleyrodidarum/genome/proteome.fasta', checkIfExists: true), []
                 ]
                 input[1] = MACSYFINDER_DOWNLOAD.out.models
                 input[2] = 'TXSScan'
@@ -56,7 +56,7 @@ nextflow_process {
 
         setup {
             run("PIGZ_COMPRESS") {
-                script "../../../pigz/compress/main.nf"
+                script "tests/nf-test/prerequisites/nf-core/pigz/compress/main.nf"
                 process {
                     """
                     input[0] = [
@@ -71,7 +71,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = PIGZ_COMPRESS.out.archive
+                input[0] = PIGZ_COMPRESS.out.archive.map { meta, proteins -> tuple(meta, proteins, []) }
                 input[1] = MACSYFINDER_DOWNLOAD.out.models
                 input[2] = 'TXSScan'
                 """
@@ -101,7 +101,7 @@ nextflow_process {
                 """
                 input[0] = [
                     [ id:'test' ],
-                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/candidatus_portiera_aleyrodidarum/genome/proteome.fasta', checkIfExists: true)
+                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/candidatus_portiera_aleyrodidarum/genome/proteome.fasta', checkIfExists: true), []
                 ]
                 input[1] = MACSYFINDER_DOWNLOAD.out.models
                 input[2] = 'TXSScan'

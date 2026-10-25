@@ -1,8 +1,7 @@
 // P3 real-data chain: METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS -> METABAT2 on the
-// pinned nf-core/test-datasets metagenome binning fixture (real contigs + real
-// sorted BAM + BAI). The vendored metabat2 suite is blocked by a missing
-// (unvendored) gunzip setup module; this chain covers the same nodes with real
-// data. Backend: podman.
+// pinned nf-core/test-datasets binning fixture (contigs, sorted BAM and BAI).
+// These inputs are software controls, not independent MAG-quality truth.
+// Vendored setup helpers are restored separately (TT-005).
 nextflow.enable.dsl = 2
 
 include { METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS } from '../../../modules/nf-core/metabat2/jgisummarizebamcontigdepths/main'

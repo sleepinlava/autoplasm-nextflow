@@ -1,0 +1,23 @@
+{
+  "repository": "BinPro/CONCOCT",
+  "ref": "1.1.0",
+  "files": [
+    {
+      "name": "composition.fa",
+      "url": "https://raw.githubusercontent.com/BinPro/CONCOCT/1.1.0/tests/test_data/composition.fa",
+      "git_blob": "47a32497a05a4a64bdcb0d6ceaa2f2c40b71e7ee",
+      "sha256": "f0f2826334f4f055cfc2cc6b3899776ed30255825fe9c3d0514ab73af8539b2f",
+      "size": 1053769
+    },
+    {
+      "name": "coverage",
+      "url": "https://raw.githubusercontent.com/BinPro/CONCOCT/1.1.0/tests/test_data/coverage",
+      "git_blob": "6966af6e3e933b26d6bc55950953767650cc0d10",
+      "sha256": "cda1a0875537380043ca6bc5cfb72eee5fe358ca8ca76d8c5eaed5d24e06c087",
+      "size": 78716
+    }
+  ],
+  "limitations": [
+    "real official DNA/coverage fixture; native MAG tests construct controlled valid BAM and do not claim independent biological binning accuracy"
+  ]
+}

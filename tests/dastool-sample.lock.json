@@ -1,0 +1,55 @@
+{
+  "repository": "cmks/DAS_Tool",
+  "ref": "1.1.7",
+  "files": [
+    {
+      "name": "sample.human.gut_contigs.fa",
+      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_data/sample.human.gut_contigs.fa",
+      "git_blob": "de08c9dbe68cd5978b06e0db88a242d45538cfb7",
+      "sha256": "956f7fd41cf7350be2c54f4c456c2a47418f76a1ef0c1746e6ccea3ecfb206ea",
+      "size": 33454419
+    },
+    {
+      "name": "sample.human.gut_metabat_contigs2bin.tsv",
+      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_data/sample.human.gut_metabat_contigs2bin.tsv",
+      "git_blob": "a84126f987320cb1a06e8e4bd1e578423223148e",
+      "sha256": "ecf36f14ddbd40f58c58f05487395f6ed0bd41d29fe074d4ef2e8f424e171f4b",
+      "size": 11353
+    },
+    {
+      "name": "sample.human.gut_concoct_contigs2bin.tsv",
+      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_data/sample.human.gut_concoct_contigs2bin.tsv",
+      "git_blob": "174b5a71603f5761c7195f6212d694d596153a4f",
+      "sha256": "7a2bacde65fb9f329e7d8d486fab74217cd918ca82d7034481816a78268392a3",
+      "size": 38826
+    },
+    {
+      "name": "sample.human.gut_maxbin2_contigs2bin.tsv",
+      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_data/sample.human.gut_maxbin2_contigs2bin.tsv",
+      "git_blob": "09b19a4ea02ed3645e22e4b19e9f09dbacd030a8",
+      "sha256": "1d5d11c466904a66156235b9b31ba662d114353c9275f6b125b3ab0df1a9590d",
+      "size": 24702
+    },
+    {
+      "name": "sample.human.gut_tetraESOM_contigs2bin.tsv",
+      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_data/sample.human.gut_tetraESOM_contigs2bin.tsv",
+      "git_blob": "1b911240f635e043b214bc5f3ebc499d69d859b7",
+      "sha256": "25323a529baa6db1ab51fe19377e2cbdf9e8d37a824131a46a3be7f7d7669645",
+      "size": 5194
+    },
+    {
+      "name": "DASToolRun1_DASTool_summary.tsv",
+      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_output/DASToolRun1_DASTool_summary.tsv",
+      "git_blob": "0e98a7e20170f662c77a64d665d26b914ca256cd",
+      "sha256": "a77d008b100a718094611335aa76efff644e9e826811885f73091cce0699a8dd",
+      "size": 1159
+    },
+    {
+      "name": "DASToolRun1_DASTool_contig2bin.tsv",
+      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_output/DASToolRun1_DASTool_contig2bin.tsv",
+      "git_blob": "d0736831c16ceea82b9058407d51eb9abe5067cb",
+      "sha256": "c3fc091c96a10cd02e78520ecc72eed1af3c89cd2c11baf49816f0163c81fb5e",
+      "size": 55171
+    }
+  ]
+}

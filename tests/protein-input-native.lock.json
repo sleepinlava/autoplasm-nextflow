@@ -1,0 +1,163 @@
+{
+  "schema": 1,
+  "models": {
+    "repository": "macsy-models/CONJScan",
+    "version": "2.1.0",
+    "commit": "898f8a1a3d9076855eb8f32be9f32d4e1b375c1f",
+    "archive_sha256": "cd428945a8bd1ed11d3c356fce78ed4b59b9ff9c8c2b9414ee84a0af4ff4da26",
+    "git_blob_files": 162
+  },
+  "eggnog_fixture": {
+    "repository": "eggnogdb/eggnog-mapper",
+    "commit": "a82fac7f5534ee97fa0385718b0012c266fcf3e7",
+    "scope": "complete upstream small integration-test fixture database; not production eggNOG database",
+    "files": {
+      "eggnog.db": {
+        "git_blob": "9ed31352ce6ab0f38595b5c9328e8921017bd12a",
+        "sha256": "8f878877e7d9b68cc9d5fa44948762599a5915e43515c066164f187d226ce9b7",
+        "bytes": 19570688
+      },
+      "eggnog.taxa.db": {
+        "git_blob": "136b907a3e0843d6874b4ecb58bf0a51a5efac4a",
+        "sha256": "57a208bdc259d8a191aca4f69b2dc6b7001f1fef221167ce72415d31595e17dc",
+        "bytes": 90112
+      },
+      "eggnog.taxa.db.traverse.pkl": {
+        "git_blob": "e1e3d6590815c3f59cf020c37debe5db3615270d",
+        "sha256": "de7bb2b35489c9e5e1f2522575c8107ebd3d7117f8910dc6745aab68ac2d2173",
+        "bytes": 6628719
+      },
+      "eggnog_proteins.dmnd": {
+        "git_blob": "356f6a2235a1a5bb492bbcace11944b327cdbd1e",
+        "sha256": "54f95aaecccab962f14e0f530c8aec469e7e7b6f2f0583beee886df761bd5e34",
+        "bytes": 3603241
+      },
+      "test_queries.fa": {
+        "git_blob": "32796fad3091f52f6efd7b5955b9e52f397b01fe",
+        "sha256": "dbf71fc3878b5a60e858012393fc14f06725da784463711921f9a83477916b9f",
+        "bytes": 1188
+      },
+      "test_queries.fna": {
+        "git_blob": "ae5c1e05476af77e57d2cf3ec734249ea5badd60",
+        "sha256": "d3be5483c01925ffe32e51d1d0811ebfbc105c49df81cc307b9d20b9cb8e2536",
+        "bytes": 2263
+      },
+      "test_output.emapper.annotations": {
+        "git_blob": "22aa127212f93d072696625df78603dc64a17e42",
+        "sha256": "c9612074e797024bc29c2bdbf1f5da82bfbcc669e431e0fc412bc9f2da6b2137",
+        "bytes": 1347
+      }
+    }
+  },
+  "source_commits": {
+    "macsyfinder": "9caf84252b9cc89b9ef93173df250e764172b330",
+    "macsylib": "561f521027954ed73fd91fa2126f4e43b0a86439",
+    "eggnogmapper": "a82fac7f5534ee97fa0385718b0012c266fcf3e7"
+  },
+  "native_packages": {
+    "macsyfinder-2.1.6": [
+      {
+        "name": "hmmer",
+        "version": "3.4",
+        "build": "h7d74f8d_5",
+        "url": "https://conda.anaconda.org/bioconda/linux-64/hmmer-3.4-h7d74f8d_5.conda",
+        "sha256": "b0ea2115beb20bbd3fe63dd8e41bfc29eab42a0c3982f91f0e018840567f37b6",
+        "md5": "7e252dc47eda3426c7a2a87122b1a3fa"
+      },
+      {
+        "name": "macsyfinder",
+        "version": "2.1.6",
+        "build": "pyhdfd78af_0",
+        "url": "https://conda.anaconda.org/bioconda/noarch/macsyfinder-2.1.6-pyhdfd78af_0.conda",
+        "sha256": "66e68c98b98126b48af2776943ad9038bb774b9c7a02c660a29860ae27e6fd29",
+        "md5": "8126185536d46525f3cfa3da0b1fd569"
+      },
+      {
+        "name": "macsylib",
+        "version": "1.0.4",
+        "build": "pyhdfd78af_1",
+        "url": "https://conda.anaconda.org/bioconda/noarch/macsylib-1.0.4-pyhdfd78af_1.conda",
+        "sha256": "61d6a9275d5cf83c520252c64e10d2ab874132e6b6c81d26907a80ef5e892a82",
+        "md5": "e6ef4689eeedd76fb40a514c64a25e4d"
+      },
+      {
+        "name": "pigz",
+        "version": "2.6",
+        "build": "h2797004_1",
+        "url": "https://conda.anaconda.org/conda-forge/linux-64/pigz-2.6-h2797004_1.conda",
+        "sha256": "074bfefe3552545257babaaca0d6e00a5f9732118d0824382c6eb5c7befe7c7e",
+        "md5": "5f19233669faf26889f27a2d2710e170"
+      },
+      {
+        "name": "prodigal",
+        "version": "2.6.3",
+        "build": "h577a1d6_11",
+        "url": "https://conda.anaconda.org/bioconda/linux-64/prodigal-2.6.3-h577a1d6_11.tar.bz2",
+        "sha256": "1211d9f01128f141154cb4616aa5b15890afc26699767886f6655cabfd67ec06",
+        "md5": "7b083f573760cbd88a206e05f73f5e9d"
+      },
+      {
+        "name": "python",
+        "version": "3.12.15",
+        "build": "h5f976f7_2_cpython",
+        "url": "https://conda.anaconda.org/conda-forge/linux-64/python-3.12.15-h5f976f7_2_cpython.conda",
+        "sha256": "f8a38c33f627c68e35d02cc5a11eff25eadb853791ac40bf9cc569315d25bc54",
+        "md5": "13cef25ee4055b1fec19d35d20aadda2"
+      }
+    ],
+    "eggnog-mapper-2.1.13": [
+      {
+        "name": "biopython",
+        "version": "1.88",
+        "build": "py311h0d48ccd_1",
+        "url": "https://conda.anaconda.org/conda-forge/linux-64/biopython-1.88-py311h0d48ccd_1.conda",
+        "sha256": "ae9bc82d5e3731fd7fcc380c475b1c909de2d702a71c67dfbee3fe3d37d14689",
+        "md5": "a1a589904e5b8e31f6fb123bc2b83f33"
+      },
+      {
+        "name": "diamond",
+        "version": "2.0.15",
+        "build": "hb97b32f_1",
+        "url": "https://conda.anaconda.org/bioconda/linux-64/diamond-2.0.15-hb97b32f_1.tar.bz2",
+        "sha256": "788ccf2daef5f7bf5e2cd088c2e3234f263aedc96b5d1fd2c7aee1323e435a39",
+        "md5": "6951be09685f9979086684bfcef47932"
+      },
+      {
+        "name": "eggnog-mapper",
+        "version": "2.1.13",
+        "build": "pyhdfd78af_2",
+        "url": "https://conda.anaconda.org/bioconda/noarch/eggnog-mapper-2.1.13-pyhdfd78af_2.conda",
+        "sha256": "35d659b4871f198c4439fdcfeb8a35338ee6925dfc20b808596cd508fc6a6c8a",
+        "md5": "4b7a8018bf11ba81d61fdf1b1bb6bb01"
+      },
+      {
+        "name": "hmmer",
+        "version": "3.4",
+        "build": "h7d74f8d_5",
+        "url": "https://conda.anaconda.org/bioconda/linux-64/hmmer-3.4-h7d74f8d_5.conda",
+        "sha256": "b0ea2115beb20bbd3fe63dd8e41bfc29eab42a0c3982f91f0e018840567f37b6",
+        "md5": "7e252dc47eda3426c7a2a87122b1a3fa"
+      },
+      {
+        "name": "prodigal",
+        "version": "2.6.3",
+        "build": "h7b50bb2_10",
+        "url": "https://conda.anaconda.org/bioconda/linux-64/prodigal-2.6.3-h7b50bb2_10.tar.bz2",
+        "sha256": "05018dce864a23867f302cd78e000358bc585fc5bc082b6e16d5d6200d90447d",
+        "md5": "66cc94ede7d4cd483a0412adaf9532ce"
+      },
+      {
+        "name": "python",
+        "version": "3.11.9",
+        "build": "hb806964_0_cpython",
+        "url": "https://conda.anaconda.org/conda-forge/linux-64/python-3.11.9-hb806964_0_cpython.conda",
+        "sha256": "177f33a1fb8d3476b38f73c37b42f01c0b014fa0e039a701fd9f83d83aae6d40",
+        "md5": "ac68acfa8b558ed406c75e98d3428d7b"
+      }
+    ]
+  },
+  "limitations": [
+    "Full package archive verification and installed Python/source Git blob equality recorded in results/tool-audit/20261023-protein-inputs/runtime-proof.json; images not executed.",
+    "Two MacSyFinder aliases use identical CONJScan models; not independent evidence."
+  ]
+}

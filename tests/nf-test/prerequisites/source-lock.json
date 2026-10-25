@@ -1,0 +1,475 @@
+{
+  "repository": "https://github.com/nf-core/modules",
+  "purpose": "Test-only setup dependencies at each consumer revision; identical UNTAR resources deduplicated with all source refs retained",
+  "files": [
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/blast/makeblastdb/main.nf",
+      "sha256": "ebbd176b2576c9ff2829befff85ce557e6998f2e200fd2c4273a216b8e667ecf",
+      "source_refs": [
+        {
+          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+          "repository_path": "modules/nf-core/blast/makeblastdb/main.nf",
+          "git_blob": "2622c1d9f68ff9f22128877d324ee08bca1de28b",
+          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/blast/makeblastdb/main.nf"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/blast/makeblastdb/environment.yml",
+      "sha256": "a0841732bc7ffff781e52e678422dfc5a95228cbbf34db1a283a6fc675df41d7",
+      "source_refs": [
+        {
+          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+          "repository_path": "modules/nf-core/blast/makeblastdb/environment.yml",
+          "git_blob": "0a7e8e60447c5e9212838f491c5ddb87191eca84",
+          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/blast/makeblastdb/environment.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/blast/makeblastdb/meta.yml",
+      "sha256": "1dbe7b3a302dc85fb8ffc03702f3da5e6333a39e562785130d957c6cf4a5934b",
+      "source_refs": [
+        {
+          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+          "repository_path": "modules/nf-core/blast/makeblastdb/meta.yml",
+          "git_blob": "b8f2f1fc0873853426b4933929e87b696d2a0036",
+          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/blast/makeblastdb/meta.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/diamond/makedb/main.nf",
+      "sha256": "f7a0162060b35a508605803ea63a48ff44766a558e45a428be7262cabf15487f",
+      "source_refs": [
+        {
+          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
+          "repository_path": "modules/nf-core/diamond/makedb/main.nf",
+          "git_blob": "cf81d1d6fd60a94374409bf0b2e09a3d675c8f89",
+          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/diamond/makedb/main.nf"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/diamond/makedb/environment.yml",
+      "sha256": "ece01836508b72c5aea7814ce785b3119a326dd4195861bed33fde7c8380e524",
+      "source_refs": [
+        {
+          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
+          "repository_path": "modules/nf-core/diamond/makedb/environment.yml",
+          "git_blob": "5dc13ad057b240bb12dd7252f50490eb385aa568",
+          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/diamond/makedb/environment.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/diamond/makedb/meta.yml",
+      "sha256": "bc4f153d08f63b57f8b9d07452e41d1620fc5cd2a4435c605bda8e2eab2edac2",
+      "source_refs": [
+        {
+          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
+          "repository_path": "modules/nf-core/diamond/makedb/meta.yml",
+          "git_blob": "90558eec526c377ceae8ca3fbc107f28b7482e71",
+          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/diamond/makedb/meta.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/mmseqs/createdb/main.nf",
+      "sha256": "96c34baf4e71ed14f092c777994b969e3ef14192ee560d37252663a3a110fbb8",
+      "source_refs": [
+        {
+          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
+          "repository_path": "modules/nf-core/mmseqs/createdb/main.nf",
+          "git_blob": "728ee2cc3b7fe09a6d737ab359370baefd5be1ae",
+          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/mmseqs/createdb/main.nf"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/mmseqs/createdb/environment.yml",
+      "sha256": "f097f365ad088a8e4e43c2611159c6e8b80816ba40bc8e8fec3248c5ab1a9c61",
+      "source_refs": [
+        {
+          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
+          "repository_path": "modules/nf-core/mmseqs/createdb/environment.yml",
+          "git_blob": "072223f2aacebbde31a5710b6e9d2bc22cae73cd",
+          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/mmseqs/createdb/environment.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/mmseqs/createdb/meta.yml",
+      "sha256": "fc9b42a991250f59130b348b9d3377c56cebc834950bba4eac6df360592859ad",
+      "source_refs": [
+        {
+          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
+          "repository_path": "modules/nf-core/mmseqs/createdb/meta.yml",
+          "git_blob": "9777725334653fd8c9513f64f8a91fd11ea3fecd",
+          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/mmseqs/createdb/meta.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/untar/main.nf",
+      "sha256": "037665c6bdc42ddcc75e30a293c629c53a1d245ce7c8c7791f18ef3c1069f62d",
+      "source_refs": [
+        {
+          "consumer_revision": "781f2625386fe0bf2f337c7b99f56e618c59fc99",
+          "repository_path": "modules/nf-core/untar/main.nf",
+          "git_blob": "bf2c056c6239da4341583e3330675e548699049e",
+          "url": "https://github.com/nf-core/modules/blob/781f2625386fe0bf2f337c7b99f56e618c59fc99/modules/nf-core/untar/main.nf"
+        },
+        {
+          "consumer_revision": "b581ebb37c529fa07e22c38d128a7c5c273ed286",
+          "repository_path": "modules/nf-core/untar/main.nf",
+          "git_blob": "bf2c056c6239da4341583e3330675e548699049e",
+          "url": "https://github.com/nf-core/modules/blob/b581ebb37c529fa07e22c38d128a7c5c273ed286/modules/nf-core/untar/main.nf"
+        },
+        {
+          "consumer_revision": "d67d33d5925fcec4691b499670fa2bd926fd2be5",
+          "repository_path": "modules/nf-core/untar/main.nf",
+          "git_blob": "bf2c056c6239da4341583e3330675e548699049e",
+          "url": "https://github.com/nf-core/modules/blob/d67d33d5925fcec4691b499670fa2bd926fd2be5/modules/nf-core/untar/main.nf"
+        },
+        {
+          "consumer_revision": "98ad2ea364508c5eefa3eee721f5659b3d7585a9",
+          "repository_path": "modules/nf-core/untar/main.nf",
+          "git_blob": "bf2c056c6239da4341583e3330675e548699049e",
+          "url": "https://github.com/nf-core/modules/blob/98ad2ea364508c5eefa3eee721f5659b3d7585a9/modules/nf-core/untar/main.nf"
+        },
+        {
+          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
+          "repository_path": "modules/nf-core/untar/main.nf",
+          "git_blob": "bf2c056c6239da4341583e3330675e548699049e",
+          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/untar/main.nf"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/untar/environment.yml",
+      "sha256": "744c448dd17c4da5cfd257c470309e2de7e6d1adcbbb74c9f7fbc0ae4db6a452",
+      "source_refs": [
+        {
+          "consumer_revision": "781f2625386fe0bf2f337c7b99f56e618c59fc99",
+          "repository_path": "modules/nf-core/untar/environment.yml",
+          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
+          "url": "https://github.com/nf-core/modules/blob/781f2625386fe0bf2f337c7b99f56e618c59fc99/modules/nf-core/untar/environment.yml"
+        },
+        {
+          "consumer_revision": "b581ebb37c529fa07e22c38d128a7c5c273ed286",
+          "repository_path": "modules/nf-core/untar/environment.yml",
+          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
+          "url": "https://github.com/nf-core/modules/blob/b581ebb37c529fa07e22c38d128a7c5c273ed286/modules/nf-core/untar/environment.yml"
+        },
+        {
+          "consumer_revision": "d67d33d5925fcec4691b499670fa2bd926fd2be5",
+          "repository_path": "modules/nf-core/untar/environment.yml",
+          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
+          "url": "https://github.com/nf-core/modules/blob/d67d33d5925fcec4691b499670fa2bd926fd2be5/modules/nf-core/untar/environment.yml"
+        },
+        {
+          "consumer_revision": "98ad2ea364508c5eefa3eee721f5659b3d7585a9",
+          "repository_path": "modules/nf-core/untar/environment.yml",
+          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
+          "url": "https://github.com/nf-core/modules/blob/98ad2ea364508c5eefa3eee721f5659b3d7585a9/modules/nf-core/untar/environment.yml"
+        },
+        {
+          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
+          "repository_path": "modules/nf-core/untar/environment.yml",
+          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
+          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/untar/environment.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/untar/meta.yml",
+      "sha256": "cd10d878b40b8639a1c24be839d3667c035a97107ff3da80aeb184080a83ba2a",
+      "source_refs": [
+        {
+          "consumer_revision": "781f2625386fe0bf2f337c7b99f56e618c59fc99",
+          "repository_path": "modules/nf-core/untar/meta.yml",
+          "git_blob": "571d8078a42b09048e574b81cd329fc92aa3d82e",
+          "url": "https://github.com/nf-core/modules/blob/781f2625386fe0bf2f337c7b99f56e618c59fc99/modules/nf-core/untar/meta.yml"
+        },
+        {
+          "consumer_revision": "b581ebb37c529fa07e22c38d128a7c5c273ed286",
+          "repository_path": "modules/nf-core/untar/meta.yml",
+          "git_blob": "571d8078a42b09048e574b81cd329fc92aa3d82e",
+          "url": "https://github.com/nf-core/modules/blob/b581ebb37c529fa07e22c38d128a7c5c273ed286/modules/nf-core/untar/meta.yml"
+        },
+        {
+          "consumer_revision": "d67d33d5925fcec4691b499670fa2bd926fd2be5",
+          "repository_path": "modules/nf-core/untar/meta.yml",
+          "git_blob": "571d8078a42b09048e574b81cd329fc92aa3d82e",
+          "url": "https://github.com/nf-core/modules/blob/d67d33d5925fcec4691b499670fa2bd926fd2be5/modules/nf-core/untar/meta.yml"
+        },
+        {
+          "consumer_revision": "98ad2ea364508c5eefa3eee721f5659b3d7585a9",
+          "repository_path": "modules/nf-core/untar/meta.yml",
+          "git_blob": "571d8078a42b09048e574b81cd329fc92aa3d82e",
+          "url": "https://github.com/nf-core/modules/blob/98ad2ea364508c5eefa3eee721f5659b3d7585a9/modules/nf-core/untar/meta.yml"
+        },
+        {
+          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
+          "repository_path": "modules/nf-core/untar/meta.yml",
+          "git_blob": "571d8078a42b09048e574b81cd329fc92aa3d82e",
+          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/untar/meta.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/hifiadapterfilt/downloaddb/main.nf",
+      "sha256": "b35121119d619717b5fb2c82b543f47c5a32bad462cb442e49db42c5ae3165c8",
+      "source_refs": [
+        {
+          "consumer_revision": "9cc9ac3431911839826f062a5f0348835ebcc7ae",
+          "repository_path": "modules/nf-core/hifiadapterfilt/downloaddb/main.nf",
+          "git_blob": "937fd7a0ce644bf6afae5b1eaee5b28b020e3deb",
+          "url": "https://github.com/nf-core/modules/blob/9cc9ac3431911839826f062a5f0348835ebcc7ae/modules/nf-core/hifiadapterfilt/downloaddb/main.nf"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/hifiadapterfilt/downloaddb/environment.yml",
+      "sha256": "936b6730e9938ee4979bbffe354d6abaf737b820bdb0420b76685f1e0cd81ff5",
+      "source_refs": [
+        {
+          "consumer_revision": "9cc9ac3431911839826f062a5f0348835ebcc7ae",
+          "repository_path": "modules/nf-core/hifiadapterfilt/downloaddb/environment.yml",
+          "git_blob": "f7954e9d254f3690cb1a0213444347af43a91735",
+          "url": "https://github.com/nf-core/modules/blob/9cc9ac3431911839826f062a5f0348835ebcc7ae/modules/nf-core/hifiadapterfilt/downloaddb/environment.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/hifiadapterfilt/downloaddb/meta.yml",
+      "sha256": "cfa1a71bf7964b8c14d195c70f10b4557af0dfc9f92c182a7b765ed73d3a450f",
+      "source_refs": [
+        {
+          "consumer_revision": "9cc9ac3431911839826f062a5f0348835ebcc7ae",
+          "repository_path": "modules/nf-core/hifiadapterfilt/downloaddb/meta.yml",
+          "git_blob": "fe642e2e5ee76fcf2fbef5f238745a2e1d9399d4",
+          "url": "https://github.com/nf-core/modules/blob/9cc9ac3431911839826f062a5f0348835ebcc7ae/modules/nf-core/hifiadapterfilt/downloaddb/meta.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/pigz/compress/main.nf",
+      "sha256": "c58e8c7d0c5c46ab04ba466766cdaf5a71b3583f933688121f648a29f8a73deb",
+      "source_refs": [
+        {
+          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+          "repository_path": "modules/nf-core/pigz/compress/main.nf",
+          "git_blob": "b5af45e921677ca88c4e89798ea21dcfb0bc2984",
+          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/pigz/compress/main.nf"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/pigz/compress/environment.yml",
+      "sha256": "9eccae7155a7fccbbd2b184e5f79a0d22ef447b83fae4e055c8b20cc0987cc20",
+      "source_refs": [
+        {
+          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+          "repository_path": "modules/nf-core/pigz/compress/environment.yml",
+          "git_blob": "a91b6f426b087e94cbafefb6c4b1d00f96cd62ac",
+          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/pigz/compress/environment.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/pigz/compress/meta.yml",
+      "sha256": "178393d965812eeb1d75363aa7778c2712b548c36a9b747be130f87da97cd794",
+      "source_refs": [
+        {
+          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+          "repository_path": "modules/nf-core/pigz/compress/meta.yml",
+          "git_blob": "bfcc0f9d15fdb85da367e28a10203619b5ed26d6",
+          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/pigz/compress/meta.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/gunzip/main.nf",
+      "sha256": "8b23dad59f8f269b38d8262a035ab3384bb4edde93af3b412743d08ecfe3ab0d",
+      "source_refs": [
+        {
+          "consumer_revision": "5be91832f7c6a2d229f900a239d9532c9ae133c7",
+          "repository_path": "modules/nf-core/gunzip/main.nf",
+          "git_blob": "6edffc5930a42e4a191be194ec4d941aeb466557",
+          "url": "https://github.com/nf-core/modules/blob/5be91832f7c6a2d229f900a239d9532c9ae133c7/modules/nf-core/gunzip/main.nf"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/gunzip/environment.yml",
+      "sha256": "744c448dd17c4da5cfd257c470309e2de7e6d1adcbbb74c9f7fbc0ae4db6a452",
+      "source_refs": [
+        {
+          "consumer_revision": "5be91832f7c6a2d229f900a239d9532c9ae133c7",
+          "repository_path": "modules/nf-core/gunzip/environment.yml",
+          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
+          "url": "https://github.com/nf-core/modules/blob/5be91832f7c6a2d229f900a239d9532c9ae133c7/modules/nf-core/gunzip/environment.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/gunzip/meta.yml",
+      "sha256": "216b014df4f884b6b2adf7ac36792f5618942a86b03575fcf2ee8d463204c03a",
+      "source_refs": [
+        {
+          "consumer_revision": "5be91832f7c6a2d229f900a239d9532c9ae133c7",
+          "repository_path": "modules/nf-core/gunzip/meta.yml",
+          "git_blob": "bba6b3ba70a704dcca1bb85de5639a16bcf009a4",
+          "url": "https://github.com/nf-core/modules/blob/5be91832f7c6a2d229f900a239d9532c9ae133c7/modules/nf-core/gunzip/meta.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/rgi/cardannotation/main.nf",
+      "sha256": "04424f2e2322c5923efd66a673b45d65711cd779c679a6f149a13e29bf9e8bad",
+      "source_refs": [
+        {
+          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
+          "repository_path": "modules/nf-core/rgi/cardannotation/main.nf",
+          "git_blob": "3e694e9d02b849e28472bb73e4ba9965c03e214b",
+          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/rgi/cardannotation/main.nf"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/rgi/cardannotation/environment.yml",
+      "sha256": "8ef25f7727c26a1b69585f118acbb4f6d14af493ce2793e9e59d5e7e7e73cf38",
+      "source_refs": [
+        {
+          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
+          "repository_path": "modules/nf-core/rgi/cardannotation/environment.yml",
+          "git_blob": "58b301d50929bd52c9438fbb4623ef8b3e950731",
+          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/rgi/cardannotation/environment.yml"
+        }
+      ]
+    },
+    {
+      "path": "tests/nf-test/prerequisites/nf-core/rgi/cardannotation/meta.yml",
+      "sha256": "367859cf0299f323a525698d61b0977dbe7461b0a35f1a55c9d60b43e07f8d51",
+      "source_refs": [
+        {
+          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
+          "repository_path": "modules/nf-core/rgi/cardannotation/meta.yml",
+          "git_blob": "3c1ffbe3e70eb7fd35f2397b8341a66ee61671a1",
+          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/rgi/cardannotation/meta.yml"
+        }
+      ]
+    }
+  ],
+  "consumers": [
+    {
+      "suite": "modules/nf-core/blast/blastn/tests/main.nf.test",
+      "consumer": "blast/blastn",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "original_reference": "../../makeblastdb/main.nf",
+      "dependency": "blast/makeblastdb"
+    },
+    {
+      "suite": "modules/nf-core/eggnogmapper/tests/main.nf.test",
+      "consumer": "eggnogmapper",
+      "revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
+      "original_reference": "../../diamond/makedb/main.nf",
+      "dependency": "diamond/makedb"
+    },
+    {
+      "suite": "modules/nf-core/eggnogmapper/tests/main.nf.test",
+      "consumer": "eggnogmapper",
+      "revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
+      "original_reference": "../../mmseqs/createdb/main.nf",
+      "dependency": "mmseqs/createdb"
+    },
+    {
+      "suite": "modules/nf-core/eggnogmapper/tests/main.nf.test",
+      "consumer": "eggnogmapper",
+      "revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
+      "original_reference": "../../diamond/makedb/main.nf",
+      "dependency": "diamond/makedb"
+    },
+    {
+      "suite": "modules/nf-core/eggnogmapper/tests/main.nf.test",
+      "consumer": "eggnogmapper",
+      "revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
+      "original_reference": "../../diamond/makedb/main.nf",
+      "dependency": "diamond/makedb"
+    },
+    {
+      "suite": "modules/nf-core/genomad/endtoend/tests/main.nf.test",
+      "consumer": "genomad/endtoend",
+      "revision": "781f2625386fe0bf2f337c7b99f56e618c59fc99",
+      "original_reference": "../../../untar/main.nf",
+      "dependency": "untar"
+    },
+    {
+      "suite": "modules/nf-core/gtdbtk/classifywf/tests/main.nf.test",
+      "consumer": "gtdbtk/classifywf",
+      "revision": "b581ebb37c529fa07e22c38d128a7c5c273ed286",
+      "original_reference": "../../../untar/main.nf",
+      "dependency": "untar"
+    },
+    {
+      "suite": "modules/nf-core/hifiadapterfilt/hifiadapterfilt/tests/main.nf.test",
+      "consumer": "hifiadapterfilt/hifiadapterfilt",
+      "revision": "9cc9ac3431911839826f062a5f0348835ebcc7ae",
+      "original_reference": "../../downloaddb/main.nf",
+      "dependency": "hifiadapterfilt/downloaddb"
+    },
+    {
+      "suite": "modules/nf-core/kraken2/kraken2/tests/main.nf.test",
+      "consumer": "kraken2/kraken2",
+      "revision": "d67d33d5925fcec4691b499670fa2bd926fd2be5",
+      "original_reference": "modules/nf-core/untar/main.nf",
+      "dependency": "untar"
+    },
+    {
+      "suite": "modules/nf-core/macsyfinder/search/tests/main.nf.test",
+      "consumer": "macsyfinder/search",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "original_reference": "../../../pigz/compress/main.nf",
+      "dependency": "pigz/compress"
+    },
+    {
+      "suite": "modules/nf-core/metabat2/metabat2/tests/main.nf.test",
+      "consumer": "metabat2/metabat2",
+      "revision": "5be91832f7c6a2d229f900a239d9532c9ae133c7",
+      "original_reference": "../../../gunzip/main.nf",
+      "dependency": "gunzip"
+    },
+    {
+      "suite": "modules/nf-core/metaphlan/metaphlan/tests/main.nf.test",
+      "consumer": "metaphlan/metaphlan",
+      "revision": "98ad2ea364508c5eefa3eee721f5659b3d7585a9",
+      "original_reference": "modules/nf-core/untar/main.nf",
+      "dependency": "untar"
+    },
+    {
+      "suite": "modules/nf-core/rgi/main/tests/main.nf.test",
+      "consumer": "rgi/main",
+      "revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
+      "original_reference": "modules/nf-core/untar/main.nf",
+      "dependency": "untar"
+    },
+    {
+      "suite": "modules/nf-core/rgi/main/tests/main.nf.test",
+      "consumer": "rgi/main",
+      "revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
+      "original_reference": "modules/nf-core/rgi/cardannotation",
+      "dependency": "rgi/cardannotation"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "git_blob": "2a0f576bcb8b535895922fc93da357534cd2d482",
+    "sha256": "0227425f8337b6dd85ddeb2de77d1a028dc0df4ca213dd1bdc8abd4f455fba7c"
+  },
+  "limitations": [
+    "Restoring definitions is not running native P1 cases or validating models/data/containers.",
+    "Original upstream helper source/environment/metadata preserved; hifi source downloads master DB, so native database identity still requires separate verification."
+  ]
+}

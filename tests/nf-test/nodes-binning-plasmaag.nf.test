@@ -1,0 +1,63 @@
+// Complete original two-sample software fixture; explicit test-only VAMB
+// settings and memory partition, no independent biological accuracy claim.
+nextflow_pipeline {
+    name 'P3 native PlasMAAG complete cohort and restored identity'
+    script 'tests/nextflow/plasmaag_workflow.nf'
+    tag 'P3'
+    tag 'binning'
+    tag 'backend-native'
+
+    test('reversed arrival retains sample metadata and original DNA in nonempty bins') {
+        when {
+            params {
+                records = [
+                    [id:'A__1', group:'group1', fasta:"${System.getenv('AUTOPLASM_PLASMAAG_DATA')}/spades1/contigs.fasta", bundle:"${System.getenv('AUTOPLASM_PLASMAAG_DATA')}/spades1", reads:["${System.getenv('AUTOPLASM_PLASMAAG_DATA')}/extracted_reads_clean_sample_1_fw.fq", "${System.getenv('AUTOPLASM_PLASMAAG_DATA')}/extracted_reads_clean_sample_1_rv.fq"]],
+                    [id:'A.1', group:'group0', fasta:"${System.getenv('AUTOPLASM_PLASMAAG_DATA')}/spades0/contigs.fasta", bundle:"${System.getenv('AUTOPLASM_PLASMAAG_DATA')}/spades0", reads:["${System.getenv('AUTOPLASM_PLASMAAG_DATA')}/extracted_reads_clean_sample_0_fw.fq", "${System.getenv('AUTOPLASM_PLASMAAG_DATA')}/extracted_reads_clean_sample_0_rv.fq"]]
+                ]
+                platform = 'illumina'
+                short_read_assembler = 'metaspades'
+                plasmid_binning_tools = ['plasmaag']
+                plasmaag_source = System.getenv('AUTOPLASM_PLASMAAG_SOURCE')
+                genomad_db = System.getenv('AUTOPLASM_PLASMAAG_DB')
+                plasmaag_conda_prefix = System.getenv('AUTOPLASM_PLASMAAG_CONDA')
+                plasmaag_genomad_splits = 16
+                plasmaag_vamb_arguments = '-o C -e 200 -q 25 75 150 --seed 1'
+                publish_dir_mode = 'copy'
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            assert workflow.trace.succeeded().size() == 1
+            def base = new File(params.outdir, '05_plasmid_binning/plasmaag')
+            def directories = base.listFiles().findAll { it.isDirectory() && it.name.endsWith('.plasmaag') }
+            assert directories.size() == 1
+            def result = directories[0]
+            def manifest = new groovy.json.JsonSlurper().parse(new File(result, 'samples.json'))
+            assert manifest.samples.collect { it.meta.id } == ['A.1', 'A__1']
+            assert manifest.samples.collect { it.meta.group } == ['group0', 'group1']
+            assert manifest.samples.every { it.bins > 0 && it.state == 'candidate_plasmid_bins' }
+            assert manifest.samples.collect { it.relative_directory }.toSet().size() == 2
+            def runtimeFiles = base.listFiles().findAll { it.name.endsWith('.plasmaag_runtime.json') }
+            assert runtimeFiles.size() == 1
+            def runtime = new groovy.json.JsonSlurper().parse(runtimeFiles[0])
+            assert runtime.source_commit == 'a6b39ac6e8e38ccc8419fc7b4a3f304b0f511803'
+            assert runtime.source_sha256.size() == 85
+            assert runtime.exit_code == 0 && runtime.children.size() == 1
+            assert !runtime.children.any { it.exit_code != 0 }
+            // Independent original assemblies, not the production canonical FASTA.
+            def original = new File(params.outdir, 'original-assemblies.tsv')
+            def data = System.getenv('AUTOPLASM_PLASMAAG_DATA')
+            original.text = 'read1\tread2\tassembly_dir\n' + (0..1).collect { i -> "${data}/extracted_reads_clean_sample_${i}_fw.fq\t${data}/extracted_reads_clean_sample_${i}_rv.fq\t${data}/spades${i}\n" }.join('')
+            def check = new File(params.outdir, 'independent-native-products.json')
+            def command = ['python3',new File('tests/check_plasmaag_native.py').absolutePath,'--manifest',original.absolutePath,'--products',new File(result,'native_results').absolutePath,'--output',check.absolutePath,'--sample-export',result.absolutePath].collect { it.toString() }
+            def checker = new ProcessBuilder(command).redirectErrorStream(true).start()
+            def log = checker.inputStream.text
+            assert checker.waitFor() == 0: log
+            def audit = new groovy.json.JsonSlurper().parse(check)
+            assert audit.pass && audit.products.candidate_plasmids.written_bins > 0
+            assert audit.products.candidate_plasmids.written_bins == manifest.samples.sum { it.bins }
+        }
+    }
+}

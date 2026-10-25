@@ -40,6 +40,11 @@ workflow {
             cleanEntries << tuple([id: 'U1'], 'clean',
                 file("${root}/uncompressed/mate1/reads.fastq", checkIfExists: true),
                 file("${root}/uncompressed/mate2/reads.fq", checkIfExists: true))
+            ['A.clean.B', 'A.clean.C'].each { id ->
+                rawEntries << tuple([id: id], 'raw',
+                    file("${root}/${id}/R1.fastq.gz", checkIfExists: true),
+                    file("${root}/${id}/R2.fastq.gz", checkIfExists: true))
+            }
         }
         // nf-core fastqc input: tuple(meta, [reads]); meta.stage feeds the
         // <id>.<stage> alias prefix configured in conf/nfcore_qc_assembly.config

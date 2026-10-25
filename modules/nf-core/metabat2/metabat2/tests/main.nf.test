@@ -27,7 +27,7 @@ nextflow_process {
         }
 
         run("GUNZIP") {
-            script "../../../gunzip/main.nf"
+            script "tests/nf-test/prerequisites/nf-core/gunzip/main.nf"
             process {
                 """
                 input[0] = METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.out.depth

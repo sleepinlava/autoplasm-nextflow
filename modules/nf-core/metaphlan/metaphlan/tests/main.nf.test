@@ -12,7 +12,7 @@ nextflow_process {
 
     setup {
         run("UNTAR") {
-            script "modules/nf-core/untar/main.nf"
+            script "tests/nf-test/prerequisites/nf-core/untar/main.nf"
             process {
                 """
                 input[0] = Channel.of([

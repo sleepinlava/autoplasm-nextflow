@@ -1,9 +1,8 @@
 // P3 real-data node test: RECYCLER (binning domain).
 // Real metaSPAdes fastg graph of the minigut illumina pair (SPADES --meta
-// via w2spades profile) + real bowtie2 BAM of the same reads against the
-// real minigut assembly (scaffolding workflow). RECYCLER takes
-// tuple(meta, graph, bam) since the wrong `-k contigs` argument was removed.
-// Backend: podman (spades/recycler biocontainers, bowtie2_samtools wave image).
+// via w2spades profile) + graph-node BWA BAM/BAI of the same original pairs.
+// Graph SHA and actual k provenance must agree before reconstruction.
+// This fixture allows zero cycles and does not certify biological recall.
 nextflow_pipeline {
     name 'P3 real node: RECYCLER on a real metaSPAdes fastg graph and real illumina BAM'
     script 'tests/nf-test/workflows/recycler_real.nf'
@@ -23,11 +22,26 @@ nextflow_pipeline {
             assert workflow.trace.failed().isEmpty()
             def tasks = workflow.trace.succeeded().collect { it.name }
             assert tasks.any { it.startsWith('MINIGUT_FASTG:SPADES') }
-            assert tasks.any { it.startsWith('ALIGN_FOR_RECYCLER') }
-            assert tasks.any { it.startsWith('RECYCLER') }
-            def outFiles = getAllFilesFromDir(params.outdir,
-                include: ['05_plasmid_binning/recycler/minigut.recycler_out/**'])
-            assert outFiles.size() >= 1
+            assert tasks.any { it.startsWith('RECYCLER_INPUTS:RECYCLER_REFERENCE') }
+            assert tasks.any { it.startsWith('RECYCLER_INPUTS:RECYCLER_ALIGN') }
+            assert tasks.any { it.startsWith('RECYCLER (') || it == 'RECYCLER' }
+            def base = new File(params.outdir, '05_plasmid_binning/recycler/minigut.recycler_out')
+            def contract = new groovy.json.JsonSlurper().parse(new File(base, 'input_contract.json'))
+            def provenance = new groovy.json.JsonSlurper().parse(new File(base, 'graph_provenance.json'))
+            assert contract.graph_references > 0
+            assert contract.max_k == provenance.max_k
+            assert contract.max_k > 0 && contract.max_k % 2 == 1
+            assert contract.sha256.graph == provenance.graph_sha256
+            assert contract.sha256.index ==~ /[0-9a-f]{64}/
+            def cycleName = provenance.graph_file.replaceAll(/\.fastg$/, '.cycs.fasta')
+            def pathsName = provenance.graph_file.replaceAll(/\.fastg$/, '.cycs.paths_w_cov.txt')
+            assert contract.execution_state in ['recycler_completed', 'skipped_no_graph_edges']
+            if (contract.execution_state == 'skipped_no_graph_edges') {
+                assert contract.graph_edges == 0
+                assert new File(base, cycleName).length() == 0
+            }
+            assert new File(base, cycleName).exists()
+            assert new File(base, pathsName).exists()
         }
     }
 }

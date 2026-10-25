@@ -1,18 +1,19 @@
-// P3 real-data node chain: JGISUMMARIZEBAMCONTIGDEPTHS -> METABAT2 (mag domain).
-// Input: pinned nf-core/test-datasets binning fixture (real contigs + s1 BAM/BAI).
-// Backend: podman.
+// P3 native-tool chain on a fixed upstream software fixture; not MAG-quality
+// truth. Separate unchanged-default empty and upstream-settings nonempty paths.
 nextflow_pipeline {
     name 'P3 real nodes: metabat2 depth + binning'
     script 'tests/nf-test/workflows/metabat2_real.nf'
+    config './metabat2-semantic.config'
     tag 'P3'
     tag 'mag'
     tag 'backend-podman'
 
-    test('real contigs + real BAM produce metabat2 bins') {
+    test('default settings explicitly validate the legitimate empty-bin boundary') {
         when {
             params {
                 test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
                 outdir = "$outputDir"
+                metabat_test_args = ''
             }
         }
         then {
@@ -21,6 +22,41 @@ nextflow_pipeline {
             def tasks = workflow.trace.succeeded().collect { it.name }
             assert tasks.any { it.contains('JGISUMMARIZEBAMCONTIGDEPTHS') }
             assert tasks.any { it.contains('METABAT2') }
+            assert tasks.size() == 2
+            def command = ['python3', new File('tests/check_metabat2_native.py').absolutePath,
+                '--fixture', "${params.test_data}/data/genomics/prokaryotes/metagenome/binning/multisample",
+                '--products', "${params.outdir}/07_host_prediction/mag/metabat2",
+                '--mode', 'default-empty', '--output', "${params.outdir}/independent-metabat.json"]
+            def oracle = new ProcessBuilder(command.collect { it.toString() }).redirectErrorStream(true).start()
+            def log = oracle.inputStream.text
+            assert oracle.waitFor() == 0: log
+            def checked = new groovy.json.JsonSlurper().parse(new File(params.outdir, 'independent-metabat.json'))
+            assert checked.pass && checked.bins == 0
+        }
+    }
+
+    test('fixed upstream permissive settings exercise nonempty bin membership and exact DNA') {
+        when {
+            params {
+                test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+                outdir = "$outputDir"
+                // Exact arguments in the vendored module's tests/nextflow.config.
+                metabat_test_args = '--minContig 1500 --minCV 0.1 --minCVSum 0.1 --minClsSize 10 --minS 2'
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            assert workflow.trace.succeeded().size() == 2
+            def command = ['python3', new File('tests/check_metabat2_native.py').absolutePath,
+                '--fixture', "${params.test_data}/data/genomics/prokaryotes/metagenome/binning/multisample",
+                '--products', "${params.outdir}/07_host_prediction/mag/metabat2",
+                '--mode', 'upstream-nonempty', '--output', "${params.outdir}/independent-metabat.json"]
+            def oracle = new ProcessBuilder(command.collect { it.toString() }).redirectErrorStream(true).start()
+            def log = oracle.inputStream.text
+            assert oracle.waitFor() == 0: log
+            def checked = new groovy.json.JsonSlurper().parse(new File(params.outdir, 'independent-metabat.json'))
+            assert checked.pass && checked.bins > 0 && checked.binned_contigs > 0
         }
     }
 }

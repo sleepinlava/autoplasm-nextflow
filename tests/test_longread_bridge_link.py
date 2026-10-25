@@ -18,8 +18,8 @@ class LongReadBridgeLinkTests(unittest.TestCase):
         self.assembly = self.root / "assembly.fasta"
         self.sam = self.root / "alignments.sam"
         self.out = self.root / "links.tsv"
-        self.plasmids.write_text(">p1\nAAAA\n")
-        self.assembly.write_text(">p1\nAAAA\n>h1\nCCCC\n")
+        self.plasmids.write_text(">p1\n" + "A" * 100 + "\n")
+        self.assembly.write_text(">p1\n" + "A" * 100 + "\n>h1\n" + "C" * 100 + "\n")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -30,7 +30,7 @@ class LongReadBridgeLinkTests(unittest.TestCase):
                            "A" * 100, "I" * 100]) + "\n"
 
     def run_cli(self, records, *extra):
-        self.sam.write_text("@HD\tVN:1.6\n@SQ\tSN:p1\tLN:4\n@SQ\tSN:h1\tLN:4\n" + "".join(records))
+        self.sam.write_text("@HD\tVN:1.6\n@SQ\tSN:p1\tLN:100\n@SQ\tSN:h1\tLN:100\n" + "".join(records))
         return subprocess.run(
             ["Rscript", str(SCRIPT), "--sam", str(self.sam),
              "--plasmid-contigs", str(self.plasmids), "--assembly", str(self.assembly),

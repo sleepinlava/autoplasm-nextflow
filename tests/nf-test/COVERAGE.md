@@ -1,5 +1,7 @@
 # 全节点真实数据测试覆盖矩阵
 
+> 2026-10-21 更新：SCAPP 检测与 binning 已按用户要求移除，相关旧运行仅作历史证据，旧套件不再存在。当前状态见 `docs/tool-audit/status.md`。
+
 每个 process 节点的真实数据测试策略与状态。状态：`done` 已有真实运行通过；
 `vendored` 复用 vendored nf-core 模块自带测试；`new` 需要本仓库新增 nf-test 套件；
 `blocked` 依赖大型数据库/外部仓库，记录为环境阻塞（不 stub、不 skip、不放宽断言）。
@@ -131,3 +133,5 @@
 
 GTDB-Tk (~110GB)、eggNOG (~40GB)、MetaPhlAn (~4GB)、RGI/CARD、HOTSPOT、COPLA
 refgraph。这些是环境/数据阻塞，不是测试通过。
+
+2026-10-24 Platon有界增量：当前原生产模块、固定1.7/完整v1.5.0数据库在nf-test0.9.5 native overlay中两个plain/gzip P3用例通过，代码/数据库/命令/断言见 results/tool-audit/20261024-platon-native/receipt.json。另8单元、2原生传输方法、完整库无检出与错误/缓存/Conda控制单列；同一pUTI89重放不算独立生物学重复。旧w3单例缺源码hash，不替代本次证据；未扩大到镜像或完整平台。

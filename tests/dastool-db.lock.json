@@ -1,0 +1,45 @@
+{
+  "package": {
+    "name": "das_tool",
+    "version": "1.1.7",
+    "build": "r44hdfd78af_1",
+    "url": "https://conda.anaconda.org/bioconda/noarch/das_tool-1.1.7-r44hdfd78af_1.tar.bz2",
+    "sha256": "725eabd5d492969ce11316b49c485f89ec909a45fc85b8b2a97cae8c90efae65"
+  },
+  "files": [
+    {
+      "name": "arc.all.faa",
+      "sha256": "d9df3cf22e4840e9f001a6cba2095af6f535b7473adea17a2a354dd455b8eb76",
+      "size": 67368053
+    },
+    {
+      "name": "arc.scg.faa",
+      "sha256": "bdc6bc3575516a23d89f10e5ec4aca6d0c1760d831bd569192cd172c3cf40e72",
+      "size": 1324749
+    },
+    {
+      "name": "arc.scg.lookup",
+      "sha256": "609ce407e67bb52a43f2571c8e01fc57b8aec139f03c03260b23928a999b29fa",
+      "size": 202175
+    },
+    {
+      "name": "bac.all.faa",
+      "sha256": "45beee3189219a2ada04b82d1727073925fc0099ab89c522b34b4c99193ae1e2",
+      "size": 16173613
+    },
+    {
+      "name": "bac.scg.faa",
+      "sha256": "ed822759f4cea1e3b4da9aa3a1faad23cbe79d56923068ef1ab389d103441a2b",
+      "size": 249620
+    },
+    {
+      "name": "bac.scg.lookup",
+      "sha256": "69442b76f6f8cdad226f859380619ec2b8f904c25c5843894ca76b49d2881c35",
+      "size": 36700
+    }
+  ],
+  "sample_lock": "tests/dastool-sample.lock.json",
+  "limitations": [
+    "six complete positive packaged reference files; negative unmatched lookup fixture is separately labeled and is not a biological database"
+  ]
+}

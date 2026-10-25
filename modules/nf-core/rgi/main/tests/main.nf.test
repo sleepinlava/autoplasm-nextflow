@@ -13,7 +13,7 @@ nextflow_process {
 
     setup {
         run("UNTAR") {
-            script "modules/nf-core/untar/main.nf"
+            script "tests/nf-test/prerequisites/nf-core/untar/main.nf"
             process {
             """
             file('https://card.mcmaster.ca/latest/data', checkIfExists: true).copyTo('card-data.tar.bz2')
@@ -27,7 +27,7 @@ nextflow_process {
         }
 
         run("RGI_CARDANNOTATION") {
-            script "modules/nf-core/rgi/cardannotation"
+            script "tests/nf-test/prerequisites/nf-core/rgi/cardannotation/main.nf"
             process {
                 """
                 input[0] = UNTAR.out.untar.map{ it[1] }
@@ -42,6 +42,7 @@ nextflow_process {
         when {
             process {
                 """
+                input[3] = file("${new File('bin/validate_rgi_card.py').absolutePath}", checkIfExists: true)
                 input[0] = [
                     [ id:'test', single_end:false ],
                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/haemophilus_influenzae/genome/genome.fna.gz', checkIfExists: true)
@@ -67,6 +68,7 @@ nextflow_process {
         when {
             process {
                 """
+                input[3] = file("${new File('bin/validate_rgi_card.py').absolutePath}", checkIfExists: true)
                 input[0] = [
                     [ id:'test', single_end:false ],
                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/haemophilus_influenzae/genome/genome.fna.gz', checkIfExists: true)

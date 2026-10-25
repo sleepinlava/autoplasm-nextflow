@@ -1,15 +1,19 @@
 import csv
+import json
 import gzip
 import subprocess
 import sys
 import tempfile
 import unittest
+import random
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "bin" / "sequence_similarity_link.R"
-MATCHING = "ACGT" * 300
+# Full-rank self-match control, independent of the implementation's output.
+# Periodic ACGT is a degenerate Markov profile and is tested separately.
+MATCHING = ''.join(random.Random(39040).choices('ACGT', k=1200))
 
 
 class SequenceSimilarityLinkTests(unittest.TestCase):
@@ -18,6 +22,8 @@ class SequenceSimilarityLinkTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.plasmids = self.root / "S1.plasmid_contigs.fasta"
         self.out = self.root / "links.tsv"
+        self.scores = self.root / "scores.tsv"
+        self.method = self.root / "method.json"
 
     def tearDown(self):
         self.temp.cleanup()
@@ -31,15 +37,16 @@ class SequenceSimilarityLinkTests(unittest.TestCase):
     def run_cli(self, *extra):
         return subprocess.run(
             ["Rscript", str(SCRIPT), "--plasmid-contigs", str(self.plasmids),
-             "--sample-id", "S1", "--out", str(self.out), *map(str, extra)],
+             "--sample-id", "S1", "--out", str(self.out),
+             "--out-scores", str(self.scores), "--out-profile-status", str(self.method), *map(str, extra)],
             text=True, capture_output=True, check=False,
         )
 
     def rows(self):
-        with self.out.open() as fh:
+        with self.scores.open() as fh:
             return list(csv.DictReader(fh, delimiter="\t"))
 
-    def test_matching_nested_bin_links_and_taxonomy_is_attached(self):
+    def test_matching_nested_bin_scores_and_taxonomy_without_host_links(self):
         self.fasta(self.plasmids, [("p1", MATCHING)])
         mag_dir = self.root / "mag_bins" / "S1.metabat2_bins"
         self.fasta(mag_dir / "bin.1.fa", [("contig", MATCHING)])
@@ -53,8 +60,20 @@ class SequenceSimilarityLinkTests(unittest.TestCase):
         self.assertEqual(rows[0]["sample_id"], "S1")
         self.assertEqual(rows[0]["host_id"], "bin.1")
         self.assertAlmostEqual(float(rows[0]["score"]), 1.0, places=3)
-        self.assertIn("d__Bacteria", rows[0]["supporting_data"])
+        self.assertIn("d__Bacteria", rows[0]["host_taxonomy"])
         self.assertIn("valid bins: 1", result.stderr)
+        with self.out.open() as stream:
+            self.assertEqual(list(csv.DictReader(stream, delimiter="\t")), [])
+        info = json.loads(self.method.read_text())
+        self.assertFalse(info['host_links_enabled'])
+        self.assertEqual(info['association_status'], 'disabled_uncalibrated')
+        self.assertNotIn('threshold_pass', rows[0])
+        # Even a legacy zero cutoff cannot reactivate host associations.
+        result = self.run_cli('--host-genomes', mag_dir, '--min-similarity', 0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with self.out.open() as stream:
+            self.assertEqual(list(csv.DictReader(stream, delimiter="\t")), [])
+        self.assertIn('deprecated and ignored', result.stderr)
 
     def test_missing_taxonomy_uses_na(self):
         self.fasta(self.plasmids, [("p1", MATCHING)])
@@ -62,7 +81,7 @@ class SequenceSimilarityLinkTests(unittest.TestCase):
         self.fasta(mag_dir / "bin.1.fa", [("c1", MATCHING)])
         result = self.run_cli("--host-genomes", mag_dir)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("taxonomy=NA", self.rows()[0]["supporting_data"])
+        self.assertEqual("NA", self.rows()[0]["host_taxonomy"])
 
     def test_no_mag_argument_writes_header_and_reports_skip(self):
         self.fasta(self.plasmids, [("p1", MATCHING)])
@@ -123,7 +142,7 @@ class SequenceSimilarityLinkTests(unittest.TestCase):
         result = self.run_cli("--host-genomes", mag_dir)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("candidate FASTA files: 3", result.stderr)
-        # The TETRA linker emits every bin above the threshold, not only the best.
+        # Every compared MAG is scored; no threshold selects host assignments.
         self.assertEqual(len(self.rows()), 3)
 
     def test_duplicate_host_ids_fail(self):
@@ -154,9 +173,27 @@ class SequenceSimilarityLinkTests(unittest.TestCase):
         self.fasta(mag_dir / "bin.1.fa", [("c1", "C" * 1200)])
         result = self.run_cli("--host-genomes", mag_dir)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.rows(), [])
+        self.assertEqual(len(self.rows()), 1)
+        self.assertEqual(self.rows()[0]["score"], "")
         self.assertIn("valid bins: 1", result.stderr)
         self.assertIn("links: 0", result.stderr)
+
+    def test_degenerate_profile_never_becomes_a_link_at_zero_threshold(self):
+        self.fasta(self.plasmids, [("periodic", "ACGT" * 300)])
+        mag_dir = self.root / "bins"
+        self.fasta(mag_dir / "host.fa", [("c", "ACGT" * 300)])
+        scores = self.root / 'scores.tsv'
+        result = self.run_cli('--host-genomes', mag_dir, '--min-similarity', '0',
+                              '--out-scores', scores)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with self.out.open() as stream:
+            self.assertEqual(list(csv.DictReader(stream, delimiter="\t")), [])
+        with scores.open() as stream:
+            row = next(csv.DictReader(stream, delimiter='\t'))
+        self.assertEqual(row['score'], '')
+        self.assertEqual(row['profile_status'], 'ineligible_profile')
+        self.assertNotIn('threshold_pass', row)
+        self.assertEqual(row['association_status'], 'disabled_uncalibrated')
 
 
 if __name__ == "__main__":

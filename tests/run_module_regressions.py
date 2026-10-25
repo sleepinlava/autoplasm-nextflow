@@ -4,6 +4,7 @@
 import argparse
 import csv
 import gzip
+import io
 import json
 import os
 import re
@@ -20,7 +21,7 @@ CONFIG = ROOT / "tests" / "nextflow" / "nextflow.config"
 HARNESS = ROOT / "tests" / "nextflow"
 ALL_SUITES = (
     "catalog", "sequence", "sample-ids", "coabundance", "host-routing",
-    "sequence-optional", "longread-source", "crispr-guard", "qc",
+    "sequence-optional", "longread-source", "crispr-guard", "qc", "abricate-routing",
 )
 
 
@@ -32,6 +33,27 @@ def require_tools(names):
     missing = [name for name in names if shutil.which(name) is None]
     if missing:
         raise RegressionFailure(f"未运行：缺少工具 {', '.join(missing)}")
+
+
+def require_qc_versions():
+    """Native QC must exercise the versions declared by its production modules."""
+    versions = {}
+    for name, pattern in [('fastqc', r'FastQC v(\S+)'),
+                          ('multiqc', r'multiqc, version (\S+)'),
+                          ('fastp', r'fastp (\S+)')]:
+        environment = ROOT / 'modules' / 'nf-core' / name / 'environment.yml'
+        declared = re.findall(r'^\s*-\s+bioconda::' + name + r'=([^\s]+)\s*$',
+                              environment.read_text(), re.MULTILINE)
+        if len(declared) != 1:
+            raise RegressionFailure(f'无法确定 {name} 的生产版本：{environment}')
+        result = subprocess.run([name, '--version'], text=True, capture_output=True, check=False)
+        output = (result.stdout + result.stderr).strip()
+        match = re.fullmatch(pattern, output)
+        if result.returncode != 0 or match is None or match.group(1) != declared[0]:
+            raise RegressionFailure(f'QC 回归要求 {name}=={declared[0]}，实际：{output}（退出码 {result.returncode}）')
+        versions[name] = {'expected': declared[0], 'actual': match.group(1),
+                          'executable': shutil.which(name), 'version_output': output}
+    return versions
 
 
 def java_version():
@@ -102,7 +124,16 @@ def run_nf(base, harness, fixture_dir, out_dir, work_dir, trace_path,
         print(result.stdout, end="")
     if result.stderr:
         print(result.stderr, end="", file=sys.stderr)
+    if not expect_success and result.returncode == 0:
+        raise RegressionFailure("Expected Nextflow failure, but workflow exited successfully")
     return result
+
+
+def assert_duplicate_join_failure(result):
+    assert_true(result.returncode != 0, "duplicate-key workflow exited successfully")
+    assert_true(re.search(r"Detected join operation duplicate emission on (?:left|right) channel -- offending element:",
+                          result.stdout + result.stderr, re.IGNORECASE) is not None,
+                "workflow failed without the intended duplicate-key join diagnostic")
 
 
 def trace_rows(path):
@@ -211,7 +242,8 @@ def suite_catalog(base):
 def suite_sequence(base):
     fixture = base / "fixtures" / "sequence"
     sample = "S1"
-    sequence = "ACGT" * 300
+    import random
+    sequence = "".join(random.Random(39040).choices("ACGT", k=1200))
     write_fasta(fixture / f"{sample}.plasmid_contigs.fasta", [("p1", sequence)])
     write_fasta(fixture / f"{sample}.metabat2_bins" / "bin.1.fa", [("contig_1", sequence)])
     (fixture / f"{sample}.taxonomy.tsv").write_text(
@@ -226,16 +258,20 @@ def suite_sequence(base):
     assert_true(table.exists(), "sequence module did not publish its TSV")
     with table.open() as fh:
         rows = list(csv.DictReader(fh, delimiter="\t"))
-    assert_true(len(rows) == 1 and rows[0]["sample_id"] == sample and rows[0]["host_id"] == "bin.1",
-                "nested MetaBAT2 bin directory did not produce the expected link")
-    assert_true(abs(float(rows[0]["score"]) - 1.0) < 0.001, "matching sequences did not score near one")
+    assert_true(not rows, "Uncalibrated TETRA emitted host links")
+    with (table.parent / f"{sample}.sequence_scores.tsv").open() as fh:
+        scores = list(csv.DictReader(fh, delimiter="\t"))
+    assert_true(len(scores) == 1 and scores[0]["sample_id"] == sample and scores[0]["host_id"] == "bin.1",
+                "nested MetaBAT2 bin directory did not produce the expected composition score")
+    assert_true(abs(float(scores[0]["score"]) - 1.0) < 0.001, "matching sequences did not score near one")
+    assert_true(scores[0]["association_status"] == "disabled_uncalibrated", "Missing score-only state")
     scripts = command_files(work)
     command = next((path.read_text() for path in scripts if "sequence_similarity_link.R" in path.read_text()), "")
     assert_true("--host-genomes mag_bins" in command,
                 "sequence .command.sh does not pass the staged MAG directory")
     assert_true("${params.outdir}" not in command and "mag_bins/*.fa" not in command,
                 "sequence task command searched a publish directory or a glob")
-    print("sequence: real module staged nested MAG directory and emitted expected association")
+    print("sequence: real module staged nested MAG directory and scored without host links")
 
 
 def suite_sample_ids(base):
@@ -277,7 +313,8 @@ def suite_host_routing(base):
 
 
 def sequence_optional_fixtures(root):
-    seq = "ACGT" * 300
+    import random
+    seq = ''.join(random.Random(39040).choices('ACGT', k=1200))
     for sample in ("S1", "S2"):
         write_fasta(root / f"{sample}.plasmid_contigs.fasta", [("p1", seq)])
     write_fasta(root / "S1.metabat2_bins" / "bin.1.fa", [("h1", seq)])
@@ -293,13 +330,16 @@ def suite_sequence_optional(base):
     sequence_optional_fixtures(fixture)
     scenarios = [
         ("default", {}),
+        ("trimmed-list", {"host_linking_methods": [" sequence "]}),
+        ("trimmed-string", {"host_linking_methods": " sequence "}),
         ("no-mag", {"omit_mag": True}),
         ("no-taxonomy", {"omit_taxonomy": True}),
         ("no-plasmids", {"empty_plasmids": True}),
     ]
     for name, params in scenarios:
         out, work, trace = base / f"out-{name}", base / f"work-{name}", base / f"trace-{name}.trace"
-        run_nf(base, "link_sequence_optional.nf", fixture, out, work, trace, params)
+        execution = run_nf(base, "link_sequence_optional.nf", fixture, out, work, trace, params)
+        assert_true("OPTIONAL_LINK\t" not in execution.stdout, "TETRA leaked into unified host links")
         task_statuses = trace_statuses(trace, "LINK_SEQUENCE")
         if name == "no-plasmids":
             assert_true(not task_statuses, "empty plasmid channel scheduled LINK_SEQUENCE")
@@ -310,18 +350,21 @@ def suite_sequence_optional(base):
         assert_true(not (table_dir / "S3.sequence_links.tsv").exists(), "MAG-only S3 was not filtered")
         assert_true(not (table_dir / "S4.sequence_links.tsv").exists(), "taxonomy-only S4 was not filtered")
         assert_true(len(task_statuses) == 2, f"{name}: expected two plasmid sample tasks, got {task_statuses}")
-        if name == "default":
-            s1 = (table_dir / "S1.sequence_links.tsv").read_text()
-            s2 = (table_dir / "S2.sequence_links.tsv").read_text()
-            assert_true("sequence_similarity" in s1 and "sequence_similarity" not in s2,
+        if name in ("default", "trimmed-list", "trimmed-string"):
+            def scored(sample):
+                with (table_dir / f"{sample}.sequence_scores.tsv").open() as stream:
+                    return list(csv.DictReader(stream, delimiter="\t"))
+            s1, s2 = scored("S1"), scored("S2")
+            assert_true(len(s1) == 1 and not s2,
                         "present MAG and absent MAG did not take distinct expected branches")
-    duplicate_trace = base / "trace-duplicate-keys.trace"
-    duplicate = run_nf(base, "link_sequence_optional.nf", fixture, base / "out-duplicate-keys",
-                       base / "work-duplicate-keys", duplicate_trace,
-                       {"duplicate_keys": True}, expect_success=False)
-    duplicate_text = (duplicate.stdout + duplicate.stderr).lower()
-    assert_true("duplicate" in duplicate_text or "same key" in duplicate_text,
-                "duplicate sample key was silently accepted by the outer joins")
+        for sid in ["S1", "S2"]:
+            with (table_dir / f"{sid}.sequence_links.tsv").open() as stream:
+                assert_true(not list(csv.DictReader(stream, delimiter="\t")), "Uncalibrated link file is nonempty")
+    for key in ("duplicate_keys", "duplicate_mag_keys", "duplicate_taxonomy_keys"):
+        duplicate = run_nf(base, "link_sequence_optional.nf", fixture, base / f"out-{key}",
+                           base / f"work-{key}", base / f"trace-{key}.trace",
+                           {key: True}, expect_success=False)
+        assert_duplicate_join_failure(duplicate)
     print("sequence-optional: left-side plasmid filtering, absent MAG/taxonomy, and empty input passed")
 
 
@@ -459,25 +502,21 @@ def write_fastq_gz(path, sample, stage, mate, count):
 
 
 def make_fastp_json(path):
-    summary = {
-        "total_reads": 200, "total_bases": 15000, "q20_rate": 0.95,
-        "q30_rate": 0.90, "q20_bases": 14250, "q30_bases": 13500,
-        "gc_content": 0.5, "read1_mean_length": 75, "read2_mean_length": 75,
-    }
-    data = {
-        "summary": {"before_filtering": summary, "after_filtering": summary},
-        "filtering_result": {
-            "passed_filter_reads": 190, "low_quality_reads": 5,
-            "too_many_N_reads": 2, "too_short_reads": 2, "low_complexity_reads": 1,
-        },
-        "read1_before_filtering": summary, "read2_before_filtering": summary,
-        "read1_after_filtering": summary, "read2_after_filtering": summary,
-        "duplication": {"rate": 0.02, "duplication": 2},
-        "insert_size": 0,
-        "adapter_cutting": {"adapter_trimmed_reads": 0, "adapter_trimmed_bases": 0},
-    }
+    # Generate the complete target-version producer format; hand-written partial
+    # JSON omitted `command` and was correctly rejected by MultiQC 1.35.
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data))
+    input_reads = path.with_suffix('.input.fastq.gz')
+    write_fastq_gz(input_reads, 'FASTP', 'raw', 'R1', 200)
+    command = ['fastp', '--in1', str(input_reads), '--out1', str(path.with_suffix('.clean.fastq.gz')),
+               '--json', str(path), '--html', str(path.with_suffix('.html')), '--thread', '1',
+               '--disable_adapter_trimming', '--disable_trim_poly_g']
+    result = subprocess.run(command, text=True, capture_output=True, check=True)
+    path.with_suffix('.producer.log').write_text(result.stdout + result.stderr)
+    data = json.loads(path.read_text())
+    assert_true(data['summary']['before_filtering']['total_reads'] == 200 and
+                data['summary']['after_filtering']['total_reads'] == 200,
+                'real fastp fixture must preserve all 200 known reads')
 
 
 def make_qc_fixtures(root):
@@ -506,20 +545,35 @@ def qc_run(base, fixture, name, run_fastqc, run_multiqc, include_fastp_json, fas
 
 def multiqc_data_text(work, trace):
     rows = trace_rows(trace)
-    multiqc_tasks = [row for row in rows if "MULTIQC" in row.get("name", "").upper()]
-    assert_true(bool(multiqc_tasks), "MultiQC task was not recorded")
-    task_work = Path(multiqc_tasks[-1].get("workdir", ""))
-    if not task_work.is_absolute():
-        task_work = ROOT / task_work
-    files = []
-    for candidate in task_work.rglob("multiqc_data"):
-        files.extend(path for path in candidate.rglob("*") if path.is_file())
-    assert_true(bool(files), "MultiQC task did not write its data directory")
-    return {path.name: path.read_text(errors="replace") for path in files}
+    multiqc_tasks = [row for row in rows if row.get('name', '').split(' (')[0].split(':')[-1] in ['MULTIQC', 'MULTIQC_ONT']]
+    assert_true(len(multiqc_tasks) == 1, "Exactly one MultiQC task must be recorded")
+    assert_true(bool(multiqc_tasks[0].get('workdir')), 'MultiQC trace lacks workdir; refusing unrelated or stale files')
+    task_work = Path(multiqc_tasks[0]['workdir']).resolve()
+    assert_true(task_work.is_relative_to(Path(work).resolve()) and task_work.is_dir(),
+                'MultiQC task directory must belong to this regression work directory')
+    directories = [path for path in task_work.glob('*_data') if path.is_dir()]
+    assert_true(len(directories) == 1, "MultiQC task must write exactly one report data directory")
+    files = [path for path in directories[0].iterdir() if path.is_file() and path.suffix in ['.txt', '.json', '.log']]
+    assert_true(bool(files), "MultiQC task did not write its data files")
+    return {path.name: path.read_text() for path in files}
+
+
+def assert_multiqc_fastqc_sources(work, trace, expected):
+    data_files = multiqc_data_text(work, trace)
+    assert_true('multiqc_fastqc.txt' in data_files, 'MultiQC did not parse FastQC source data')
+    records = list(csv.DictReader(io.StringIO(data_files['multiqc_fastqc.txt']), delimiter='\t'))
+    assert_true(len(records) == len(expected), 'MultiQC merged or lost FastQC reports')
+    assert_true({row['Sample'] for row in records} == set(expected), 'MultiQC changed sample/stage/mate identities')
+    for row in records:
+        assert_true(row['Filename'] == row['Sample'], 'MultiQC source filename differs from its complete sample key')
+        assert_true(float(row['Total Sequences']) == expected[row['Sample']], 'MultiQC assigned the wrong read count to a source')
 
 
 def suite_qc(base):
-    require_tools(["fastqc", "multiqc"])
+    require_tools(["fastqc", "multiqc", "fastp"])
+    versions = require_qc_versions()
+    (base / 'tool-versions.json').write_text(json.dumps(versions, indent=2) + '\n')
+    print('QC versions: ' + json.dumps(versions))
     for workflow_name in ("illumina", "hybrid"):
         source = (ROOT / "subworkflows" / f"{workflow_name}.nf").read_text()
         assert_true("SHORT_READ_MULTIQC_INPUTS(FASTP.out.json" in source and
@@ -559,15 +613,7 @@ def suite_qc(base):
                 f"expected four completed FastQC tasks, got {statuses}")
     report = full_out / "01_qc" / "multiqc_test_report.html"
     assert_true(report.exists(), "MultiQC report was not published")
-    data_files = multiqc_data_text(full_work, full_trace)
-    fastqc_data_files = {name: text for name, text in data_files.items()
-                         if "fastqc" in name.lower() and "source" not in name.lower()}
-    assert_true(bool(fastqc_data_files), "could not identify FastQC source data in MultiQC output")
-    fastqc_content = "\n".join(fastqc_data_files.values())
-    observed_keys = {alias for alias in expected if alias in fastqc_content}
-    assert_true(observed_keys == set(expected),
-                f"MultiQC FastQC data did not contain eight unique sample keys: {observed_keys}; "
-                f"files={sorted(fastqc_data_files)}")
+    assert_multiqc_fastqc_sources(full_work, full_trace, {key + '.fastq.gz': count for key, count in expected.items()})
 
     resume_trace = base / "trace-full-resume.trace"
     run_nf(base, "qc.nf", fixture, full_out, full_work, resume_trace, resume=True)
@@ -581,12 +627,17 @@ def suite_qc(base):
 
     fastp_json = fixture / "fastp.json"
     make_fastp_json(fastp_json)
-    no_fastqc_out, _, no_fastqc_trace = qc_run(base, fixture, "multiqc-without-fastqc", False, True,
+    no_fastqc_out, no_fastqc_work, no_fastqc_trace = qc_run(base, fixture, "multiqc-without-fastqc", False, True,
                                                 True, fastp_json)
     assert_true((no_fastqc_out / "01_qc" / "multiqc_test_report.html").exists(),
                 "MultiQC did not run on fastp JSON with run_fastqc=false")
     assert_true(not trace_statuses(no_fastqc_trace, "FASTQC"),
                 "FASTQC was scheduled when run_fastqc=false")
+    fastp_table = multiqc_data_text(no_fastqc_work, no_fastqc_trace).get('multiqc_fastp.txt')
+    assert_true(bool(fastp_table), 'MultiQC must parse the actual fastp JSON when FastQC is disabled')
+    fastp_rows = list(csv.DictReader(io.StringIO(fastp_table), delimiter='\t'))
+    assert_true(len(fastp_rows) == 1 and fastp_rows[0]['Sample'] == 'fastp.input.fastq.gz',
+                'MultiQC changed or lost the real fastp source identity')
 
     fastqc_only_out, _, fastqc_only_trace = qc_run(base, fixture, "fastqc-without-multiqc", True, False, False)
     assert_true(len(list((fastqc_only_out / "01_qc" / "fastqc").glob("*.zip"))) == 8,
@@ -608,15 +659,22 @@ def suite_qc(base):
     write_extra(fixture / "same-basename" / "mate2" / "reads.fq.gz", 115, True)
     write_extra(fixture / "uncompressed" / "mate1" / "reads.fastq", 125, False)
     write_extra(fixture / "uncompressed" / "mate2" / "reads.fq", 135, False)
-    alias_out, _, alias_trace = qc_run(base, fixture, "alias-extensions", True, False, False,
+    for sample, first in [('A.clean.B', 145), ('A.clean.C', 165)]:
+        write_extra(fixture / sample / 'R1.fastq.gz', first, True)
+        write_extra(fixture / sample / 'R2.fastq.gz', first + 10, True)
+    alias_out, alias_work, alias_trace = qc_run(base, fixture, "alias-extensions", True, True, False,
                                        extra_alias_tests=True)
     alias_zips = sorted((alias_out / "01_qc" / "fastqc").glob("*.zip"))
-    assert_true(len(alias_zips) == 12, f"extension/complex-ID check expected 12 ZIPs, got {len(alias_zips)}")
+    assert_true(len(alias_zips) == 16, f"extension/complex-ID check expected 16 ZIPs, got {len(alias_zips)}")
     alias_counts = {
         "A__B.v1.raw.R1": (105, "A__B.v1.raw.R1.fastq.gz"),
         "A__B.v1.raw.R2": (115, "A__B.v1.raw.R2.fastq.gz"),
         "U1.clean.R1": (125, "U1.clean.R1.fastq"),
         "U1.clean.R2": (135, "U1.clean.R2.fastq"),
+        "A.clean.B.raw.R1": (145, "A.clean.B.raw.R1.fastq.gz"),
+        "A.clean.B.raw.R2": (155, "A.clean.B.raw.R2.fastq.gz"),
+        "A.clean.C.raw.R1": (165, "A.clean.C.raw.R1.fastq.gz"),
+        "A.clean.C.raw.R2": (175, "A.clean.C.raw.R2.fastq.gz"),
     }
     seen_aliases = set()
     for archive in alias_zips:
@@ -631,9 +689,18 @@ def suite_qc(base):
                 assert_true(int(total.group(1)) == count, f"{key}: wrong read count in ZIP")
                 seen_aliases.add(key)
     assert_true(seen_aliases == set(alias_counts), "complex ID or FASTQ extension aliases were not preserved")
-    assert_true(len(trace_statuses(alias_trace, "FASTQC")) == 6,
-                "same-basename/extension run did not execute all six sample-stage tasks")
+    assert_true(len(trace_statuses(alias_trace, "FASTQC")) == 8,
+                "same-basename/extension run did not execute all eight sample-stage tasks")
+    assert_multiqc_fastqc_sources(alias_work, alias_trace,
+        {**{key + '.fastq.gz': count for key, count in expected.items()},
+         **{filename: count for count, filename in alias_counts.values()}})
     print("qc: real FastQC/MultiQC verified eight unique aliases, ZIP counts, and conditional routing")
+
+
+def suite_abricate_routing(base):
+    from run_abricate_routing import run_checks
+    print("abricate-routing: explicit CLI observer; no database search or biological calls")
+    assert_true(run_checks(base), "ABRicate input selection or sample/report provenance mismatch")
 
 
 def run_suite(name, keep_temp):
@@ -646,7 +713,8 @@ def run_suite(name, keep_temp):
         "sequence-optional": ["nextflow"],
         "longread-source": ["nextflow", "samtools"],
         "crispr-guard": ["nextflow"],
-        "qc": ["nextflow", "fastqc", "multiqc"],
+        "qc": ["nextflow", "fastqc", "multiqc", "fastp"],
+        "abricate-routing": ["nextflow", "python3"],
     }
     require_tools(requirements[name])
     version = nextflow_version()
@@ -666,6 +734,7 @@ def run_suite(name, keep_temp):
             "longread-source": suite_longread_source,
             "crispr-guard": suite_crispr_guard,
             "qc": suite_qc,
+            "abricate-routing": suite_abricate_routing,
         }[name](base)
         success = True
     except (AssertionError, RegressionFailure, subprocess.CalledProcessError, OSError, StopIteration) as exc:

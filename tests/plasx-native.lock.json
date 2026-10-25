@@ -1,0 +1,395 @@
+{
+  "status": "locked_assets_not_a_validation_certificate",
+  "plasx_commit": "5c9acfd00a597da27ef5261acf72dbaf2117b645",
+  "anvio_commit": "258991a5bc0f483c958040a55d339e1f447429ac",
+  "method": "per-sample anvi’o COG2014/Pfam32 plus all ten de-novo families; original native PlasX model",
+  "model_sha256": "c80948687b28f900a977b2ec755e62d48c28939a1c545ed870c7abdee419aa41",
+  "downloads": {
+    "PlasX_coefficients_and_gene_enrichments.txt.gz": {
+      "url": "https://zenodo.org/records/5819401/files/PlasX_coefficients_and_gene_enrichments.txt.gz",
+      "bytes": 16843622,
+      "sha256": "317f3e7d27115d71a05ca0d31a8eaf7d668a81f23335f6e4480b4637b22cc3b9",
+      "md5": "0ad227c0603236088d67656877877557"
+    },
+    "PlasX_mmseqs_profiles.tar.gz": {
+      "url": "https://zenodo.org/records/5819401/files/PlasX_mmseqs_profiles.tar.gz",
+      "bytes": 1700322242,
+      "sha256": "914fd70d84343d55a111ebc4c0fc5e6d366543929c8aea9a0e63ce07325de512",
+      "md5": "0cb528ebeac860360bbeffafc872473c"
+    }
+  },
+  "profiles": {
+    "files": [
+      {
+        "path": "clu20.profile",
+        "bytes": 677824294,
+        "sha256": "beee16b7dd58b79f5d2abef8b0f499c52fee0c847b22e7b4739dd51a1232bf24"
+      },
+      {
+        "path": "clu20.profile.dbtype",
+        "bytes": 4,
+        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
+      },
+      {
+        "path": "clu20.profile.index",
+        "bytes": 2025340,
+        "sha256": "acb75591ed157f5f8848bb4def050f9467ea6040ae3b6d65eda974c03c859780"
+      },
+      {
+        "path": "clu20.profile_h",
+        "bytes": 923701,
+        "sha256": "5b8b3420773a9ba50769145bfb7b6de2a89e300c70143173397a2bc8b809dfca"
+      },
+      {
+        "path": "clu20.profile_h.index",
+        "bytes": 1583646,
+        "sha256": "ff3cb6c667b350098d9a22d203c2567d609dabc31c3eaca13c4c32e5f0836805"
+      },
+      {
+        "path": "clu25.profile",
+        "bytes": 557793985,
+        "sha256": "4db6469eeb51d7f25eb89b32278d44b79e2221fbf611927b703b6b9d8b752482"
+      },
+      {
+        "path": "clu25.profile.dbtype",
+        "bytes": 4,
+        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
+      },
+      {
+        "path": "clu25.profile.index",
+        "bytes": 1676547,
+        "sha256": "8f52d0f4d99f84b65be85b3fdda6c1b09396f8d2aea70500a772c5be8848d013"
+      },
+      {
+        "path": "clu25.profile_h",
+        "bytes": 766280,
+        "sha256": "222539732b243ce2abb25eac2430d78a755b04878fe8eaa1c58a0b7bec458ffb"
+      },
+      {
+        "path": "clu25.profile_h.index",
+        "bytes": 1311575,
+        "sha256": "d071dd9cce962fbf4eed8b73faadea591393817f48050a690aa64c7403a18b23"
+      },
+      {
+        "path": "clu30.profile",
+        "bytes": 510111140,
+        "sha256": "6bb594438cea488547f19927998d287f7bb9e3bfec3eab2d177453641751fbda"
+      },
+      {
+        "path": "clu30.profile.dbtype",
+        "bytes": 4,
+        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
+      },
+      {
+        "path": "clu30.profile.index",
+        "bytes": 1690191,
+        "sha256": "640f1e87e77bc9102e0523dbe2a161e576452c9459851ef638025905b4e623df"
+      },
+      {
+        "path": "clu30.profile_h",
+        "bytes": 774696,
+        "sha256": "dabd3a4a9dd4aff2968146cc909448cae76640ab2f99a3655d8ff765ee832364"
+      },
+      {
+        "path": "clu30.profile_h.index",
+        "bytes": 1325732,
+        "sha256": "36ce43ba297e322f20d8e083524225b9e5924109242e2e0e5023ea5aad1abbe1"
+      },
+      {
+        "path": "clu40.profile",
+        "bytes": 335257247,
+        "sha256": "2896b267929d0aaa875e03b88fdc654aead1be8b22758aa4b8c36373bbd65891"
+      },
+      {
+        "path": "clu40.profile.dbtype",
+        "bytes": 4,
+        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
+      },
+      {
+        "path": "clu40.profile.index",
+        "bytes": 1157717,
+        "sha256": "e6f06f06766b4d70a6adf049d798c5801b2833a670af11aa817f27392decef43"
+      },
+      {
+        "path": "clu40.profile_h",
+        "bytes": 534012,
+        "sha256": "cda9f66ca2102aa6e472c7cb077402508f72419939d2254e04a5759962849142"
+      },
+      {
+        "path": "clu40.profile_h.index",
+        "bytes": 910029,
+        "sha256": "630e691fae6540d2848a56ba4af7b369d9156d4407c38f5d85db43a8eab00370"
+      },
+      {
+        "path": "clu5.profile",
+        "bytes": 3657788391,
+        "sha256": "39ccf44c857586928e434af87a8fa7d1d21b237ee20cfa843a7e8db9bbf26133"
+      },
+      {
+        "path": "clu5.profile.dbtype",
+        "bytes": 4,
+        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
+      },
+      {
+        "path": "clu5.profile.index",
+        "bytes": 17647922,
+        "sha256": "587204d169e0a19564054a7b91fdf8dcd0410f18f311ffc3771358f38cb47d7e"
+      },
+      {
+        "path": "clu5.profile_h",
+        "bytes": 7767393,
+        "sha256": "fc78931244b7447884c79915b676131084da83fbf2282f34a95b430dc544645b"
+      },
+      {
+        "path": "clu5.profile_h.index",
+        "bytes": 14082154,
+        "sha256": "ab98569970a2b1d326f6b6a9c1dcb7700b7c700a0cde237e7913fa7062b96e33"
+      },
+      {
+        "path": "clu50.profile",
+        "bytes": 154859574,
+        "sha256": "255698436db5ef36fdf6b86336f7d97b986bf8e5c9be38cc04e5fc1dae9390a1"
+      },
+      {
+        "path": "clu50.profile.dbtype",
+        "bytes": 4,
+        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
+      },
+      {
+        "path": "clu50.profile.index",
+        "bytes": 555150,
+        "sha256": "b01c4fc2413b38112a8e429e619deb71704ebc612a487f2f62ef294af0a3b1c5"
+      },
+      {
+        "path": "clu50.profile_h",
+        "bytes": 260594,
+        "sha256": "7ecc823787579311d8cd5692de4346f8c7dcf4e24edde0cbe56397571e016033"
+      },
+      {
+        "path": "clu50.profile_h.index",
+        "bytes": 438773,
+        "sha256": "be7733e6448bd063bc214c72b5626ded46f9bb554d7c09cc6f453f597692175f"
+      },
+      {
+        "path": "clu60.profile",
+        "bytes": 172467761,
+        "sha256": "f0b1308f6a050c76662ec034600ce00d6aa3dc9a0b6de7342617145519669609"
+      },
+      {
+        "path": "clu60.profile.dbtype",
+        "bytes": 4,
+        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
+      },
+      {
+        "path": "clu60.profile.index",
+        "bytes": 726528,
+        "sha256": "9421f955ba3123277a85342a2e08b1584933748895f7d7c3f95658176d99c58e"
+      },
+      {
+        "path": "clu60.profile_h",
+        "bytes": 339904,
+        "sha256": "331513006635621dfd51631c90eebdf6f4b819920e47ad241b0e9dfe29f26be5"
+      },
+      {
+        "path": "clu60.profile_h.index",
+        "bytes": 575663,
+        "sha256": "6d3d7145838917a3a4e8ca0ccbf1dc989d5c1e10a01c0440f5dd765f4b73530d"
+      },
+      {
+        "path": "clu70.profile",
+        "bytes": 103150101,
+        "sha256": "9762bdb1b6b1984fe17256a3b383216e29ef6ff0fb397bd995e1ebea090e07e1"
+      },
+      {
+        "path": "clu70.profile.dbtype",
+        "bytes": 4,
+        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
+      },
+      {
+        "path": "clu70.profile.index",
+        "bytes": 427690,
+        "sha256": "c0b610eaa28437ca04c204db7480a0b4336538412292d81c297fb06b72472743"
+      },
+      {
+        "path": "clu70.profile_h",
+        "bytes": 203705,
+        "sha256": "ac77513cf2ae47d628e5d2801ebe0121b96fd13801fc3de48c861f49ea44bf9a"
+      },
+      {
+        "path": "clu70.profile_h.index",
+        "bytes": 340965,
+        "sha256": "edd979a4a0bb89c4342c3487cddc53b64f8a3d1eb66fa0ec92a75bc55cb6aa90"
+      },
+      {
+        "path": "clu80.profile",
+        "bytes": 60386849,
+        "sha256": "57edf21ba2bd793f3755984b269e621d4ce2a14acbe5393bd38a1f9b71ffb361"
+      },
+      {
+        "path": "clu80.profile.dbtype",
+        "bytes": 4,
+        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
+      },
+      {
+        "path": "clu80.profile.index",
+        "bytes": 233257,
+        "sha256": "4c355c2a2b4936284b546c1574b1ce0d40fedec41879be1aa4abe2bc4263d0fa"
+      },
+      {
+        "path": "clu80.profile_h",
+        "bytes": 110973,
+        "sha256": "79014866943e69d60b35e30e6072dab8408e1bcad445e8fa0e280c1afa3e1eb1"
+      },
+      {
+        "path": "clu80.profile_h.index",
+        "bytes": 181670,
+        "sha256": "4bf0da7e0816c2456bdc29b6e91d4ebc024a12d31a9eb0ca8af45d414bc58871"
+      },
+      {
+        "path": "clu90.profile",
+        "bytes": 63204106,
+        "sha256": "20d4d8d436003038dc691f612e0c1607726fe7949e1a42e02c00c1d3d20a6103"
+      },
+      {
+        "path": "clu90.profile.dbtype",
+        "bytes": 4,
+        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
+      },
+      {
+        "path": "clu90.profile.index",
+        "bytes": 205142,
+        "sha256": "e7ad18725b7627604ed9f926049e8021474988798355a3c6a26c9f6ae089b9b6"
+      },
+      {
+        "path": "clu90.profile_h",
+        "bytes": 96751,
+        "sha256": "101198dc4d206218e003765d3da46ed750ff24986a211ee7c835641d2259b4f9"
+      },
+      {
+        "path": "clu90.profile_h.index",
+        "bytes": 157927,
+        "sha256": "2e83242049b2f147890a2346c514d492ad4d4ef60a3871b310b067389407021b"
+      },
+      {
+        "path": "rep_lengths.pkl.blp",
+        "bytes": 3051896,
+        "sha256": "07658ed0bced95a5d7ec7d7caaa4ced19be6f077490a3d1713d2b8624c196e36"
+      },
+      {
+        "path": "rep_lengths.txt",
+        "bytes": 13621022,
+        "sha256": "d52bfec11b10f38ef0ef4c3dd29fa1a0e7d3d28603d353e7ad8e8094eaadd8d2"
+      },
+      {
+        "path": "rep_min_align_identity.pkl.blp",
+        "bytes": 5541199,
+        "sha256": "3994bf67258dea4c235a25fe6942b4d8c8a6c6eaaec12ae5452a7376d58a28f9"
+      },
+      {
+        "path": "rep_min_align_identity.txt",
+        "bytes": 18268258,
+        "sha256": "eecb18151cbb4889d95c7a81c03a12fd032d8a5b7836e34ed60b8fba2adab05f"
+      }
+    ],
+    "total_bytes": 6392357490,
+    "scope": "all regular files extracted from the complete verified official PlasX profile archive, no subset/index rebuild"
+  },
+  "raw_annotation_resources": [
+    {
+      "file": "Pfam_v32/Pfam-A.hmm.gz",
+      "url": "https://ftp.ebi.ac.uk/pub/databases/Pfam/releases/Pfam32.0/Pfam-A.hmm.gz",
+      "bytes": 270995712,
+      "sha256": "33a7713c080c8f921863ee87793f36b4bce0fc05ff5fec767109a4e9ffbf9c1e",
+      "md5": "1456545a3f37eb25fa40225cb378a415",
+      "official_md5": "1456545a3f37eb25fa40225cb378a415",
+      "integrity_scope": "official MD5 verified"
+    },
+    {
+      "file": "Pfam_v32/Pfam.version.gz",
+      "url": "https://ftp.ebi.ac.uk/pub/databases/Pfam/releases/Pfam32.0/Pfam.version.gz",
+      "bytes": 114,
+      "sha256": "7852cbaa548a6c0fcdb6ec1a707c5ef35684bd4dcc0a9c7c9a1fb90e0ff499d5",
+      "md5": "de7496fad69c1040fd74db1cb5eef0fc",
+      "official_md5": "de7496fad69c1040fd74db1cb5eef0fc",
+      "integrity_scope": "official MD5 verified"
+    },
+    {
+      "file": "Pfam_v32/Pfam-A.clans.tsv.gz",
+      "url": "https://ftp.ebi.ac.uk/pub/databases/Pfam/releases/Pfam32.0/Pfam-A.clans.tsv.gz",
+      "bytes": 330094,
+      "sha256": "65b613272dd525ca769ae5d127bf215d2dfcacdf221b2666d4c065886d7a1b7f",
+      "md5": "1b52ac0bb6e3bb80063f31e1bd0ffa70",
+      "official_md5": "1b52ac0bb6e3bb80063f31e1bd0ffa70",
+      "integrity_scope": "official MD5 verified"
+    },
+    {
+      "file": "COG_2014/COG14/RAW_DATA_FROM_NCBI/cog2003-2014.csv",
+      "url": "https://ftp.ncbi.nih.gov/pub/COG/COG2014/data/cog2003-2014.csv",
+      "bytes": 158356921,
+      "sha256": "937ff2746098ec514d2b3e8820438510c527a2a0b9bef702a87e03f811a58ea9",
+      "md5": "519694be6fe2394797e9f23bdfe06316",
+      "official_md5": null,
+      "integrity_scope": "HTTPS origin plus Content-Length and recorded local hashes; no independent publisher checksum available in source directory"
+    },
+    {
+      "file": "COG_2014/COG14/RAW_DATA_FROM_NCBI/cognames2003-2014.tab",
+      "url": "https://ftp.ncbi.nih.gov/pub/COG/COG2014/data/cognames2003-2014.tab",
+      "bytes": 260673,
+      "sha256": "7746d2d412874ce1bd66e660ecd5244430663180758d3b8eb4ef18b32acb00e3",
+      "md5": "e7de08419101ee106d8a33df5636215a",
+      "official_md5": null,
+      "integrity_scope": "HTTPS origin plus Content-Length and recorded local hashes; no independent publisher checksum available in source directory"
+    },
+    {
+      "file": "COG_2014/COG14/RAW_DATA_FROM_NCBI/fun2003-2014.tab",
+      "url": "https://ftp.ncbi.nih.gov/pub/COG/COG2014/data/fun2003-2014.tab",
+      "bytes": 961,
+      "sha256": "3bdcb2d4afbaf06fadaf7d6280cc4e5476b525de865eae0d27bdef66eb3fe69c",
+      "md5": "7e992f9ffb4165c25f17bdb6d67fe571",
+      "official_md5": null,
+      "integrity_scope": "HTTPS origin plus Content-Length and recorded local hashes; no independent publisher checksum available in source directory"
+    },
+    {
+      "file": "COG_2014/COG14/RAW_DATA_FROM_NCBI/prot2003-2014.fa.gz",
+      "url": "https://ftp.ncbi.nih.gov/pub/COG/COG2014/data/prot2003-2014.fa.gz",
+      "bytes": 423934259,
+      "sha256": "34ebaa5a3990ee3840a73318eb970a48cfdc3f01eb8ca6ea50643d22f676965f",
+      "md5": "1a7affeeff04fe1347323c6777d4fe53",
+      "official_md5": null,
+      "integrity_scope": "HTTPS origin plus Content-Length and recorded local hashes; no independent publisher checksum available in source directory"
+    }
+  ],
+  "environment_locks": {
+    "plasx-linux-64.lock": "09a81346d084501586f679ee28c1a48b55197f3bf9f64eccefcdcefd6eb9b573",
+    "plasx-anvio-linux-64.lock": "ec02fee9ac6f88c9190ac6101c97781f8b6f104abb02879ddd29abc06b8c5755"
+  },
+  "limitations": [
+    "full native search and current workflow validation ongoing; no image, AWS, independent biological accuracy, or full-platform certification"
+  ],
+  "sources": [
+    {
+      "repository": "michaelkyu/PlasX",
+      "commit": "5c9acfd00a597da27ef5261acf72dbaf2117b645",
+      "archive": "plasx-source.tar.gz",
+      "url": "https://codeload.github.com/michaelkyu/PlasX/tar.gz/5c9acfd00a597da27ef5261acf72dbaf2117b645",
+      "sha256": "5d08bd8640fb82fbda322e078f818037074067829af32fa994151ec314775df0",
+      "bytes": 303354
+    },
+    {
+      "repository": "merenlab/anvio",
+      "commit": "258991a5bc0f483c958040a55d339e1f447429ac",
+      "archive": "anvio-source.tar.gz",
+      "url": "https://codeload.github.com/merenlab/anvio/tar.gz/258991a5bc0f483c958040a55d339e1f447429ac",
+      "sha256": "546745b96fad69f8d0b088a4b6a8f90cc2a367acf581f2e2ac0bcdc41cdf6643",
+      "bytes": 200325989
+    }
+  ],
+  "official_fixture_sha256": {
+    "test-contigs-cogs-and-pfams.txt": "753c3a224cc7db9d00d82320d09e8ad9c943d443178ecf46d7626baaf866ce40",
+    "test-contigs-de-novo-families.txt": "836470a46ae6c454a680de0e6c7bf5c244d65283330178643bb99eab72f8d667",
+    "test-contigs-gene-calls.txt": "6485d220fd62aa0f20e680bc8c3eb4896db677e1dc28691ea1316428847e9a75",
+    "test-contigs-scores.txt": "7957d81f2a657eb65dc12e3dab032301016c2716c6d11d9440f1b10b92dbc442",
+    "test-contigs.fa": "9a14bfd7bb825d8c1aaf3fde27590826f1e82d7e0867cb95a0e34b4b7aaa2d1b"
+  },
+  "validation_record": "docs/tool-audit/contracts/plasx-native.md; results/tool-audit/20261024-plasx-native/receipt.json when present; historical preparation used resource-preparation.lock.json"
+}
