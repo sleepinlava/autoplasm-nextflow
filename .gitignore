@@ -13,6 +13,9 @@ docs/review-executability-repro.py
 docs/review-executability-round2.md
 docs/review-fix-plan-detailed.md
 docs/*
+!docs/tool-interface-audit-plan.md
+!docs/tool-audit/
+!docs/tool-audit/**
 
 # lazygit
 lazygit
@@ -31,3 +34,7 @@ lazygit
 
 # agent tooling dirs
 .codex/
+
+# Local test publication and external-tool scratch output
+/null/
+/blast-log.txt
