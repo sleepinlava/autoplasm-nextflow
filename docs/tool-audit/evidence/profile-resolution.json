@@ -1,0 +1,31 @@
+{
+  "run_id": "20261025-profile-resolution-current",
+  "level": "static/config-resolution",
+  "artifact": "results/tool-audit/20261025-profile-resolution-current/run.json",
+  "artifact_sha256": "7f9d2f2b95167d39076896cd6fe9318ff0f9b2c04ceb049b9281e6ce6ab8303f",
+  "script": "results/tool-audit/20261025-profile-resolution-current/resolve_profiles.py",
+  "script_sha256": "9b8c3975cde619480cf56af709a3acf22a46b970da1f7e25b45559e5333399da",
+  "cases": 12,
+  "pass": true,
+  "source_sha256": {
+    "nextflow.config": "797333db2ca4953d0f1ed137d49901789e25a38bd58dd7d945fb42efcf297505",
+    "conf/gplas.config": "a1b8fc60387cf9b983de9a72b942c2df303f4f2f24a8c20d162a05ea4335d86f",
+    "conf/nfcore_detection.config": "51ff384c58a02260c5c427ef77f9ab766eb192362ee0d21de34524f986b34224",
+    "conf/nfcore_downstream.config": "c65ae298c5b46496a6279c4421fd67bb65e7de3e14f21135f790567b8410729a",
+    "conf/nfcore_host_comparative.config": "a898202fd0851a80c5cb2be1741ec452898d254875f7f72317451f2fcb5b3012",
+    "conf/nfcore_mag.config": "85c48ad7081bde4374fff7df3790fe42e2a08715f665f321fc713b660c40e2c1",
+    "conf/nfcore_qc_assembly.config": "3de8ccf4eacf5c3a138dc3244dd8c383dc4a09a3635d28697b5d5057e584842f",
+    "conf/nfcore_upstream.config": "24b01fc02bfc880cd3e53187941a7dd2e4b2a84395ecc82eaf8cf4c539b9534c",
+    "conf/plasmaag.config": "d4bcde84a34c279a11deb36b59157c0072cc5291c1a328e068cb45dee0a855c3",
+    "conf/shared_quantification.config": "2038616e366dbb83aa4d169476a6f682774791734e232b69fa28e94ead7a3148",
+    "conf/test.config": "32fefaf3d8e5bf3632ca7ed14ca34c56bbccbae7a8bf0b3fd4ab33dc1c2fac10"
+  },
+  "limits": [
+    "Actual Nextflow config serialization with isolated -C workspace configuration; no workflow launched",
+    "Default platform illumina only; no claims about CLI parameter overrides or other platforms",
+    "Does not resolve module-level process directives, closure evaluation, selector precedence at task execution, tools or databases",
+    "Test profile explicitly disables geNomad neural classification for its small database; not a scientific benchmark",
+    "Default profile enables no package/container engine; executable readiness is not tested"
+  ],
+  "supersedes_current_config_identity": "results/tool-audit/20261023-profile-resolution-after-proteins/run.json; previous pointer saved separately; same12 unique scenarios, no denominator increase"
+}

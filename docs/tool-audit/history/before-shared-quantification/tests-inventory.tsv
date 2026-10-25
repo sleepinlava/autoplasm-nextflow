@@ -1,0 +1,110 @@
+path	kind	test_definitions_lexical	assertions_lexical	review	limitations
+tests/mock_e2e/generate.py	.py	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/mock_e2e/mock_tool.py	.py	0	19	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/mock_e2e/run.py	.py	0	20	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nextflow/catalog.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nextflow/coabundance.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected in linking/config batch; scientific oracle and full runtime acceptance unresolved
+tests/nextflow/crispr_guard.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nextflow/host_routing.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nextflow/link_sequence_optional.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nextflow/longread_source.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected in linking/config batch; scientific oracle and full runtime acceptance unresolved
+tests/nextflow/nextflow.config	.config	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nextflow/qc.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nextflow/sample_ids.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nextflow/sequence.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected in linking/config batch; scientific oracle and full runtime acceptance unresolved
+tests/nf-test.config	.config	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/blastn.config	.config	0	1	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/download_databases.sh	.sh	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/ena.config	.config	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected in linking/config batch; scientific oracle and full runtime acceptance unresolved
+tests/nf-test/env.sh	.sh	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/integration.config	.config	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/integration.nf.test	nf-test	1	17	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nextflow.config	.config	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected in linking/config batch; scientific oracle and full runtime acceptance unresolved
+tests/nf-test/nodes-annotation.nf.test	nf-test	1	5	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nodes-assembly-hifiasm.nf.test	nf-test	1	4	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nodes-assembly-operams.nf.test	nf-test	1	6	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/nodes-basecalling-dorado.nf.test	nf-test	1	5	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/nodes-binning-recycler.nf.test	nf-test	1	16	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nodes-binning-scapp.nf.test	nf-test	1	5	removed_by_user	Historical test source retained in denominator; SCAPP nodes explicitly removed on2026-10-21; no active test/coverage claim
+tests/nf-test/nodes-comparative-blastn.nf.test	nf-test	1	4	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/nodes-comparative-catalog.nf.test	nf-test	1	5	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nodes-comparative-clinker.nf.test	nf-test	1	7	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/nodes-comparative-mummer.nf.test	nf-test	1	3	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nodes-cross-sample-ena.nf.test	nf-test	1	17	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nodes-cross-sample-fastspar.nf.test	nf-test	1	7	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nodes-detection-platon.nf.test	nf-test	2	14	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/nodes-detection-scapp.nf.test	nf-test	1	6	removed_by_user	Historical test source retained in denominator; SCAPP nodes explicitly removed on2026-10-21; no active test/coverage claim
+tests/nf-test/nodes-linking-coabundance.nf.test	nf-test	1	4	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nodes-linking-longread.nf.test	nf-test	1	6	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nodes-linking-sequence.nf.test	nf-test	1	5	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nodes-mag-metabat2.nf.test	nf-test	1	4	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/nodes-mag-samtools-index.nf.test	nf-test	1	8	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/plasmid.nf.test	nf-test	1	26	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/prepare_data.py	.py	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/validation.config	.config	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/validation.nf.test	nf-test	7	22	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/nf-test/workflows/blastn_real.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/workflows/clinker_real.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/workflows/link_longread_real.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected in linking/config batch; scientific oracle and full runtime acceptance unresolved
+tests/nf-test/workflows/metabat2_real.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected in linking/config batch; scientific oracle and full runtime acceptance unresolved
+tests/nf-test/workflows/network_real.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/workflows/recycler_real.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected in linking/config batch; scientific oracle and full runtime acceptance unresolved
+tests/nf-test/workflows/samtools_index_real.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/nf-test/workflows/scapp_bin_real.nf	.nf	0	0	removed_by_user	Historical test source retained in denominator; SCAPP nodes explicitly removed on2026-10-21; no active test/coverage claim
+tests/nf-test/workflows/scapp_detect_real.nf	.nf	0	0	removed_by_user	Historical test source retained in denominator; SCAPP nodes explicitly removed on2026-10-21; no active test/coverage claim
+tests/nf-test/workflows/spades_minigut_fastg.nf	.nf	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/r_mock/run_r_mock_tests.sh	.sh	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/run_module_regressions.py	.py	0	0	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/test_catalog_prepare.py	.py	7	23	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/test_coabundance_link.py	.py	6	34	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected in linking/config batch; scientific oracle and full runtime acceptance unresolved
+tests/test_generate_report.py	.py	3	10	investigating	new TA-045 regression3/3 native R; lexical counts not coverage; includes suffix collision, zero calls, ordinary IDs; full report contract unresolved
+tests/test_longread_bridge_link.py	.py	6	24	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected in linking/config batch; scientific oracle and full runtime acceptance unresolved
+tests/test_merge_abundance.py	.py	5	22	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected for fixture/producer/assertion scope; not full runtime certification
+tests/test_plasmid_consensus.py	.py	11	41	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/test_prepare_test_data.py	.py	7	30	investigating	lexical counts are not independent cases or coverage; harnesses/configs included
+tests/test_sequence_similarity_link.py	.py	10	41	investigating	lexical counts are not independent cases or coverage; harnesses/configs included; source inspected in linking/config batch; scientific oracle and full runtime acceptance unresolved
+tests/test_statistics_identity.py	.py	7	18	investigating	7 identity regression methods; native R/DESeq2 1.52; not full statistical contract or declared container certification
+tests/test_module_regression_oracles.py	.py	4	3	investigating	lexical counts are not independent cases or coverage; TT-008 targeted checks only
+tests/test_plasmid_structure.py	.py	13	27	investigating	TA-036 actual structure/report wrappers on two locked real references plus explicit header/synthetic/empty controls; repeat vs topology unknown separated; no graph/reads/production publication barrier/image/nf-test/full platform/topology sensitivity certification
+tests/test_opera_ms_interface.py	.py	5	5	investigating	explicit interface observer; not real assembly; nf-test source assertions do not prove execution
+tests/test_platon_input_interface.py	.py	2	7	investigating	input observer; real sequence origin but no classifier; nf-test source changes not executed
+tests/test_abundance_numeric_validation.py	.py	6	11	investigating	6 methods/35 rejection subcases; native numeric contract only; full statistical source/unit/P4 scope open
+tests/test_consensus_integrity.py	.py	5	8	investigating	6 methods/7 integrity rejection subcases; native parser contract only; scientific/other formats still open
+tests/test_consensus_weights.py	.py	6	7	investigating	6 methods/20 configuration scenarios; native consumer contract only; full tool registry/scientific/E2E scope open
+tests/nextflow/abricate_selection.nf	.nf	0	0	investigating	explicit interface observer;6 routing cases, not real annotation or scientific/P3 coverage
+tests/run_abricate_routing.py	.py	0	0	investigating	explicit interface observer;6 routing cases, not real annotation or scientific/P3 coverage
+tests/run_native_alignment_pairing.py	.py	0	0	investigating	standalone exact-native22-task workflow/component regression; synthetic independent truth; not full platform/P4/scientific benchmark
+tests/run_recycler_input_validation.py	.py	0	0	investigating	standalone10-case native guard component; not production Recycler or biological/P3 certification
+tests/test_recycler_graph_reference.py	.py	10	6	investigating	independent canonical orientation component cases; native full-graph/CLI receipts separate; no production repair
+tests/test_spades_graph_provenance.py	.py	8	9	investigating	new original-module/independent provenance regression; execution scopes in receipts
+tests/nextflow/recycler_native.nf	.nf	0	0	investigating	new original-module/independent provenance regression; execution scopes in receipts
+tests/nextflow/recycler_contract.nf	.nf	0	0	investigating	new original-module/independent provenance regression; execution scopes in receipts
+tests/test_consensus_inputs.py	.py	6	14	investigating	Controlled native consensus/structure interface fixtures and retired-tool rejection; not classifier inference/image/nf-test/full platform/scientific validation
+tests/run_consensus_inputs.py	.py	0	1	investigating	Controlled native consensus/structure interface fixtures and retired-tool rejection; not classifier inference/image/nf-test/full platform/scientific validation
+tests/nextflow/consensus_inputs.nf	.nf	0	0	investigating	Controlled native consensus/structure interface fixtures and retired-tool rejection; not classifier inference/image/nf-test/full platform/scientific validation
+tests/run_detection_selection.py	.py	0	0	investigating	Controlled native consensus/structure interface fixtures and retired-tool rejection; not classifier inference/image/nf-test/full platform/scientific validation
+tests/nextflow/detection_selection.nf	.nf	0	0	investigating	Controlled native consensus/structure interface fixtures and retired-tool rejection; not classifier inference/image/nf-test/full platform/scientific validation
+tests/test_plasx_scores.py	.py	5	12	investigating	consumer/adapter contract tests; pinned upstream writer only, controlled candidates; not classifier/model inference, image, nf-test or scientific validation
+tests/test_plasme_outputs.py	.py	7	5	investigating	consumer/adapter contract tests; pinned upstream writer only, controlled candidates; not classifier/model inference, image, nf-test or scientific validation
+tests/run_plasme_interface.py	.py	0	3	investigating	consumer/adapter contract tests; pinned upstream writer only, controlled candidates; not classifier/model inference, image, nf-test or scientific validation
+tests/test_rgi_card_validation.py	.py	6	6	investigating	actual native RGI + two genuine fixed CARD releases; default versus upstream mode controls explicit; not image/nf-test/full platform or AMR benchmark
+tests/run_rgi_database_scope.py	.py	0	2	investigating	actual native RGI + two genuine fixed CARD releases; default versus upstream mode controls explicit; not image/nf-test/full platform or AMR benchmark
+tests/nextflow/rgi_database_scope.nf	.nf	0	0	investigating	actual native RGI + two genuine fixed CARD releases; default versus upstream mode controls explicit; not image/nf-test/full platform or AMR benchmark
+tests/run_rgi_downstream.py	.py	0	0	investigating	actual native RGI + two genuine fixed CARD releases; default versus upstream mode controls explicit; not image/nf-test/full platform or AMR benchmark
+tests/nextflow/rgi_downstream.nf	.nf	0	0	investigating	actual native RGI + two genuine fixed CARD releases; default versus upstream mode controls explicit; not image/nf-test/full platform or AMR benchmark
+tests/prepare_rgi_scope.py	.py	0	0	investigating	actual native RGI + two genuine fixed CARD releases; default versus upstream mode controls explicit; not image/nf-test/full platform or AMR benchmark
+tests/run_mag_routing.py	.py	0	1	investigating	actual fixed CONCOCT cut/merge/extract helpers; native R; core binner/coverage/quality/DAS explicit observers.14 total scenarios217 tasks include genuine empty extraction; not native clustering/models/platform certification
+tests/mag_interface_observer.py	.py	0	11	investigating	actual fixed CONCOCT cut/merge/extract helpers; native R; core binner/coverage/quality/DAS explicit observers.14 total scenarios217 tasks include genuine empty extraction; not native clustering/models/platform certification
+tests/nextflow/mag_selection.nf	.nf	0	0	investigating	MAG policy/route observers explicitly separate from native DAS fixed independent sample; native R linking; not full binner/quality/taxonomy/model/nf-test/platform certification
+tests/run_mag_selection_validation.py	.py	0	0	investigating	MAG policy/route observers explicitly separate from native DAS fixed independent sample; native R linking; not full binner/quality/taxonomy/model/nf-test/platform certification
+tests/run_dastool_export.py	.py	0	4	investigating	MAG policy/route observers explicitly separate from native DAS fixed independent sample; native R linking; not full binner/quality/taxonomy/model/nf-test/platform certification
+tests/nextflow/dastool_export.nf	.nf	0	0	investigating	MAG policy/route observers explicitly separate from native DAS fixed independent sample; native R linking; not full binner/quality/taxonomy/model/nf-test/platform certification
+tests/prepare_dastool_sample.py	.py	0	0	investigating	MAG policy/route observers explicitly separate from native DAS fixed independent sample; native R linking; not full binner/quality/taxonomy/model/nf-test/platform certification
+tests/nextflow/concoct_io.nf	.nf	0	0	investigating	native fixed CONCOCT helpers/complete branch; official real DNA, controlled CSV/BAM and failure cases; not independent clustering accuracy/image/nf-test/full platform
+tests/nextflow/concoct_mag.nf	.nf	0	0	investigating	native fixed CONCOCT helpers/complete branch; official real DNA, controlled CSV/BAM and failure cases; not independent clustering accuracy/image/nf-test/full platform
+tests/run_concoct_io.py	.py	0	3	investigating	native fixed CONCOCT helpers/complete branch; official real DNA, controlled CSV/BAM and failure cases; not independent clustering accuracy/image/nf-test/full platform
+tests/run_concoct_mag.py	.py	0	2	investigating	native fixed CONCOCT helpers/complete branch; official real DNA, controlled CSV/BAM and failure cases; not independent clustering accuracy/image/nf-test/full platform
+tests/nextflow/dastool_custom_db.nf	.nf	0	0	investigating	actual native optional DB8 cases/8 tasks; complete locked positive data and independent fixed15-bin oracle; controlled unmatched lookup is read-path counterexample, not biological negative benchmark
+tests/run_dastool_custom_db.py	.py	0	6	investigating	actual native optional DB8 cases/8 tasks; complete locked positive data and independent fixed15-bin oracle; controlled unmatched lookup is read-path counterexample, not biological negative benchmark
+tests/run_structure_topology.py	.py	0	22	investigating	TA-036 actual structure/report wrappers on two locked real references plus explicit header/synthetic/empty controls; repeat vs topology unknown separated; no graph/reads/production publication barrier/image/nf-test/full platform/topology sensitivity certification
+tests/nextflow/structure_topology.nf	.nf	0	0	investigating	TA-036 actual structure/report wrappers on two locked real references plus explicit header/synthetic/empty controls; repeat vs topology unknown separated; no graph/reads/production publication barrier/image/nf-test/full platform/topology sensitivity certification

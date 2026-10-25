@@ -1,0 +1,738 @@
+diff --git a/tests/nf-test/nodes-mag-metabat2.nf.test b/tests/nf-test/nodes-mag-metabat2.nf.test
+--- a/tests/nf-test/nodes-mag-metabat2.nf.test
++++ b/tests/nf-test/nodes-mag-metabat2.nf.test
+@@ -1,18 +1,19 @@
+-// P3 real-data node chain: JGISUMMARIZEBAMCONTIGDEPTHS -> METABAT2 (mag domain).
+-// Input: pinned nf-core/test-datasets binning fixture (real contigs + s1 BAM/BAI).
+-// Backend: podman.
++// P3 native-tool chain on a fixed upstream software fixture; not MAG-quality
++// truth. Separate unchanged-default empty and upstream-settings nonempty paths.
+ nextflow_pipeline {
+     name 'P3 real nodes: metabat2 depth + binning'
+     script 'tests/nf-test/workflows/metabat2_real.nf'
++    config './metabat2-semantic.config'
+     tag 'P3'
+     tag 'mag'
+     tag 'backend-podman'
+ 
+-    test('real contigs + real BAM produce metabat2 bins') {
++    test('default settings explicitly validate the legitimate empty-bin boundary') {
+         when {
+             params {
+                 test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+                 outdir = "$outputDir"
++                metabat_test_args = ''
+             }
+         }
+         then {
+@@ -21,6 +22,41 @@
+             def tasks = workflow.trace.succeeded().collect { it.name }
+             assert tasks.any { it.contains('JGISUMMARIZEBAMCONTIGDEPTHS') }
+             assert tasks.any { it.contains('METABAT2') }
++            assert tasks.size() == 2
++            def command = ['python3', new File('tests/check_metabat2_native.py').absolutePath,
++                '--fixture', "${params.test_data}/data/genomics/prokaryotes/metagenome/binning/multisample",
++                '--products', "${params.outdir}/07_host_prediction/mag/metabat2",
++                '--mode', 'default-empty', '--output', "${params.outdir}/independent-metabat.json"]
++            def oracle = new ProcessBuilder(command.collect { it.toString() }).redirectErrorStream(true).start()
++            def log = oracle.inputStream.text
++            assert oracle.waitFor() == 0: log
++            def checked = new groovy.json.JsonSlurper().parse(new File(params.outdir, 'independent-metabat.json'))
++            assert checked.pass && checked.bins == 0
++        }
++    }
++
++    test('fixed upstream permissive settings exercise nonempty bin membership and exact DNA') {
++        when {
++            params {
++                test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
++                outdir = "$outputDir"
++                // Exact arguments in the vendored module's tests/nextflow.config.
++                metabat_test_args = '--minContig 1500 --minCV 0.1 --minCVSum 0.1 --minClsSize 10 --minS 2'
++            }
++        }
++        then {
++            assert workflow.success
++            assert workflow.trace.failed().isEmpty()
++            assert workflow.trace.succeeded().size() == 2
++            def command = ['python3', new File('tests/check_metabat2_native.py').absolutePath,
++                '--fixture', "${params.test_data}/data/genomics/prokaryotes/metagenome/binning/multisample",
++                '--products', "${params.outdir}/07_host_prediction/mag/metabat2",
++                '--mode', 'upstream-nonempty', '--output', "${params.outdir}/independent-metabat.json"]
++            def oracle = new ProcessBuilder(command.collect { it.toString() }).redirectErrorStream(true).start()
++            def log = oracle.inputStream.text
++            assert oracle.waitFor() == 0: log
++            def checked = new groovy.json.JsonSlurper().parse(new File(params.outdir, 'independent-metabat.json'))
++            assert checked.pass && checked.bins > 0 && checked.binned_contigs > 0
+         }
+     }
+ }
+diff --git a/tests/nf-test/workflows/metabat2_real.nf b/tests/nf-test/workflows/metabat2_real.nf
+--- a/tests/nf-test/workflows/metabat2_real.nf
++++ b/tests/nf-test/workflows/metabat2_real.nf
+@@ -1,8 +1,7 @@
+ // P3 real-data chain: METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS -> METABAT2 on the
+-// pinned nf-core/test-datasets metagenome binning fixture (real contigs + real
+-// sorted BAM + BAI). The vendored metabat2 suite is blocked by a missing
+-// (unvendored) gunzip setup module; this chain covers the same nodes with real
+-// data. Backend: podman.
++// pinned nf-core/test-datasets binning fixture (contigs, sorted BAM and BAI).
++// These inputs are software controls, not independent MAG-quality truth.
++// Vendored setup helpers are restored separately (TT-005).
+ nextflow.enable.dsl = 2
+ 
+ include { METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS } from '../../../modules/nf-core/metabat2/jgisummarizebamcontigdepths/main'
+diff --git a/tests/nf-test/nodes-linking-longread.nf.test b/tests/nf-test/nodes-linking-longread.nf.test
+--- a/tests/nf-test/nodes-linking-longread.nf.test
++++ b/tests/nf-test/nodes-linking-longread.nf.test
+@@ -1,7 +1,9 @@
+ // P3 real-data node test: LINK_LONGREAD (host-plasmid linking domain).
+-// Real minigut ONT reads are aligned to the real minigut assembly with
++// Fixed upstream synthetic minigut reads are aligned to its assembly with
+ // minimap2+samtools (test scaffolding workflow), then the R bridge counter runs.
+-// Backend: podman (scaffolding in minimap2_samtools image; LINK_LONGREAD runs in its declared bioconductor image).
++// First-five contigs are an explicit partition, not biological plasmid truth.
++// A separate constructed split-read case guarantees a known nonempty counter.
++// Native and podman deployment evidence must be recorded separately.
+ nextflow_pipeline {
+     name 'P3 real node: LINK_LONGREAD on real minigut ONT alignment'
+     script 'tests/nf-test/workflows/link_longread_real.nf'
+@@ -26,7 +28,43 @@
+             def links = getAllFilesFromDir(params.outdir,
+                 include: ['07_host_prediction/linking/longread/*.longread_bridge_links.tsv'])
+             assert links.size() == 1
+-            assert links[0].text.readLines()[0].split('\t').size() >= 2
++            def root = System.getenv('AUTOPLASM_TEST_DATA')
++            def command = ['python3', new File('tests/check_longread_native.py').absolutePath,
++                '--assembly', "${root}/minigut.fasta", '--reads', "${root}/test_data/minigut_reads.fastq.gz",
++                '--plasmids', "${params.outdir}/test_inputs/longread/plasmid_contigs.fasta",
++                '--sam', "${params.outdir}/test_inputs/longread/minigut_ont.sam.gz",
++                '--links', links[0].toString(), '--output', "${params.outdir}/independent-longread.json"]
++            def oracle = new ProcessBuilder(command.collect { it.toString() }).redirectErrorStream(true).start()
++            def log = oracle.inputStream.text
++            assert oracle.waitFor() == 0: log
++            assert new groovy.json.JsonSlurper().parse(new File(params.outdir, 'independent-longread.json')).pass
++        }
++    }
++
++    test('explicit synthetic split-read control reaches a nonempty native bridge count') {
++        when {
++            params {
++                test_data = "${System.getenv('AUTOPLASM_LONGREAD_CONTROL_DATA')}"
++                outdir = "$outputDir"
++            }
++        }
++        then {
++            assert workflow.success
++            assert workflow.trace.failed().isEmpty()
++            assert workflow.trace.succeeded().size() == 2
++            def root = System.getenv('AUTOPLASM_LONGREAD_CONTROL_DATA')
++            def command = ['python3', new File('tests/check_longread_native.py').absolutePath,
++                '--assembly', "${root}/minigut.fasta", '--reads', "${root}/test_data/minigut_reads.fastq.gz",
++                '--plasmids', "${params.outdir}/test_inputs/longread/plasmid_contigs.fasta",
++                '--sam', "${params.outdir}/test_inputs/longread/minigut_ont.sam.gz",
++                '--links', "${params.outdir}/07_host_prediction/linking/longread/minigut_ont.longread_bridge_links.tsv",
++                '--control-manifest', "${root}/control.json", '--output', "${params.outdir}/independent-longread.json"]
++            def oracle = new ProcessBuilder(command.collect { it.toString() }).redirectErrorStream(true).start()
++            def log = oracle.inputStream.text
++            assert oracle.waitFor() == 0: log
++            def checked = new groovy.json.JsonSlurper().parse(new File(params.outdir, 'independent-longread.json'))
++            assert checked.pass && checked.known_positive_control
++            assert checked.expected_links.size() == 1 && checked.expected_links[0].reads == 2
+         }
+     }
+ }
+diff --git a/tests/nf-test/workflows/link_longread_real.nf b/tests/nf-test/workflows/link_longread_real.nf
+--- a/tests/nf-test/workflows/link_longread_real.nf
++++ b/tests/nf-test/workflows/link_longread_real.nf
+@@ -1,8 +1,8 @@
+-// Real minimap2+samtools alignment feeding LINK_LONGREAD.
++// Native minimap2+samtools alignment feeding LINK_LONGREAD.
+ // Data: pinned nf-core/test-datasets minigut assembly and ONT reads,
+ // prepared by prepare_data.py (AUTOPLASM_TEST_DATA).
+-// Scaffolding runs in the same container family as the vendored modules
+-// (native minimap2/samtools are not installed on this host).
++// The upstream minigut fixture is synthetic; first-five partition membership
++// is an execution control, not independent biological plasmid/host truth.
+ nextflow.enable.dsl = 2
+ 
+ include { LINK_LONGREAD } from '../../../modules/linking/longread'
+@@ -14,6 +14,7 @@
+     // name, real sequence content).
+     label 'process_low'
+     container 'community.wave.seqera.io/library/minimap2_samtools:b09096fc890429ce'
++    publishDir "${params.outdir}/test_inputs/longread", mode: 'copy'
+ 
+     input:
+     tuple val(meta), path(assembly), path(reads)
+@@ -21,10 +22,13 @@
+     output:
+     tuple val(meta), path("${meta.id}.bam"), emit: bam
+     path "plasmid_contigs.fasta", emit: contigs
++    path "${meta.id}.sam.gz", emit: sam
+ 
+     script:
+     """
++    set -o pipefail
+     minimap2 -ax map-ont ${assembly} ${reads} | samtools sort -o ${meta.id}.bam
++    samtools view -h ${meta.id}.bam | gzip -c > ${meta.id}.sam.gz
+     n=0
+     while IFS= read -r line; do
+         case "\$line" in
+diff --git a/tests/test_longread_bridge_link.py b/tests/test_longread_bridge_link.py
+--- a/tests/test_longread_bridge_link.py
++++ b/tests/test_longread_bridge_link.py
+@@ -18,8 +18,8 @@
+         self.assembly = self.root / "assembly.fasta"
+         self.sam = self.root / "alignments.sam"
+         self.out = self.root / "links.tsv"
+-        self.plasmids.write_text(">p1\nAAAA\n")
+-        self.assembly.write_text(">p1\nAAAA\n>h1\nCCCC\n")
++        self.plasmids.write_text(">p1\n" + "A" * 100 + "\n")
++        self.assembly.write_text(">p1\n" + "A" * 100 + "\n>h1\n" + "C" * 100 + "\n")
+ 
+     def tearDown(self):
+         self.temp.cleanup()
+@@ -30,7 +30,7 @@
+                            "A" * 100, "I" * 100]) + "\n"
+ 
+     def run_cli(self, records, *extra):
+-        self.sam.write_text("@HD\tVN:1.6\n@SQ\tSN:p1\tLN:4\n@SQ\tSN:h1\tLN:4\n" + "".join(records))
++        self.sam.write_text("@HD\tVN:1.6\n@SQ\tSN:p1\tLN:100\n@SQ\tSN:h1\tLN:100\n" + "".join(records))
+         return subprocess.run(
+             ["Rscript", str(SCRIPT), "--sam", str(self.sam),
+              "--plasmid-contigs", str(self.plasmids), "--assembly", str(self.assembly),
+diff --git a/tests/nf-test/README.md b/tests/nf-test/README.md
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -56,6 +56,38 @@
+ 
+ Python 固定为 3.12，环境位于本目录 `.venv/`；不要使用 `--active`，以免使用外部环境。
+ `uv.lock` 锁定完整依赖解析。`--no-sync` 的执行命令保留已经安装的可选依赖。
++
++## MetaBAT2 与长读长关联的语义验收
++
++`nodes-mag-metabat2.nf.test` 分开检查默认空分箱与上游固定宽松参数下的非空
++成员输出。后者使用 vendored `tests/nextflow.config` 的原参数，未修改生产默认。
++独立 Python 检查固定输入身份、深度表完整 ID/长度/有限数值、全部分箱 DNA、
++唯一成员及完整成员分区。MetaBAT2 2.17 的内部簇编号与 FASTA 文件编号独立，
++不可直接按编号比较；不以当前分箱数量作为准确率真值。
++
++本轮原生环境锁为 `tests/metabat2-native-linux-64.lock`（Linux64，35 个远程
++归档 URL/SHA256，MetaBAT2 2.17 build0、htslib1.20）。它是测试环境锁，不替代
++生产模块环境/镜像认证。原生测试需将该环境程序放入 PATH。
++
++`nodes-linking-longread.nf.test` 使用上游 **合成** minigut 及单独构造的跨序列
++阳性控制。第一批五条 contig 只是测试分区，不是已知质粒。准备额外控制：
++
++```bash
++python3 tests/prepare_longread_controls.py \
++  --assembly "$AUTOPLASM_TEST_DATA/minigut.fasta" \
++  --output results/nf-test/longread-controls
++export AUTOPLASM_LONGREAD_CONTROL_DATA="$PWD/results/nf-test/longread-controls"
++```
++
++控制含两条明确构造的技术读段，各跨越已知 4kb+4kb 接点，不是生物学重复或
++自然宿主关系真值。SAMtools 导出的 SAM 供独立 Python 复核；生产 R 仍读取
++BAM。断言核对原始 DNA/读段/参考域、唯一桥接读段数、样本、分数、长度归一化
++和宿主名次。测试比对管道显式传播失败，不允许部分比对掩盖子程序错误。
++
++2026-10-25 实际 nf-test0.9.5 的两套四例及8原生任务通过；6项现有 R 单元测试
++使用合法参考长度复验通过。12项实际产物副本对照检查错误结果拒绝；编号重命名
++合法对照仍通过。此次为 native 证据，不认证 podman 镜像、MAG 质量或宿主生物学
++准确率。版本/输入/失败尝试及完整范围见 `docs/tool-audit/contracts/p3-semantic-oracles.md`。
+ 
+ uv 管理 Python 依赖；Java、Nextflow 及原生生信程序由独立工具路径提供。
+ 本配置不启用 Conda。P1 原生工具为 fastp 1.3.6、FastQC 0.13.0、SAMtools 1.24、
+diff --git a/tests/check_metabat2_native.py b/tests/check_metabat2_native.py
+new file mode 100644
+--- /dev/null
++++ b/tests/check_metabat2_native.py
+@@ -0,0 +1,101 @@
++#!/usr/bin/env python3
++"""Independent fixed-fixture membership/DNA/depth oracle; no MAG-quality claim."""
++import argparse
++from collections import defaultdict
++import csv
++import gzip
++import hashlib
++import json
++import math
++from pathlib import Path
++import re
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def fasta(path):
++    result = {}
++    with gzip.open(path, 'rt') as stream:
++        for line in stream:
++            if line.startswith('>'):
++                name = line[1:].split()[0]
++                assert name not in result, 'Duplicate FASTA ID'
++                result[name] = ''
++            elif line.strip():
++                assert result
++                result[name] += line.strip()
++    assert result and all(result.values())
++    return result
++
++
++def check(fixture, products, mode):
++    lock = json.loads((ROOT / 'tests/nf-test/real-nodes-datasets.lock.json').read_text())
++    for name in ['contigs.fasta.gz', 's1.sorted.bam', 's1.sorted.bam.bai']:
++        expected = next(row for row in lock['files'] if row.get('path', '').endswith('/binning/multisample/' + name))
++        data = (fixture / name).read_bytes()
++        assert len(data) == expected['size']
++        assert hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() == expected['git_blob_sha1'], 'Fixed fixture identity differs'
++    source = fasta(fixture / 'contigs.fasta.gz')
++    with gzip.open(products / 'depth/binning_s1.txt.gz', 'rt') as stream:
++        reader = csv.DictReader(stream, delimiter='\t')
++        assert reader.fieldnames == ['contigName', 'contigLen', 'totalAvgDepth', 's1.sorted', 's1.sorted-var']
++        rows = list(reader)
++    assert len(rows) == len(source)
++    depth = {row['contigName']: row for row in rows}
++    assert set(depth) == set(source)
++    for key, row in depth.items():
++        assert int(row['contigLen']) == len(source[key])
++        assert all(math.isfinite(float(row[column])) and float(row[column]) >= 0 for column in ['totalAvgDepth', 's1.sorted', 's1.sorted-var'])
++    with gzip.open(products / 'binning_s1.tsv.gz', 'rt') as stream:
++        membership = list(csv.reader(stream, delimiter='\t'))
++    assert membership and all(len(row) == 2 and row[0] in source and re.fullmatch(r'[0-9]+', row[1]) for row in membership)
++    assert len({row[0] for row in membership}) == len(membership)
++    declared = defaultdict(set)
++    for contig, label in membership:
++        if label != '0':
++            declared[label].add(contig)
++    emitted, seen = {}, set()
++    for path in products.glob('*.fa.gz'):
++        match = re.fullmatch(r'binning_s1\.([0-9]+)\.fa\.gz', path.name)
++        assert match, 'Unexpected auxiliary/output FASTA in this fixture'
++        dna = fasta(path)
++        assert not seen.intersection(dna), 'Contig emitted more than once'
++        assert all(key in source and value == source[key] for key, value in dna.items()), 'Foreign ID or changed bin DNA'
++        seen.update(dna)
++        emitted[match[1]] = set(dna)
++    # Fixed upstream2.17 output_bins() uses internal cluster key+1 in the
++    # matrix, and an independent sequential bin_id in FASTA filenames.
++    # Compare the complete partitions; those two numeric labels can differ.
++    declared_partition = {frozenset(members) for members in declared.values()}
++    emitted_partition = {frozenset(members) for members in emitted.values()}
++    assert len(emitted) == len(declared) and emitted_partition == declared_partition, 'Membership partition and emitted bins disagree'
++    if mode == 'default-empty':
++        eligible = {key for key, row in depth.items() if len(source[key]) >= 2500 and float(row['totalAvgDepth']) >= 1}
++        # The maximum eligible DNA is smaller than the declared 200kb bin
++        # minimum. This predicts zero bins independently of the first run.
++        assert 0 < sum(len(source[key]) for key in eligible) < 200000
++        assert not emitted and {row[0] for row in membership} == eligible
++    else:
++        assert emitted and seen, 'Upstream permissive settings must exercise nonempty bin publication'
++        assert all(len(source[key]) >= 1500 and float(depth[key]['totalAvgDepth']) >= .1 for key in seen)
++    return {'pass': True, 'mode': mode, 'source_contigs': len(source), 'depth_rows': len(rows),
++            'membership_rows': len(membership), 'bins': len(emitted), 'binned_contigs': len(seen),
++            'binned_bases': sum(len(source[key]) for key in seen),
++            'scope': 'Fixed upstream software fixture, depth domain/length/finite values and exact membership/DNA. Permissive settings are upstream test parameters, not production defaults or independent MAG-quality truth.'}
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--fixture', type=Path, required=True)
++    parser.add_argument('--products', type=Path, required=True)
++    parser.add_argument('--mode', choices=['default-empty', 'upstream-nonempty'], required=True)
++    parser.add_argument('--output', type=Path, required=True)
++    args = parser.parse_args()
++    result = check(args.fixture, args.products, args.mode)
++    result['source_sha256'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
++    args.output.write_text(json.dumps(result, indent=2) + '\n')
++    print('PASS independent MetaBAT2 DNA/membership/depth oracle;', result['bins'], 'bins')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/check_longread_native.py b/tests/check_longread_native.py
+new file mode 100644
+--- /dev/null
++++ b/tests/check_longread_native.py
+@@ -0,0 +1,124 @@
++#!/usr/bin/env python3
++"""Independent SAM/count/DNA oracle for the long-read execution fixture.
++
++SAM is exported by SAMtools; production consumes BAM through Rsamtools. No
++production parser is imported. This checks evidence counts, not host biology.
++"""
++import argparse
++from collections import defaultdict
++import csv
++import gzip
++import hashlib
++import json
++import math
++from pathlib import Path
++import re
++
++
++def text_file(path):
++    return gzip.open(path, 'rt') if str(path).endswith('.gz') else Path(path).open()
++
++
++def fasta(path):
++    result = {}
++    name = None
++    with text_file(path) as stream:
++        for line in stream:
++            if line.startswith('>'):
++                name = line[1:].split()[0]
++                assert name not in result, 'Duplicate FASTA ID'
++                result[name] = ''
++            elif line.strip():
++                assert name is not None
++                result[name] += line.strip()
++    assert result and all(result.values())
++    return result
++
++
++def check(assembly, plasmids, reads, sam, links, sample, control=None):
++    source, selected = fasta(assembly), fasta(plasmids)
++    assert list(selected) == list(source)[:5], 'First-five partition differs'
++    assert all(dna == source[key] for key, dna in selected.items()), 'Partition DNA differs'
++    read_ids = set()
++    with text_file(reads) as stream:
++        while True:
++            header = stream.readline()
++            if not header:
++                break
++            dna, plus, quality = stream.readline().strip(), stream.readline(), stream.readline().strip()
++            assert header.startswith('@') and plus.startswith('+') and len(dna) == len(quality)
++            name = header[1:].split()[0]
++            assert name not in read_ids, 'Duplicate FASTQ ID'
++            read_ids.add(name)
++    references, groups = {}, defaultdict(lambda: [set(), set()])
++    accepted = 0
++    with text_file(sam) as stream:
++        for line in stream:
++            if line.startswith('@SQ\t'):
++                fields = dict(cell.split(':', 1) for cell in line.rstrip().split('\t')[1:])
++                assert fields['SN'] not in references
++                references[fields['SN']] = int(fields['LN'])
++            elif not line.startswith('@') and line.strip():
++                row = line.rstrip('\n').split('\t')
++                assert len(row) >= 11 and row[0] in read_ids
++                flag, mapq = int(row[1]), int(row[4])
++                # Contract defaults: unpaired primary/supplementary, MAPQ>=20.
++                if flag & (0x4 | 0x100 | 0x200 | 0x400 | 0x1) or mapq < 20:
++                    continue
++                assert row[2] in source
++                assert re.fullmatch(r'(?:[0-9]+[MIDNSHP=X])+', row[5])
++                accepted += 1
++                groups[row[0]][bool(flag & 0x800)].add(row[2])
++    assert references == {key: len(dna) for key, dna in source.items()}, 'SAM reference domain/length differs'
++    assert accepted > 0
++    supporting = defaultdict(set)
++    for qname, (primary, supplementary) in groups.items():
++        if not primary or not supplementary:
++            continue
++        targets = primary | supplementary
++        for plasmid in targets.intersection(selected):
++            for host in targets.difference(selected).intersection(source):
++                supporting[plasmid, host].add(qname)
++    expected = {key: len(value) for key, value in supporting.items() if len(value) >= 2}
++    if control:
++        truth = json.loads(Path(control).read_text())
++        assert truth['kind'] == 'synthetic_spanning_read_execution_control'
++        assert expected == {(truth['plasmid_id'], truth['host_id']): 2}, 'Known spanning-read control missing'
++    with Path(links).open() as stream:
++        reader = csv.DictReader(stream, delimiter='\t')
++        assert reader.fieldnames == ['plasmid_id', 'host_id', 'sample_id', 'evidence_type', 'score', 'supporting_data']
++        table = list(reader)
++    assert len(table) == len(expected)
++    actual = {(row['plasmid_id'], row['host_id']): row for row in table}
++    assert len(actual) == len(table) and set(actual) == set(expected), 'Link domain differs'
++    for key, count in expected.items():
++        row = actual[key]
++        assert row['sample_id'] == sample and row['evidence_type'] == 'long_read_bridge'
++        assert row['score'] == str(count)
++        notes = dict(cell.split('=', 1) for cell in row['supporting_data'].split(';'))
++        assert notes['host_id_type'] == 'contig' and int(notes['bridging_reads']) == count
++        strength = count / ((len(source[key[0]]) / 1000) * (len(source[key[1]]) / 1000))
++        assert math.isfinite(float(notes['strength'])) and math.isclose(float(notes['strength']), strength, rel_tol=5e-4)
++        ranked = sorted({n for (plasmid, _), n in expected.items() if plasmid == key[0]}, reverse=True)
++        assert int(notes['host_rank']) == ranked.index(count) + 1
++    return {'pass': True, 'accepted_alignments': accepted, 'input_reads': len(read_ids),
++            'expected_links': [{'plasmid_id': p, 'host_id': h, 'reads': n} for (p, h), n in sorted(expected.items())],
++            'known_positive_control': bool(control),
++            'scope': 'Native evidence-count/DNA/reference contract; upstream minigut and the explicit positive control are synthetic, no host biology/accuracy claim'}
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    for name in ['assembly', 'plasmids', 'reads', 'sam', 'links', 'output']:
++        parser.add_argument('--' + name, type=Path, required=True)
++    parser.add_argument('--sample-id', default='minigut_ont')
++    parser.add_argument('--control-manifest', type=Path)
++    args = parser.parse_args()
++    result = check(args.assembly, args.plasmids, args.reads, args.sam, args.links, args.sample_id, args.control_manifest)
++    result['source_sha256'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
++    args.output.write_text(json.dumps(result, indent=2) + '\n')
++    print('PASS independent long-read evidence oracle; links', len(result['expected_links']))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/prepare_longread_controls.py b/tests/prepare_longread_controls.py
+new file mode 100644
+--- /dev/null
++++ b/tests/prepare_longread_controls.py
+@@ -0,0 +1,46 @@
++#!/usr/bin/env python3
++"""Build an explicit synthetic split-read control from fixed upstream DNA.
++
++Two named technical records contain a known 4kb+4kb junction. They are not
++biological replicates, naturally occurring plasmids or host-linking truth.
++"""
++import argparse
++import gzip
++import hashlib
++import json
++from pathlib import Path
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--assembly', type=Path, required=True)
++    parser.add_argument('--output', type=Path, required=True)
++    args = parser.parse_args()
++    source = {}
++    with args.assembly.open() as stream:
++        for line in stream:
++            if line.startswith('>'):
++                key = line[1:].split()[0]
++                assert key not in source
++                source[key] = ''
++            elif line.strip():
++                source[key] += line.strip()
++    selected = [(key, dna) for key, dna in source.items() if len(dna) >= 10000][:6]
++    assert len(selected) == 6
++    args.output.mkdir(parents=True, exist_ok=False)
++    (args.output / 'test_data').mkdir()
++    (args.output / 'minigut.fasta').write_text(''.join('>' + key + '\n' + dna + '\n' for key, dna in selected))
++    sequence = selected[0][1][:4000] + selected[5][1][:4000]
++    with gzip.open(args.output / 'test_data/minigut_reads.fastq.gz', 'wt') as stream:
++        for index in [1, 2]:
++            stream.write(f'@controlled_bridge_{index}\n{sequence}\n+\n' + 'I' * len(sequence) + '\n')
++    manifest = {'kind': 'synthetic_spanning_read_execution_control', 'plasmid_id': selected[0][0],
++                'host_id': selected[5][0], 'expected_supporting_reads': 2,
++                'source_sha256': hashlib.sha256(args.assembly.read_bytes()).hexdigest(),
++                'selected_contig_ids': [key for key, _ in selected], 'junction': 'first4000bp of first contig + first4000bp of sixth contig',
++                'scope': 'Controlled mapper/BAM/R counter positive only; no biological replicate, plasmid or host truth'}
++    (args.output / 'control.json').write_text(json.dumps(manifest, indent=2) + '\n')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/run_p3_semantic_oracle_controls.py b/tests/run_p3_semantic_oracle_controls.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_p3_semantic_oracle_controls.py
+@@ -0,0 +1,111 @@
++#!/usr/bin/env python3
++"""Counterfactual checks against copies of actual completed P3 products."""
++import argparse
++import gzip
++import hashlib
++import json
++from pathlib import Path
++import shutil
++import traceback
++
++from check_longread_native import check as longread_check
++from check_metabat2_native import check as metabat_check
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    for name in ['data', 'control-dir', 'metabat-products', 'longread-products', 'work-dir']:
++        parser.add_argument('--' + name, type=Path, required=True)
++    args = parser.parse_args()
++    args.work_dir.mkdir(parents=True, exist_ok=False)
++    records = []
++    fixture = args.data / 'data/genomics/prokaryotes/metagenome/binning/multisample'
++    control = args.control_dir
++    original = [p for root in [args.metabat_products, args.longread_products] for p in root.rglob('*') if p.is_file()]
++    hashes = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in original}
++
++    def evaluate(name, expected, callback):
++        try:
++            callback()
++            actual, error = True, None
++        except AssertionError as exc:
++            actual = False
++            frame = traceback.extract_tb(exc.__traceback__)[-1]
++            error = {'message': str(exc), 'file': frame.filename, 'line': frame.lineno}
++        assert actual == expected, (name, actual, error)
++        records.append({'case': name, 'expected_pass': expected, 'actual_pass': actual, 'assertion': error})
++
++    evaluate('actual-metabat-products', True, lambda: metabat_check(fixture, args.metabat_products, 'upstream-nonempty'))
++    for name in ['drop-bin', 'changed-bin-DNA', 'wrong-membership-partition', 'nonfinite-depth', 'arbitrary-label-permutation']:
++        folder = args.work_dir / name
++        shutil.copytree(args.metabat_products, folder)
++        if name in ['drop-bin', 'changed-bin-DNA']:
++            path = sorted(folder.glob('*.fa.gz'))[0]
++            if name == 'drop-bin':
++                path.unlink()
++            else:
++                with gzip.open(path, 'rt') as stream:
++                    lines = stream.read().splitlines()
++                index = next(i for i, line in enumerate(lines) if line and not line.startswith('>'))
++                lines[index] = ('C' if lines[index][0] != 'C' else 'A') + lines[index][1:]
++                with gzip.open(path, 'wt') as stream:
++                    stream.write('\n'.join(lines) + '\n')
++        elif name == 'nonfinite-depth':
++            path = folder / 'depth/binning_s1.txt.gz'
++            with gzip.open(path, 'rt') as stream:
++                lines = stream.read().splitlines()
++            cells = lines[1].split('\t'); cells[2] = 'NaN'; lines[1] = '\t'.join(cells)
++            with gzip.open(path, 'wt') as stream:
++                stream.write('\n'.join(lines) + '\n')
++        else:
++            path = folder / 'binning_s1.tsv.gz'
++            with gzip.open(path, 'rt') as stream:
++                rows = [line.rstrip().split('\t') for line in stream]
++            if name == 'wrong-membership-partition':
++                first = next(row for row in rows if row[1] != '0')
++                second = next(row for row in rows if row[1] not in ['0', first[1]])
++                second[1] = first[1]
++            else:
++                for row in rows:
++                    if row[1] != '0': row[1] = str(int(row[1]) + 10000)
++            with gzip.open(path, 'wt') as stream:
++                stream.write(''.join('\t'.join(row) + '\n' for row in rows))
++        evaluate(name, name == 'arbitrary-label-permutation', lambda folder=folder: metabat_check(fixture, folder, 'upstream-nonempty'))
++
++    def long_check(folder):
++        return longread_check(control / 'minigut.fasta', folder / 'test_inputs/longread/plasmid_contigs.fasta',
++                              control / 'test_data/minigut_reads.fastq.gz', folder / 'test_inputs/longread/minigut_ont.sam.gz',
++                              folder / '07_host_prediction/linking/longread/minigut_ont.longread_bridge_links.tsv',
++                              'minigut_ont', control / 'control.json')
++
++    evaluate('actual-known-longread-positive', True, lambda: long_check(args.longread_products))
++    for name in ['header-only-links', 'wrong-score', 'wrong-sample', 'wrong-SAM-reference', 'changed-partition-DNA']:
++        folder = args.work_dir / name
++        shutil.copytree(args.longread_products, folder)
++        path = folder / '07_host_prediction/linking/longread/minigut_ont.longread_bridge_links.tsv'
++        lines = path.read_text().splitlines()
++        if name == 'header-only-links':
++            path.write_text(lines[0] + '\n')
++        elif name in ['wrong-score', 'wrong-sample']:
++            cells = lines[1].split('\t'); cells[4 if name == 'wrong-score' else 2] = '3' if name == 'wrong-score' else 'foreign_sample'
++            lines[1] = '\t'.join(cells); path.write_text('\n'.join(lines) + '\n')
++        elif name == 'wrong-SAM-reference':
++            path = folder / 'test_inputs/longread/minigut_ont.sam.gz'
++            with gzip.open(path, 'rt') as stream: text = stream.read()
++            with gzip.open(path, 'wt') as stream: stream.write(text.replace('SN:', 'SN:foreign_', 1))
++        else:
++            path = folder / 'test_inputs/longread/plasmid_contigs.fasta'
++            lines = path.read_text().splitlines(); index = next(i for i, line in enumerate(lines) if line and not line.startswith('>'))
++            lines[index] = ('C' if lines[index][0] != 'C' else 'A') + lines[index][1:]; path.write_text('\n'.join(lines) + '\n')
++        evaluate(name, False, lambda folder=folder: long_check(folder))
++    assert hashes == {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in original}
++    result = {'pass': True, 'cases': records, 'original_products_unchanged': True,
++              'source_sha256': {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
++                                for name in ['run_p3_semantic_oracle_controls.py', 'check_metabat2_native.py', 'check_longread_native.py']},
++              'scope': 'Actual product-copy counterfactuals only; no additional scientific analyses or accuracy benchmark'}
++    (args.work_dir / 'run.json').write_text(json.dumps(result, indent=2) + '\n')
++    print('PASS semantic oracle counterfactuals', len(records))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/metabat2-native-linux-64.lock b/tests/metabat2-native-linux-64.lock
+new file mode 100644
+--- /dev/null
++++ b/tests/metabat2-native-linux-64.lock
+@@ -0,0 +1,36 @@
++@EXPLICIT
++https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda#1dd3fffd892081df9726d7eb7e0dea6198962ba775bd88842135a4ddb4deb3c9
++https://conda.anaconda.org/conda-forge/linux-64/boost-cpp-1.85.0-h3c6214e_4.conda#dec1f52d8869b94a9cb2b4d9a727a00ae2c54e7b5a66a51d3d9f1c33159ebb45
++https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_10.conda#1a0d382c515ebf55f8ee1f38c8b81bc95af5c2acc42ad53b66bc5df932032f96
++https://conda.anaconda.org/conda-forge/linux-64/c-ares-1.34.9-hebe6cf0_0.conda#bd95dd25b80b5c4faf5349542377bf89b2794e23d0f7aa7f1c431e4f3b633f3c
++https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.10.23-hbd8a1cb_0.conda#95619b9c1184be7175392eeb0ee7eeb5ccf25d280951f4225f2d62e725790be3
++https://conda.anaconda.org/bioconda/linux-64/htslib-1.20-h5efdd21_2.tar.bz2#791ef4ff30944a56803344b168ffb400b4a8d1ea52edb1c348541d2a67a838ba
++https://conda.anaconda.org/conda-forge/linux-64/icu-75.1-he02047a_0.conda#71e750d509f5fa3421087ba88ef9a7b9be11c53174af3aa4d06aff4c18b38e8e
++https://conda.anaconda.org/conda-forge/linux-64/keyutils-1.6.3-h7cc23a3_1.conda#dd053c96dcb0dcfd59422aefea9d2fe937a190167f34fba7893ec1e10a7e8963
++https://conda.anaconda.org/conda-forge/linux-64/krb5-1.22.2-hbc21106_2.conda#2a5c38c85e63df84c4e69ee71439841ce570d259ae3060627bb9a49a938d66f4
++https://conda.anaconda.org/conda-forge/linux-64/libboost-1.85.0-h0ccab89_4.conda#dc19dfc636c363871763384219269ce6a027fcf3831f17e018caeecb2ffbb20a
++https://conda.anaconda.org/conda-forge/linux-64/libboost-devel-1.85.0-h00ab1b0_4.conda#04ec5a59e87d75cf6f8b539493f7f71c0cca3f50976251895f51da45e39cddf7
++https://conda.anaconda.org/conda-forge/linux-64/libboost-headers-1.85.0-ha770c72_4.conda#55aa2ac604bd7ed76fae0c93698d37aae455ca2fb229ff9aa45e085ff7ad48ec
++https://conda.anaconda.org/conda-forge/linux-64/libcurl-8.21.0-hcf29cc6_1.conda#7d243f45a48f62cb8e3b871dd336137fe0fb90094a191756fb553508837f6338
++https://conda.anaconda.org/conda-forge/linux-64/libdeflate-1.20-hd590300_0.conda#f8e0f25c382b1d0b87a9b03887a34dbd91485453f1ea991fef726dba57373612
++https://conda.anaconda.org/conda-forge/linux-64/libedit-3.1.20260512-pl5321h373387f_0.conda#45301f14f4eb66da57cfaf2d265f3eeee73f8b07e99614ee3afc5b26eea91126
++https://conda.anaconda.org/conda-forge/linux-64/libev-4.33-h280c20c_3.conda#e4418f68d01a6307c4431b585c71b584f40189877364e542ee87deb777f5e85b
++https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda#e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea
++https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-16.2.0-h69a702a_7.conda#03b54d7008de080a17cc2174b0e4acd6d06e1c981b2eb19846f46d8f59966034
++https://conda.anaconda.org/conda-forge/linux-64/libgomp-16.2.0-he0feb66_7.conda#92a0bb350c7be6a4eedcb4e111c60aefd176018e6b1c009a6e025dbe9bbcd758
++https://conda.anaconda.org/conda-forge/linux-64/liblzma-5.8.3-hb03c661_1.conda#9787df8c22a59c9a70d3e5a10db9ad663485e75e9ccc3f09bd092cb7b95e0dab
++https://conda.anaconda.org/conda-forge/linux-64/liblzma-devel-5.8.3-hb03c661_1.conda#adef6e8b60afb684110b06b5310977c6836e1c923ce3ec199f45c0f000b42f20
++https://conda.anaconda.org/conda-forge/linux-64/libnghttp2-1.68.1-h74cf4be_1.conda#11a2f54a6f391e25738bce0023e6ef499600147bbcf21c1fa69d2e251b03cc6a
++https://conda.anaconda.org/conda-forge/linux-64/libssh2-1.11.1-h6154650_1.conda#7e463000fa1cba3f3a6597b776f6ab301d425a96e3bc20d0d9d76a3b9f237aa3
++https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda#fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745
++https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-16.2.0-hdf11a46_7.conda#337f481db36cc357884f05f404ccd1b3a7e0fc1ee48ec5c884e4281d213bc863
++https://conda.anaconda.org/conda-forge/linux-64/libxcrypt-4.4.38-h280c20c_0.conda#f7e9292dd219a6435bbb1223da9586c3e70d66d169c5a92f08db3f2127df04e9
++https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda#eb8a0db0aa570124f7d2a93d7c7f596e3390df5e047818d873baad32985fc736
++https://conda.anaconda.org/bioconda/linux-64/metabat2-2.17-hd498684_0.tar.bz2#dd30369b31523045adad79719433e514f52dd714d433a76c67277da81df4e499
++https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda#5d46557214ed184381dafe835b7c94a474a1c3b307a08a250b1ea4779b44ffb3
++https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.5-h781a0a9_0.conda#9c1533f1cf784f0e250919c0c9762d0b0e6bc727a79290ffb7cea1ceca1d038c
++https://conda.anaconda.org/conda-forge/linux-64/perl-5.44.0-1_h7cc23a3_perl5.conda#43afad1c27c24ccc40d98461ab7e1648ccac876421a8783167861ae19c4edc83
++https://conda.anaconda.org/conda-forge/linux-64/xz-5.8.3-ha02ee65_1.conda#547b2392d8f7b76efd4a0970946f6da2a1136ad5fe3dc936af81e02eb7181076
++https://conda.anaconda.org/conda-forge/linux-64/xz-gpl-tools-5.8.3-ha02ee65_1.conda#ed6dbec5e4f0f71e7ac629b90dc4c9fba38d194cc88eab891c29e461b408977a
++https://conda.anaconda.org/conda-forge/linux-64/xz-tools-5.8.3-hb03c661_1.conda#c74fa3eddd3ea648456517948f85068d8a07acad7752fd83c7e95b6cebb7114a
++https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_7.conda#47d682b9f6d6ec9eb1a6e6c3e75ea6273e899e78fb7fc59f81d39745009fbc60
+diff --git a/tests/nf-test/metabat2-semantic.config b/tests/nf-test/metabat2-semantic.config
+new file mode 100644
+--- /dev/null
++++ b/tests/nf-test/metabat2-semantic.config
+@@ -0,0 +1,10 @@
++includeConfig './nextflow.config'
++includeConfig '../../conf/nfcore_mag.config'
++
++// Test-only selection. Empty means the unchanged module defaults. The second
++// case uses the fixed vendored suite's permissive arguments, never production.
++process {
++    withName: 'METABAT2' {
++        ext.args = params.metabat_test_args ?: ''
++    }
++}
+diff --git a/docs/tool-audit/contracts/p3-semantic-oracles.md b/docs/tool-audit/contracts/p3-semantic-oracles.md
+new file mode 100644
+--- /dev/null
++++ b/docs/tool-audit/contracts/p3-semantic-oracles.md
+@@ -0,0 +1,29 @@
++# P3 分箱与长读长证据断言（TT-002、TT-014）
++
++2026-10-25；原始记录位于 `results/tool-audit/20261025-p3-semantic/`。候选补丁，未改此前正式 receipt。
++
++## 输入与部署
++
++MetaBAT2沿用原P3锁定的三个nf-core输入，170条contig、配套BAM/BAI，逐个校验原提交Git blob/尺寸。minigut为上游合成软件fixture，不声称真实生物样本。重用已核验读段；缺失的0.51MB组装从固定官方提交补取，另下载约3.7MB分箱输入。没有复制样本制造统计重复。
++
++模块声明的MetaBAT2 2.17 `hd498684_0`原生环境冻结35包官方URL/SHA，全部原始归档独立校验。初始htslib1.21符合当前索引放宽到1.25的上限，并非求解器忽略约束；随后固定1.20以同时符合原构建配方，旧元数据/探测运行保留。原配方源码归档v2.17 SHA `fb46f5c3d3b0c327f62a58fceee04a55b9003276bc768040ba93c9b7913b52e2`验证通过，原始源码未修改。
++
++长读长链使用实际minimap2 2.30、SAMtools1.22.1及宿主R/Rsamtools。`runtime-versions.json`与原始stdout/stderr记录实际版本。nf-test0.9.5加载仓库声明的nft-utils1.2.1/nft-bam0.7.0。原生结果不能认证未运行的镜像。
++
++## 断言与实际运行
++
++- 默认分箱：独立深度/长度筛选只有2条共80000bp可用，低于默认200kb分箱下限，明确验证空结果。170条深度记录与源FASTA的ID/长度完全对应，数值有限、非负。
++- 非空分箱：原vendored测试固定参数为 `--minContig 1500 --minCV 0.1 --minCVSum 0.1 --minClsSize 10 --minS 2`。检查完整DNA、唯一成员与全部成员分区。本次167个单成员输出只认证发布/成员契约，不认证MAG质量或生产默认表现。
++- 首个oracle误把membership簇号当FASTA编号。固定源码 `output_bins()` 在矩阵用内部 `kk+1`、文件用独立顺序计数器；保留首次失败及错误假设源码，改为比较完整分区。未删除DNA/唯一性/成员断言。合法重编号通过，错误合并分区仍失败。
++- 长读长：生产R从BAM计算，独立Python从SAMtools导出的SAM复核候选对、唯一支持读段、默认筛选及2读段门槛、样本、分数、长度归一化与名次。首五条contig是测试分区，不是质粒/宿主生物学真值。
++- 阳性控制：预先按源FASTA顺序选六条至少10kb的contig，用第一/第六条各前4kb构造两个技术FASTQ记录。实际mapper产生主/补充比对；预定预期为一对候选、2条支持读段。两个人工记录不作生物学重复。
++
++`metabat-framework/execution.json`与`longread-framework-v3/execution.json`的实际4例通过、来源前后一致，合计8条原生COMPLETED。`oracle-controls/run.json`为12个实际产物副本对照：9个损坏拒绝、3个合法结果通过，原产品未改。现有6项R单元方法复验通过；100M比对参考从4bp修正为100bp，避免把超界SAM当合法阳性。人工输入不计生物学数据验证。
++
++## 比对错误传播与失败记录
++
++TT-014：原 `ALIGN_FOR_LINK` 的 `minimap2 | samtools sort` 没有pipefail。`mapper-failure-controls/run.json`让真实mapper生成有效控制比对后，由明确测试包装返回29：旧脚手架仍2任务COMPLETED并运行R；当前1任务FAILED/exit29，R不运行、无关联产物发布。observer只注入退出状态，不伪造比对内容。修复限定测试脚手架，不能据此推断生产其他管道有相同缺陷。
++
++框架首次未正确设置Nextflow入口，0任务；第二次本地配置漏载声明插件，实际任务完成但原文件发现函数不可用。补齐既有插件后通过，未删原函数，也不把此启动配置问题登记成原套件缺陷。所有尝试保留。MetaBAT归档定位初次沿metadata猜测tar.bz2后缀失败，后按实际`fn`/URL找到并核对SHA，不据此声称上游缺失。Recycler附加框架重放首次继承64GB声明而无任务启动，后为小型fixture明确与既有原生成功运行一致的2CPU/2GB上限，结果单独记录。
++
++本批改善测试语义与脚手架错误传播；生产算法、阈值与科学结论不变。整体M0–M4、真实非空shotgun P4、数据库/镜像与AWS验证仍未完成。

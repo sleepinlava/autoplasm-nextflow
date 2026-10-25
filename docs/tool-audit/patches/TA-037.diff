@@ -1,0 +1,137 @@
+diff --git i/README.md w/README.md
+index 60282b3..b608fbf 100644
+--- i/README.md
++++ w/README.md
+@@ -238,6 +238,10 @@ hybrid 组装器，bioconda 已下架；也可改用 `--hybrid_assembler hybrids
+   结果；启用工具的缺失 contig 记录按未支持处理，不是独立的染色体鉴定。
+ - `plasmid_structure` 使用 header 标记，以及 **21 bp** 种子的精确 DTR / ITR
+   与低复杂度过滤；ITR 延伸上限 1000 bp，DTR 并非统一限制在 1000 bp 内。
++  header 阳性标记限于独立的 `circular=true`、`topology=circular` token，
++  或序列 ID 的 `_circular` 后缀；`not_circular`、`circular=false`、
++  `topology=linear` 等否定标记禁用 header 阳性推断。冲突标记会写入 warning；
++  序列重复证据仍独立评估，未命中 header 阳性不等于证实线性拓扑。
+   当前通过过滤的 ITR 也产生 `is_circular=true`，存在解释风险；该字段只能作
+   候选结构标记，不能视为已证实完整环状质粒。需要组装图与跨接 reads 等复核。
+ - 序列组成宿主关联当前使用 **TETRA 风格的四核苷酸 z-score 向量 Pearson
+diff --git i/bin/plasmid_structure.R w/bin/plasmid_structure.R
+index 211bcd5..c845ef6 100755
+--- i/bin/plasmid_structure.R
++++ w/bin/plasmid_structure.R
+@@ -26,13 +26,22 @@ suppressPackageStartupMessages(library(Biostrings))
+ 
+ REPEAT_SEED_LENGTH <- 21L
+ ITR_MAX_LENGTH <- 1000L
+-CIRCULAR_MARKERS <- c("circular=true", "topology=circular", "_circular")
+ WARNINGS_TEXT <- paste(
+   "Sequence-based circularity is predictive and should be confirmed from",
+   "the assembly graph or read support."
+ )
+ LOW_COMPLEXITY_NOTE <- "low-complexity terminal repeat filtered"
+ 
++header_circularity <- function(header) {
++  tokens <- strsplit(tolower(trimws(header)), "[[:space:];]+", perl = TRUE)[[1L]]
++  id <- if (length(tokens)) tokens[1L] else ""
++  negative_id <- grepl("(^|_)not_circular$", id, perl = TRUE)
++  positive <- any(tokens %in% c("circular=true", "topology=circular")) ||
++    (grepl("_circular$", id) && !negative_id)
++  negative <- negative_id || any(tokens %in% c("not_circular", "circular=false", "topology=linear"))
++  list(circular = positive && !negative, conflict = positive && negative)
++}
++
+ die <- function(msg) {
+   cat(msg, "\n", file = stderr(), sep = "")
+   quit(save = "no", status = 2L, runLast = FALSE)
+@@ -194,15 +203,12 @@ main <- function() {
+   rows <- vector("list", length(seqs))
+   for (i in seq_along(seqs)) {
+     seq_i <- seqs[i]
+-    header_lower <- tolower(headers[i])
+-    header_circular <- any(vapply(CIRCULAR_MARKERS, function(m) {
+-      grepl(m, header_lower, fixed = TRUE)
+-    }, logical(1)))
++    header_evidence <- header_circularity(headers[i])
+     dtr_len <- find_dtr(seq_i)
+     itr_len <- find_itr(seq_i)
+     dtr_ok <- dtr_len > 0L && !repeat_low_complexity(seq_i, dtr_len)
+     itr_ok <- itr_len > 0L && !repeat_low_complexity(seq_i, itr_len)
+-    if (header_circular) {
++    if (header_evidence$circular) {
+       is_circular <- TRUE
+       method <- "header_marker"
+       overlap <- max(dtr_len, itr_len)
+@@ -225,6 +231,9 @@ main <- function() {
+       # the raw detection is auditable; otherwise keep the standing warning.
+       warnings <- if (dtr_len > 0L || itr_len > 0L) LOW_COMPLEXITY_NOTE else WARNINGS_TEXT
+     }
++    if (header_evidence$conflict) {
++      warnings <- paste(warnings, "conflicting circularity header markers; header inference disabled")
++    }
+     rows[[i]] <- c(
+       args$sample_id, ids[i], as.character(widths[i]),
+       tolower(as.character(isTRUE(is_circular))),
+diff --git 1/tests/test_plasmid_structure.py 2/tests/test_plasmid_structure.py
+new file mode 100644
+index 0000000..943ec28
+--- /dev/null
++++ 2/tests/test_plasmid_structure.py
+@@ -0,0 +1,60 @@
++"""Header interpretation regressions; synthetic sequence is not topology truth."""
++import csv
++from pathlib import Path
++import random
++import subprocess
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++class StructureHeaderTests(unittest.TestCase):
++    def run_headers(self, headers, repeat=False):
++        rng = random.Random(20261020)
++        sequence = ''.join(rng.choice('ACGT') for _ in range(500))
++        if repeat:
++            sequence += sequence[:25]
++        with tempfile.TemporaryDirectory() as directory:
++            base = Path(directory)
++            fasta, table = base/'input.fasta', base/'structure.tsv'
++            fasta.write_text(''.join(f'>{header}\n{sequence}\n' for header in headers))
++            result = subprocess.run(['Rscript', str(ROOT/'bin/plasmid_structure.R'),
++                '--contigs', str(fasta), '--sample-id', 'S1', '--out', str(table)],
++                text=True, capture_output=True)
++            self.assertEqual(result.returncode, 0, result.stderr)
++            with table.open() as handle:
++                return list(csv.DictReader(handle, delimiter='\t'))
++
++    def test_explicit_negative_headers_are_not_positive_markers(self):
++        headers = ['p0 not_circular', 'p1_not_circular', 'p2 circular=false',
++                   'p3 topology=linear', 'p4_circular circular=false']
++        for row in self.run_headers(headers):
++            with self.subTest(plasmid=row['plasmid_id']):
++                self.assertEqual((row['is_circular'], row['method'], row['terminal_overlap_bp']),
++                                 ('false', 'none', '0'))
++
++    def test_supported_positive_markers_remain_supported(self):
++        for row in self.run_headers(['p0 circular=true', 'p1 topology=circular',
++                                     'p2_circular', 'p3 CIRCULAR=TRUE']):
++            self.assertEqual((row['is_circular'], row['method']), ('true', 'header_marker'))
++
++    def test_partial_or_embedded_markers_do_not_match(self):
++        for row in self.run_headers(['p0 circular=trueish', 'p1 topology=circularity',
++                'p2_circular_extra', 'p3 description=circular=true', 'p4 notes_circular_text']):
++            self.assertEqual((row['is_circular'], row['method']), ('false', 'none'))
++
++    def test_conflicting_header_markers_disable_header_inference(self):
++        for row in self.run_headers(['p0 circular=true circular=false',
++                                     'p1_circular topology=linear']):
++            self.assertEqual(row['is_circular'], 'false')
++            self.assertIn('conflicting circularity header markers', row['warnings'])
++
++    def test_negative_header_does_not_suppress_independent_dtr(self):
++        row = self.run_headers(['p0 circular=false'], repeat=True)[0]
++        self.assertEqual((row['is_circular'], row['method'], row['terminal_overlap_bp']),
++                         ('true', 'dtr', '25'))
++
++
++if __name__ == '__main__':
++    unittest.main()

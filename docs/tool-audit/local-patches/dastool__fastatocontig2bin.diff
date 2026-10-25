@@ -1,0 +1,16 @@
+--- upstream/dastool/fastatocontig2bin@6d46786420b4d7bc88eba026eb389c0c5535d120
++++ modules/nf-core/dastool/fastatocontig2bin/main.nf
+@@ -22,10 +22,10 @@
+     def args = task.ext.args ?: ''
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     def file_extension = extension ? extension : "fasta"
+-    def clean_fasta = fasta.toString() - ".gz"
+-    def decompress_fasta = fasta.toString() == clean_fasta ? "" : "gunzip -q -f ${fasta}"
++    // Local patch (refactor/nf-core-modules): upstream only decompresses a
++    // single input; our callers stage a list of gzipped bin fastas here.
+     """
+-    ${decompress_fasta}
++    find . -maxdepth 1 -name '*.gz' -exec gunzip -q -f {} +
+ 
+     Fasta_to_Contig2Bin.sh \\
+         ${args} \\

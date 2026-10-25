@@ -1,0 +1,994 @@
+diff --git a/bin/prepare_prodigal_inputs.py b/bin/prepare_prodigal_inputs.py
+--- /dev/null
++++ b/bin/prepare_prodigal_inputs.py
+@@ -0,0 +1,175 @@
++#!/usr/bin/env python3
++"""Keep Prodigal proteins linked to their source contigs and gene coordinates.
++
++No gene calling, translation, circularity inference or model thresholds occur
++here. Inputs must be the GFF/AA/CDS outputs of the same Prodigal invocation.
++"""
++import argparse
++import csv
++import gzip
++import hashlib
++import io
++import json
++from pathlib import Path
++import re
++
++
++def text(path):
++    data = Path(path).read_bytes()
++    if data[:2] == b'\x1f\x8b':
++        data = gzip.decompress(data)
++    return data.decode('utf-8')
++
++
++def fasta(path, alphabet, allow_empty=False):
++    records = {}
++    header = None
++    sequence = []
++
++    def append():
++        if header is None:
++            return
++        identifier = header.split()[0]
++        value = ''.join(sequence)
++        if identifier in records or not value or re.search(alphabet, value):
++            raise ValueError('Duplicate ID, empty or invalid sequence: ' + identifier)
++        records[identifier] = (header, value)
++
++    for line in text(path).splitlines():
++        if not line.strip():
++            continue
++        if line.startswith('>'):
++            append()
++            header = line[1:].strip()
++            if not header:
++                raise ValueError('Empty FASTA identifier')
++            sequence = []
++        else:
++            if header is None:
++                raise ValueError('Sequence before FASTA header')
++            sequence.append(line.strip())
++    append()
++    if not records and not allow_empty:
++        raise ValueError('Empty FASTA input')
++    return records
++
++
++def attributes(value):
++    fields = [part.split('=', 1) for part in value.strip(';').split(';') if part]
++    if any(len(part) != 2 for part in fields) or len({p[0] for p in fields}) != len(fields):
++        raise ValueError('Malformed or duplicate Prodigal attributes')
++    return dict(fields)
++
++
++def prepare(genome, gff, proteins, cds, output):
++    dna = fasta(genome, '[^ACGTRYSWKMBDHVNacgtryswkmbdhvn]')
++    aa = fasta(proteins, '[^A-Z*]', allow_empty=True)
++    nt = fasta(cds, '[^ACGTRYSWKMBDHVNacgtryswkmbdhvn]', allow_empty=True)
++    if aa.keys() != nt.keys():
++        raise ValueError('Protein/CDS identifiers differ')
++    topology = {}
++    for identifier, (header, _) in dna.items():
++        tokens = set(header.split()[1:])
++        circular = bool(tokens & {'topology=circular', 'circular=true'})
++        linear = bool(tokens & {'topology=linear', 'circular=false', 'not_circular'})
++        if circular and linear:
++            raise ValueError('Conflicting topology markers: ' + identifier)
++        if circular and (':' in identifier or identifier.startswith('#')):
++            raise ValueError('Circular contig ID cannot be represented in a MacSyFinder topology file: ' + identifier)
++        topology[identifier] = ('circular' if circular else 'linear',
++                                'explicit_header' if circular or linear else 'unknown_treated_as_linear')
++    # Prodigal's GFF ID is seqnum_gene; its protein ID is contigID_gene.
++    rows = []
++    seen = set()
++    sequence_metadata = {}
++    current = None
++    table = None
++    for line in text(gff).splitlines():
++        if line.startswith('# Sequence Data: '):
++            match = re.fullmatch(r'# Sequence Data: seqnum=(\d+);seqlen=(\d+);seqhdr="(.*)"', line)
++            if not match:
++                raise ValueError('Malformed Prodigal sequence metadata')
++            number, length, header = match.groups()
++            current = header.split()[0]
++            if current not in dna or current in sequence_metadata or len(dna[current][1]) != int(length):
++                raise ValueError('GFF/source sequence metadata mismatch: ' + current)
++            sequence_metadata[current] = number
++            table = None
++        elif line.startswith('# Model Data: '):
++            match = re.search(r'(?:^|;)transl_table=(\d+);', line)
++            if current is None or not match or 'version=Prodigal.v2.6.3;' not in line:
++                raise ValueError('Expected Prodigal 2.6.3 model metadata')
++            table = int(match.group(1))
++        elif not line or line.startswith('#'):
++            continue
++        else:
++            cols = line.split('\t')
++            if len(cols) != 9 or cols[0] != current or cols[1:3] != ['Prodigal_v2.6.3', 'CDS'] or cols[7] != '0' or table is None:
++                raise ValueError('Invalid Prodigal CDS GFF record')
++            attr = attributes(cols[8])
++            match = re.fullmatch(re.escape(sequence_metadata[current]) + r'_(\d+)', attr.get('ID', ''))
++            if not match:
++                raise ValueError('GFF gene identifier does not match its replicon')
++            pid = current + '_' + match.group(1)
++            start, end = int(cols[3]), int(cols[4])
++            strand = cols[6]
++            if pid in seen or pid not in aa or not (1 <= start <= end <= len(dna[current][1])) or strand not in ('+', '-'):
++                raise ValueError('Missing, duplicate or invalid Prodigal gene: ' + pid)
++            for header, _ in (aa[pid], nt[pid]):
++                parts = header.split(' # ')
++                if len(parts) != 5 or parts[:4] != [pid, str(start), str(end), '1' if strand == '+' else '-1']:
++                    raise ValueError('Protein/CDS coordinate header mismatch: ' + pid)
++                h_attr = attributes(parts[4])
++                if any(h_attr.get(k) != attr.get(k) for k in ('ID', 'partial', 'start_type')):
++                    raise ValueError('Protein/CDS gene attributes mismatch: ' + pid)
++            segment = dna[current][1][start - 1:end].upper()
++            if strand == '-':
++                segment = segment.translate(str.maketrans('ACGTRYSWKMBDHVN', 'TGCAYRSWMKVHDBN'))[::-1]
++            if nt[pid][1].upper() != segment or len(segment) % 3 or len(aa[pid][1]) != len(segment) // 3:
++                raise ValueError('CDS/source DNA or protein length mismatch: ' + pid)
++            if '*' in aa[pid][1][:-1]:
++                raise ValueError('Internal protein stop: ' + pid)
++            rows.append({'protein_id': pid, 'contig_id': current, 'start': start, 'end': end,
++                         'strand': strand, 'translation_table': table, 'partial': attr['partial'],
++                         'topology': topology[current][0], 'topology_source': topology[current][1]})
++            seen.add(pid)
++    if sequence_metadata.keys() != dna.keys() or seen != aa.keys():
++        raise ValueError('Incomplete Prodigal GFF/FASTA record sets')
++    order = {identifier: number for number, identifier in enumerate(dna)}
++    rows.sort(key=lambda row: (order[row['contig_id']], row['start'], row['end'], row['protein_id']))
++    # Each contig remains one contiguous gembase group; the final underscore
++    # separates the contig ID and gene number, even when contig IDs contain '_'.
++    payload = ''.join('>' + aa[row['protein_id']][0] + '\n' + aa[row['protein_id']][1] + '\n' for row in rows)
++    manifest = {'schema': 1, 'gene_caller': 'Prodigal 2.6.3',
++                'state': 'proteins_ready' if rows else 'no_predicted_proteins',
++                'protein_count': len(rows), 'contig_count': len(dna),
++                'source_sha256': {label: hashlib.sha256(Path(path).read_bytes()).hexdigest()
++                                  for label, path in [('genome', genome), ('gff', gff), ('proteins', proteins), ('cds', cds)]},
++                'replicons': [{'contig_id': identifier, 'protein_count': sum(r['contig_id'] == identifier for r in rows),
++                               'topology': topology[identifier][0], 'topology_source': topology[identifier][1]}
++                              for identifier in dna]}
++    table_out = io.StringIO()
++    fields = ['protein_id', 'contig_id', 'start', 'end', 'strand', 'translation_table', 'partial', 'topology', 'topology_source']
++    writer = csv.DictWriter(table_out, fields, delimiter='\t', lineterminator='\n')
++    writer.writeheader(); writer.writerows(rows)
++    outputs = {'proteins.faa': payload, 'gene_map.tsv': table_out.getvalue(),
++               # MacSyLib 1.0.4 parses "replicon: topology" (not TSV).
++               # All other replicons use --replicon-topology linear.
++               'replicon_topology.txt': ''.join(identifier + ': circular\n' for identifier in dna
++                                              if topology[identifier][0] == 'circular' and any(r['contig_id'] == identifier for r in rows)),
++               'manifest.json': json.dumps(manifest, indent=2) + '\n'}
++    output = Path(output)
++    if output.exists():
++        raise ValueError('Protein input output directory already exists')
++    output.mkdir(parents=True)
++    for name, data in outputs.items():
++        (output/name).write_text(data)
++    return manifest
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    for name in ('genome', 'gff', 'proteins', 'cds', 'output'):
++        parser.add_argument('--' + name, required=True)
++    args = parser.parse_args()
++    prepare(**vars(args))
+diff --git a/modules/annotation/protein_inputs.nf b/modules/annotation/protein_inputs.nf
+--- /dev/null
++++ b/modules/annotation/protein_inputs.nf
+@@ -0,0 +1,31 @@
++process PROTEIN_INPUTS {
++    tag "${meta.id}"
++    label 'process_low'
++    conda "${moduleDir}/../../envs/catalogue.yml"
++    container 'python:3.12-slim'
++
++    input:
++    tuple val(meta), path(genome), path(gff), path(proteins), path(cds)
++
++    output:
++    tuple val(meta), path('protein_inputs/proteins.faa'), path('protein_inputs/replicon_topology.txt'), emit: proteins
++    tuple val(meta), path('protein_inputs/gene_map.tsv'), emit: gene_map
++    tuple val(meta), path('protein_inputs/manifest.json'), emit: manifest
++    tuple val(meta), eval("python3 -c 'import json; print(json.load(open(\"protein_inputs/manifest.json\"))[\"state\"])'"), emit: state
++
++    script:
++    def adapter = file("${moduleDir}/../../bin/prepare_prodigal_inputs.py").text
++    """
++    python3 - --genome "${genome}" --gff "${gff}" --proteins "${proteins}" --cds "${cds}" \\
++        --output protein_inputs <<'PROTEIN_INPUTS_PY'
++${adapter}
++PROTEIN_INPUTS_PY
++    """
++
++    stub:
++    """
++    mkdir protein_inputs
++    touch protein_inputs/proteins.faa protein_inputs/replicon_topology.txt protein_inputs/gene_map.tsv
++    echo '{"state":"stub_not_gene_prediction"}' > protein_inputs/manifest.json
++    """
++}
+diff --git a/subworkflows/plasmid_downstream.nf b/subworkflows/plasmid_downstream.nf
+--- a/subworkflows/plasmid_downstream.nf
++++ b/subworkflows/plasmid_downstream.nf
+@@ -25,6 +25,7 @@
+ include { ISESCAN } from '../modules/annotation/isescan'
+ include { INTEGRONFINDER } from '../modules/nf-core/integronfinder'
+ include { PRODIGAL } from '../modules/nf-core/prodigal'
++include { PROTEIN_INPUTS } from '../modules/annotation/protein_inputs'
+ include { MOBSUITE_RECON as MOB_SUITE_ANNOT } from '../modules/nf-core/mobsuite/recon'
+ include { RGI_MAIN as RGI } from '../modules/nf-core/rgi/main'
+ include { EGGNOGMAPPER as EGGNOG_MAPPER } from '../modules/nf-core/eggnogmapper'
+@@ -45,6 +46,27 @@
+ 
+     main:
+     ch_report_events = Channel.empty()
++    def run_conjscan    = selectedTools(params.typing_optional_tools).contains('conjscan')
++    def run_macsyfinder = selectedTools(params.typing_optional_tools).contains('macsyfinder')
++    def run_eggnog = selectedTools(params.annotation_optional_tools).contains('eggnog_mapper')
++    def needs_proteins = run_conjscan || run_macsyfinder || run_eggnog
++    ch_proteins = Channel.empty()
++    if (needs_proteins || selectedTools(params.annotation_tools).contains('prodigal') || selectedTools(params.annotation_optional_tools).contains('prodigal')) {
++        // One gene call supplies annotation and all protein consumers.
++        PRODIGAL(ch_plasmids, Channel.value('gff'))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PRODIGAL.out], '08_annotation', 'PRODIGAL'))
++    }
++    if (needs_proteins) {
++        ch_gene_inputs = ch_plasmids
++            .join(PRODIGAL.out.gene_annotations, failOnDuplicate: true, failOnMismatch: true)
++            .join(PRODIGAL.out.amino_acid_fasta, failOnDuplicate: true, failOnMismatch: true)
++            .join(PRODIGAL.out.nucleotide_fasta, failOnDuplicate: true, failOnMismatch: true)
++        PROTEIN_INPUTS(ch_gene_inputs)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PROTEIN_INPUTS.out], '08_annotation', 'PROTEIN_INPUTS'))
++        // Empty gene calls retain their manifest/state; protein tools do not
++        // run on header-only input or report a biological negative for it.
++        ch_proteins = PROTEIN_INPUTS.out.proteins.filter { meta, proteins, topology -> proteins.size() > 0 }
++    }
+     // ---------------- typing (06) ----------------
+     if (selectedTools(params.typing_tools).contains('plasmidfinder')) {
+         // nf-core module: bundled PlasmidFinder db (params.plasmidfinder_db no longer used)
+@@ -67,19 +89,18 @@
+               Channel.value(file(params.copla_macsyfinder_dir, checkIfExists: true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: COPLA.out], '06_plasmid_typing', 'COPLA'))
+     }
+-    def run_conjscan    = selectedTools(params.typing_optional_tools).contains('conjscan')
+-    def run_macsyfinder = selectedTools(params.typing_optional_tools).contains('macsyfinder')
+     if (run_conjscan || run_macsyfinder) {
+-        // CONJScan models via macsydata (macsyfinder >= 2.1.2 no longer ships them)
+-        MACSYFINDER_DOWNLOAD(Channel.value('CONJ'))
++        // Match the model release already declared in the project's test data.
++        // Request once, only after at least one sample has actual proteins.
++        MACSYFINDER_DOWNLOAD(ch_proteins.map { meta, proteins, topology -> 'CONJ' }.first())
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER_DOWNLOAD.out], '06_plasmid_typing', 'MACSYFINDER_DOWNLOAD'))
+     }
+     if (run_conjscan) {
+-        CONJSCAN(ch_plasmids, MACSYFINDER_DOWNLOAD.out.models, 'CONJ')
++        CONJSCAN(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJ')
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: CONJSCAN.out], '06_plasmid_typing', 'CONJSCAN'))
+     }
+     if (run_macsyfinder) {
+-        MACSYFINDER(ch_plasmids, MACSYFINDER_DOWNLOAD.out.models, 'CONJ')
++        MACSYFINDER(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJ')
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER.out], '06_plasmid_typing', 'MACSYFINDER'))
+     }
+ 
+@@ -111,10 +132,6 @@
+         INTEGRONFINDER(ch_plasmids)
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: INTEGRONFINDER.out], '08_annotation', 'INTEGRONFINDER'))
+     }
+-    if (selectedTools(params.annotation_tools).contains('prodigal') || selectedTools(params.annotation_optional_tools).contains('prodigal')) {
+-        PRODIGAL(ch_plasmids, Channel.value('gff'))
+-        ch_report_events = ch_report_events.mix(reportEvidence([channels: PRODIGAL.out], '08_annotation', 'PRODIGAL'))
+-    }
+     if (selectedTools(params.annotation_optional_tools).contains('mob_suite')) {
+         // nf-core module: no db input (uses mob_suite 3.1.9 bundled db)
+         MOB_SUITE_ANNOT(ch_plasmids)
+@@ -127,9 +144,9 @@
+             [])
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: RGI.out], '08_annotation', 'RGI'))
+     }
+-    if (selectedTools(params.annotation_optional_tools).contains('eggnog_mapper')) {
++    if (run_eggnog) {
+         // search_mode=diamond with no explicit dmnd db (falls back to --data_dir)
+-        EGGNOG_MAPPER(ch_plasmids,
++        EGGNOG_MAPPER(ch_proteins.map { meta, proteins, topology -> tuple(meta, proteins) },
+                       Channel.value(['diamond', []]),
+                       Channel.value(file(params.eggnog_db, checkIfExists: true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: EGGNOG_MAPPER.out], '08_annotation', 'EGGNOG_MAPPER'))
+diff --git a/conf/nfcore_downstream.config b/conf/nfcore_downstream.config
+--- a/conf/nfcore_downstream.config
++++ b/conf/nfcore_downstream.config
+@@ -31,16 +31,16 @@
+     }
+ 
+     withName: 'CONJSCAN' {
+-        // retired module ran `macsyfinder conjscan --db-type ordered_replicon`
+-        ext.args   = '--db-type ordered_replicon'
++        // Preserve contig groups; unknown topology is explicitly linear.
++        ext.args   = '--db-type gembase --replicon-topology linear'
+         ext.prefix = { "${meta.id}.conjscan" }
+         publishDir = [ [path: "${params.outdir}/06_plasmid_typing/conjscan", mode: params.publish_dir_mode,
+                         saveAs: { fn -> fn }] ]
+     }
+ 
+     withName: 'MACSYFINDER' {
+-        // retired module ran `macsyfinder --db-type ordered_replicon` (env-shipped CONJScan models)
+-        ext.args   = '--db-type ordered_replicon'
++        // This alias uses the same CONJScan plasmid models, not independent evidence.
++        ext.args   = '--db-type gembase --replicon-topology linear'
+         ext.prefix = { "${meta.id}.macsyfinder" }
+         publishDir = [ [path: "${params.outdir}/06_plasmid_typing/macsyfinder", mode: params.publish_dir_mode,
+                         saveAs: { fn -> fn }] ]
+@@ -78,6 +78,10 @@
+         publishDir = [ [path: "${params.outdir}/08_annotation/prodigal", mode: params.publish_dir_mode] ]
+     }
+ 
++    withName: 'PROTEIN_INPUTS' {
++        publishDir = [ [path: { "${params.outdir}/08_annotation/protein_inputs/${meta.id}" }, mode: params.publish_dir_mode] ]
++    }
++
+     withName: 'RGI' {
+         ext.prefix = { "${meta.id}.rgi" }
+         // publish only the result json/txt, not the temp/ scratch dir
+diff --git a/modules/nf-core/macsyfinder/search/main.nf b/modules/nf-core/macsyfinder/search/main.nf
+--- a/modules/nf-core/macsyfinder/search/main.nf
++++ b/modules/nf-core/macsyfinder/search/main.nf
+@@ -8,7 +8,7 @@
+         'quay.io/biocontainers/macsyfinder:2.1.6--pyhdfd78af_0' }"
+ 
+     input:
+-    tuple val(meta), path(proteins)
++    tuple val(meta), path(proteins), path(topology)
+     path models
+     val model_names
+ 
+@@ -29,6 +29,7 @@
+     def args = task.ext.args ?: ''
+     prefix = task.ext.prefix ?: "${meta.id}"
+     def model_arg = model_names ? "--models ${model_names}" : ""
++    def topology_arg = topology ? "--topology-file ${topology}" : ""
+     """
+     macsyfinder \\
+         --sequence-db ${proteins} \\
+@@ -37,6 +38,7 @@
+         --out-dir ${prefix} \\
+         --worker ${task.cpus} \\
+         ${args} \\
++        ${topology_arg} \\
+         2>| >( tee macsyfinder.err >&2 ) \\
+         | tee macsyfinder.out
+ 
+diff --git a/modules/nf-core/macsyfinder/search/meta.yml b/modules/nf-core/macsyfinder/search/meta.yml
+--- a/modules/nf-core/macsyfinder/search/meta.yml
++++ b/modules/nf-core/macsyfinder/search/meta.yml
+@@ -35,6 +35,14 @@
+         pattern: "*.{fasta,faa,fa}"
+         ontologies:
+           - edam: "http://edamontology.org/format_1929"
++    - topology:
++        type: file
++        description: |
++          Optional per-replicon topology file, with lines `replicon: circular`
++          or `replicon: linear`. Pass [] to use the command-line default.
++          Staged in the same sample tuple as the protein sequences.
++        pattern: "*.txt"
++        ontologies: []
+   - models:
+       type: directory
+       description: Directory containing MacSyFinder model(s)
+diff --git a/modules/nf-core/macsyfinder/search/tests/main.nf.test b/modules/nf-core/macsyfinder/search/tests/main.nf.test
+--- a/modules/nf-core/macsyfinder/search/tests/main.nf.test
++++ b/modules/nf-core/macsyfinder/search/tests/main.nf.test
+@@ -30,7 +30,7 @@
+                 """
+                 input[0] = [
+                     [ id:'test' ],
+-                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/candidatus_portiera_aleyrodidarum/genome/proteome.fasta', checkIfExists: true)
++                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/candidatus_portiera_aleyrodidarum/genome/proteome.fasta', checkIfExists: true), []
+                 ]
+                 input[1] = MACSYFINDER_DOWNLOAD.out.models
+                 input[2] = 'TXSScan'
+@@ -71,7 +71,7 @@
+         when {
+             process {
+                 """
+-                input[0] = PIGZ_COMPRESS.out.archive
++                input[0] = PIGZ_COMPRESS.out.archive.map { meta, proteins -> tuple(meta, proteins, []) }
+                 input[1] = MACSYFINDER_DOWNLOAD.out.models
+                 input[2] = 'TXSScan'
+                 """
+@@ -101,7 +101,7 @@
+                 """
+                 input[0] = [
+                     [ id:'test' ],
+-                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/candidatus_portiera_aleyrodidarum/genome/proteome.fasta', checkIfExists: true)
++                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/candidatus_portiera_aleyrodidarum/genome/proteome.fasta', checkIfExists: true), []
+                 ]
+                 input[1] = MACSYFINDER_DOWNLOAD.out.models
+                 input[2] = 'TXSScan'
+diff --git a/tests/test_prodigal_inputs.py b/tests/test_prodigal_inputs.py
+--- /dev/null
++++ b/tests/test_prodigal_inputs.py
+@@ -0,0 +1,103 @@
++import gzip
++import importlib.util
++import json
++from pathlib import Path
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++spec = importlib.util.spec_from_file_location('protein_inputs', ROOT/'bin/prepare_prodigal_inputs.py')
++adapter = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(adapter)
++
++
++class ProteinInputs(unittest.TestCase):
++    def setUp(self):
++        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
++        self.root = Path(self.tmp.name)
++        self.paths = {k: self.root/k for k in ['genome', 'gff', 'proteins', 'cds']}
++        self.output = self.root/'output'
++        self.paths['genome'].write_text('>ctg_a topology=circular\nATGAAATAA\n>ctg_b\nTTATTTCAT\n')
++        self.paths['gff'].write_text(
++            '##gff-version  3\n'
++            '# Sequence Data: seqnum=1;seqlen=9;seqhdr="ctg_a topology=circular"\n'
++            '# Model Data: version=Prodigal.v2.6.3;transl_table=11;uses_sd=1\n'
++            'ctg_a\tProdigal_v2.6.3\tCDS\t1\t9\t1\t+\t0\tID=1_1;partial=00;start_type=ATG;\n'
++            '# Sequence Data: seqnum=2;seqlen=9;seqhdr="ctg_b"\n'
++            '# Model Data: version=Prodigal.v2.6.3;transl_table=4;uses_sd=1\n'
++            'ctg_b\tProdigal_v2.6.3\tCDS\t1\t9\t1\t-\t0\tID=2_1;partial=00;start_type=ATG;\n')
++        headers = ['ctg_a_1 # 1 # 9 # 1 # ID=1_1;partial=00;start_type=ATG;',
++                   'ctg_b_1 # 1 # 9 # -1 # ID=2_1;partial=00;start_type=ATG;']
++        for kind, seq in [('proteins', 'MK*'), ('cds', 'ATGAAATAA')]:
++            # Out-of-order gene FASTA is restored to source contig order.
++            self.paths[kind].write_text(''.join('>'+header+'\n'+seq+'\n' for header in headers[::-1]))
++
++    def prepare(self):
++        return adapter.prepare(**self.paths, output=self.output)
++
++    def fail_clean(self, message):
++        with self.assertRaisesRegex(ValueError, message): self.prepare()
++        self.assertFalse(self.output.exists())
++
++    def test_source_coordinates_strand_ids_order_and_topology(self):
++        result = self.prepare()
++        self.assertEqual(result['protein_count'], 2)
++        self.assertEqual([(x['contig_id'],x['topology']) for x in result['replicons']], [('ctg_a','circular'),('ctg_b','linear')])
++        self.assertEqual(result['replicons'][1]['topology_source'], 'unknown_treated_as_linear')
++        self.assertEqual((self.output/'replicon_topology.txt').read_text(), 'ctg_a: circular\n')
++        proteins = (self.output/'proteins.faa').read_text()
++        self.assertLess(proteins.index('>ctg_a_1'), proteins.index('>ctg_b_1'))
++        self.assertEqual(proteins.count('MK*'), 2)
++        self.assertIn('\t-\t4\t', (self.output/'gene_map.tsv').read_text())
++        self.assertEqual(json.loads((self.output/'manifest.json').read_text()), result)
++
++    def test_gzip_magic_and_lowercase_dna_preserve_protein_headers(self):
++        original = self.paths['proteins'].read_text()
++        for kind,p in self.paths.items():
++            data = p.read_bytes()
++            if kind == 'genome': data = data.replace(b'ATGAAATAA', b'atgaaataa')
++            p.write_bytes(gzip.compress(data, mtime=0))
++        self.prepare()
++        self.assertEqual(set((self.output/'proteins.faa').read_text().splitlines()), set(original.splitlines()))
++
++    def test_conflicting_circularity_fails_before_outputs(self):
++        p=self.paths['genome'];p.write_text(p.read_text().replace('topology=circular','topology=circular circular=false'))
++        self.fail_clean('Conflicting topology')
++
++    def test_nucleotide_input_cannot_substitute_for_protein_output(self):
++        self.paths['proteins'].write_bytes(self.paths['genome'].read_bytes())
++        self.fail_clean('identifiers differ')
++
++    def test_wrong_source_cds_is_not_silently_associated(self):
++        p=self.paths['cds'];p.write_text(p.read_text().replace('ATGAAATAA','ATGCCCTAA'))
++        self.fail_clean('CDS/source DNA')
++
++    def test_missing_duplicate_genes_and_coordinate_errors_fail(self):
++        original=self.paths['proteins'].read_text()
++        for bad,diagnostic in [(original+original,'Duplicate ID'),
++                               (original.replace(' # 9 # ',' # 6 # '),'coordinate header mismatch'),
++                               (original.split('>ctg_a_1')[0],'identifiers differ')]:
++            self.paths['proteins'].write_text(bad)
++            self.fail_clean(diagnostic)
++
++    def test_zero_genes_retains_contigs_and_explicit_state(self):
++        p=self.paths['gff'];p.write_text('\n'.join(l for l in p.read_text().splitlines() if l.startswith('#'))+'\n')
++        self.paths['proteins'].write_text('');self.paths['cds'].write_text('')
++        result=self.prepare()
++        self.assertEqual(result['state'], 'no_predicted_proteins')
++        self.assertEqual(result['contig_count'],2)
++        self.assertEqual((self.output/'proteins.faa').stat().st_size,0)
++
++    def test_unrepresented_source_contig_is_an_error(self):
++        p=self.paths['genome'];p.write_text(p.read_text()+'>missing\nATGAAATAA\n')
++        self.fail_clean('Incomplete')
++
++    def test_short_protein_with_only_dna_letters_is_still_valid(self):
++        # Protein alphabet heuristics would wrongly reject the peptide ACG.
++        for kind,old,new in [('proteins','MK*','ACG'),('cds','ATGAAATAA','GCTTGTGGT'),
++                             ('genome','ATGAAATAA','GCTTGTGGT'),('genome','TTATTTCAT','ACCACAAGC')]:
++            p=self.paths[kind];p.write_text(p.read_text().replace(old,new))
++        self.prepare();self.assertEqual((self.output/'proteins.faa').read_text().count('ACG'),2)
++
++
++if __name__ == '__main__': unittest.main()
+diff --git a/tests/run_protein_inputs.py b/tests/run_protein_inputs.py
+--- /dev/null
++++ b/tests/run_protein_inputs.py
+@@ -0,0 +1,198 @@
++#!/usr/bin/env python3
++"""Actual downstream protein routing with native Prodigal/MSF/eggNOG.
++
++The only command adapter replaces msf_data's Internet acquisition of the
++locked model with its native local-archive installation of the same release.
++It never fabricates a model, gene, hit, annotation or tool result.
++"""
++import argparse
++import csv
++import gzip
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++
++from Bio import SeqIO
++from Bio.Seq import Seq
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++
++
++def records(path):
++    opener = gzip.open if Path(path).read_bytes()[:2] == b'\x1f\x8b' else open
++    with opener(path, 'rt') as stream:
++        return {r.id:r for r in SeqIO.parse(stream, 'fasta')}
++
++
++def native_facts(folder, source):
++    dna = records(source)
++    proteins = records(folder/'proteins.faa')
++    mapping = list(csv.DictReader((folder/'gene_map.tsv').open(), delimiter='\t'))
++    manifest = json.loads((folder/'manifest.json').read_text())
++    assert set(proteins) == {r['protein_id'] for r in mapping}
++    assert len(proteins) == len(mapping) == manifest['protein_count']
++    assert {r['contig_id'] for r in manifest['replicons']} == set(dna)
++    previous = (-1, -1)
++    index = {identifier:i for i,identifier in enumerate(dna)}
++    for row in mapping:
++        pid, cid = row['protein_id'], row['contig_id']
++        start, end = int(row['start']), int(row['end'])
++        position = (index[cid], start)
++        assert position >= previous; previous = position
++        assert pid.rsplit('_',1)[0] == cid
++        segment = dna[cid].seq[start-1:end]
++        if row['strand'] == '-': segment = segment.reverse_complement()
++        translated = str(segment.translate(table=int(row['translation_table'])))
++        # Prodigal translates a complete alternative start codon as methionine.
++        if row['partial'][0] == '0': translated = 'M'+translated[1:]
++        assert str(proteins[pid].seq) == translated, (pid, translated, proteins[pid].seq)
++    topo = {}
++    for line in (folder/'replicon_topology.txt').read_text().splitlines():
++        identifier, value = line.split(':');topo[identifier] = value.strip()
++    for row in manifest['replicons']:
++        marker = 'topology=circular' in dna[row['contig_id']].description.split()[1:]
++        assert row['topology'] == ('circular' if marker else 'linear')
++        if row['protein_count']:
++            assert topo.get(row['contig_id'], 'linear') == row['topology']
++    return {'genes':len(proteins), 'contigs':len(dna), 'state':manifest['state'],
++            'independent_translation_checked':True, 'protein_ids':sorted(proteins)}
++
++
++def run(base, macsy, eggnog, models_archive, fixture, plasmid):
++    base.mkdir(parents=True)
++    lock=json.loads((ROOT/'tests/protein-input-native.lock.json').read_text())
++    assert sha(models_archive)==lock['models']['archive_sha256']
++    for name, expected in lock['eggnog_fixture']['files'].items():
++        assert sha(fixture/name)==expected['sha256'],name
++    data=base/'fixtures';data.mkdir()
++    plasmid_records=records(plasmid);assert len(plasmid_records)==1
++    plasmid_record=next(iter(plasmid_records.values()))
++    # Use the nucleotide companion of the official annotated ychF protein.
++    # The separate genepred_contig fixture uses a different search database
++    # and cannot serve as a positive annotation oracle for this database.
++    official=records(fixture/'test_queries.fna')['1000565.METUNv1_03812']
++    # Header-only topology perturbation; DNA bytes/coordinates are retained.
++    s1=data/'S1.fna.gz'
++    s1.write_bytes(gzip.compress(('>'+plasmid_record.id+' topology=circular\n'+str(plasmid_record.seq)+'\n>fragment_with_underscores\n'+str(official.seq)+'\n').encode(),mtime=0))
++    s2=data/'S.2.fna';s2.write_text('>single_contig\n'+str(official.seq)+'\n')
++    zero=data/'Zero.fna';zero.write_text('>short_fragment\n'+str(official.seq[:30])+'\n')
++    inputs=[{'id':'S.2','fasta':str(s2)},{'id':'Zero','fasta':str(zero)},{'id':'S1','fasta':str(s1)}]
++    nativebin=base/'native-bin';nativebin.mkdir()
++    wrapper=nativebin/'msf_data'
++    wrapper.write_text('#!'+str(macsy/'bin/python')+'\n'+
++        'import os,sys,json\nfrom pathlib import Path\n'
++        'args=sys.argv[1:]\noriginal=list(args)\n'
++        'if "install" in args:\n'
++        ' assert args[-1]=="CONJScan==2.1.0",args\n'
++        ' args[-1]='+repr(str(models_archive))+'\n'
++        ' Path("model_acquisition_transport.json").write_text(json.dumps({"original":original,"actual":args,"scope":"native local archive acquisition"}))\n'
++        'os.execv('+repr(str(macsy/'bin/msf_data'))+', ["msf_data"]+args)\n')
++    wrapper.chmod(0o755)
++    common={
++        'typing_tools':[], 'typing_optional_tools':[], 'annotation_tools':[], 'annotation_optional_tools':[],
++        'plasmid_binning_tools':[], 'publish_dir_mode':'copy', 'eggnog_db':str(fixture),
++    }
++    runs=[]
++    def execute(name, selections, chosen=inputs, resume=False):
++        folder=base/name;folder.mkdir(exist_ok=resume)
++        config=folder/'nextflow.config'
++        if not resume:
++            config.write_text('includeConfig '+repr(str(ROOT/'conf/nfcore_downstream.config'))+'\n'
++                "process.executor='local'\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n"
++                "process { cpus=1; memory='1 GB'; errorStrategy='terminate'; maxRetries=0\n"
++                "withName: 'EGGNOG_MAPPER' { beforeScript="+repr('export PATH='+str(eggnog/'bin')+':$PATH')+" }\n}\n")
++            params={**common,**selections,'records':chosen,'outdir':str(folder/'out')}
++            (folder/'params.json').write_text(json.dumps(params,indent=2))
++        suffix='-resume' if resume else ''
++        trace=folder/('trace'+suffix+'.tsv')
++        run_name='protein_'+hashlib.sha256(str(folder).encode()).hexdigest()[:12]
++        command=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(ROOT/'tests/nextflow/protein_inputs.nf'),'-params-file',str(folder/'params.json'),'-work-dir',str(folder/'work'),'-with-trace',str(trace),'-ansi-log','false']
++        if resume:command+=['-resume',run_name]
++        else:command+=['-name',run_name]
++        env={**os.environ,'PATH':str(nativebin)+':'+str(macsy/'bin')+':'+os.environ['PATH']}
++        result=subprocess.run(command,capture_output=True,text=True,env=env)
++        (folder/('stdout'+suffix+'.log')).write_text(result.stdout);(folder/('stderr'+suffix+'.log')).write_text(result.stderr)
++        tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else []
++        record={'scenario':name+suffix,'command':command,'exit_code':result.returncode,'trace':tasks}
++        runs.append(record);(base/'runs-progress.json').write_text(json.dumps(runs,indent=2)+'\n')
++        assert result.returncode==0,(name,result.stdout[-4000:],result.stderr[-3000:])
++        if not selections or not chosen:
++            assert not tasks
++            record['checks']={'no_analysis_tasks':True};return
++        states={t['status'] for t in tasks};assert states==({'CACHED'} if resume else {'COMPLETED'}),states
++        process_counts={}
++        for task in tasks:
++            process=task['name'].split(' (')[0].rsplit(':',1)[-1]
++            process_counts[process]=process_counts.get(process,0)+1
++        assert process_counts.get('PRODIGAL')==len(chosen),process_counts
++        if not selections.get('typing_optional_tools') and not selections.get('annotation_optional_tools'):
++            assert process_counts=={'PRODIGAL':len(chosen)}
++            for row in chosen:
++                path=folder/'out/08_annotation/prodigal'/(row['id']+'.prodigal.faa.gz')
++                assert records(path)
++                assert not (folder/'out/08_annotation/protein_inputs').exists()
++            record['checks']={'original_prodigal_only_route':True,'counts':process_counts};return
++        expected_nonempty=sum(r['id']!='Zero' for r in chosen)
++        expected={'PRODIGAL':len(chosen),'PROTEIN_INPUTS':len(chosen)}
++        if selections.get('typing_optional_tools'):
++            if expected_nonempty:
++                expected['MACSYFINDER_DOWNLOAD']=1
++                for tool in selections['typing_optional_tools']:expected['CONJSCAN' if tool=='conjscan' else 'MACSYFINDER']=expected_nonempty
++        if selections.get('annotation_optional_tools') and expected_nonempty:expected['EGGNOG_MAPPER']=expected_nonempty
++        assert process_counts==expected,(process_counts,expected)
++        facts={}
++        for row in chosen:
++            sid=row['id'];out=folder/'out/08_annotation/protein_inputs'/sid/'protein_inputs'
++            facts[sid]=native_facts(out,row['fasta'])
++        if selections.get('annotation_optional_tools'):
++            for row in chosen:
++                path=folder/'out/08_annotation/eggnog'/(row['id']+'.emapper.annotations')
++                if row['id']=='Zero':assert not path.exists();continue
++                lines=[l.split('\t') for l in path.read_text().splitlines() if l and not l.startswith('#')]
++                assert lines, (row['id'],'official fixture should annotate ychF')
++                assert {r[0] for r in lines}.issubset(facts[row['id']]['protein_ids'])
++                assert any(r[8]=='ychF' for r in lines),lines
++        if selections.get('typing_optional_tools'):
++            for tool in selections['typing_optional_tools']:
++                for row in chosen:
++                    # Nextflow retains the declared sample-specific prefix
++                    # directory in this output glob; it is not flattened.
++                    path=folder/'out/06_plasmid_typing'/tool/(row['id']+'.'+tool)/'all_systems.tsv'
++                    if row['id']=='Zero':assert not path.exists();continue
++                    lines=[l for l in path.read_text().splitlines() if not l.startswith('#')]
++                    hits=list(csv.DictReader(lines,delimiter='\t'))
++                    assert all(h['hit_id'] in facts[row['id']]['protein_ids'] and h['replicon']==h['hit_id'].rsplit('_',1)[0] for h in hits)
++                    if row['id']=='S1':assert any(h['model_fqn']=='CONJScan/Plasmids/T4SS_typeF' for h in hits)
++                    else:assert not hits
++        record['checks']={'counts':process_counts,'independent_inputs':facts,'no_zero_gene_consumer_tasks':True,
++                          'sample_scoped_publication':True,'positive_eggnog_gene_names':True,
++                          'macsy_positive_and_no_system':True}
++    execute('combined',{'typing_optional_tools':['conjscan','macsyfinder'],'annotation_tools':['prodigal'],'annotation_optional_tools':['eggnog_mapper']})
++    execute('combined',{'typing_optional_tools':['conjscan','macsyfinder'],'annotation_tools':['prodigal'],'annotation_optional_tools':['eggnog_mapper']},resume=True)
++    execute('eggnog-only',{'annotation_optional_tools':['eggnog_mapper']},inputs[:1])
++    execute('prodigal-only',{'annotation_tools':['prodigal']},inputs[:1])
++    execute('zero-proteins',{'typing_optional_tools':['conjscan'],'annotation_optional_tools':['eggnog_mapper']},inputs[1:2])
++    execute('disabled',{})
++    execute('no-input',{'typing_optional_tools':['conjscan'],'annotation_optional_tools':['eggnog_mapper']},[])
++    payload={'pass':True,'runs':runs,'native_prefixes':{'macsy':str(macsy),'eggnog':str(eggnog)},
++             'source_sha256':{p:sha(ROOT/p) for p in ['subworkflows/plasmid_downstream.nf','conf/nfcore_downstream.config','modules/annotation/protein_inputs.nf','modules/nf-core/macsyfinder/search/main.nf','modules/nf-core/macsyfinder/download/main.nf','modules/nf-core/eggnogmapper/main.nf','modules/nf-core/prodigal/main.nf','bin/prepare_prodigal_inputs.py','tests/run_protein_inputs.py','tests/nextflow/protein_inputs.nf','tests/protein-input-native.lock.json']},
++             'inputs':{str(p):sha(p) for p in [models_archive,plasmid,fixture/'test_queries.fna']},
++             'limitations':['Official small eggNOG fixture database, not full production database or scientific annotation benchmark.',
++                            'Model acquisition uses native local-archive installer through an explicitly logged transport adapter; production remote acquisition is not certified.',
++                            'Topology header perturbations and cropped zero-gene boundary are interface controls, not independent biological replicates.',
++                            'Current Nextflow native backend only; image/nf-test/full platform certification remains open.']}
++    (base/'run.json').write_text(json.dumps(payload,indent=2)+'\n')
++    print(json.dumps({'pass':True,'scenarios':len(runs),'trace_entries':sum(len(r['trace']) for r in runs)},indent=2))
++
++
++if __name__=='__main__':
++    parser=argparse.ArgumentParser(description=__doc__)
++    for name in ['output','macsy-prefix','eggnog-prefix','models-archive','fixture','plasmid']:parser.add_argument('--'+name,type=Path,required=True)
++    args=parser.parse_args()
++    run(args.output.resolve(),args.macsy_prefix.resolve(),args.eggnog_prefix.resolve(),args.models_archive.resolve(),args.fixture.resolve(),args.plasmid.resolve())
+diff --git a/tests/run_protein_input_controls.py b/tests/run_protein_input_controls.py
+--- /dev/null
++++ b/tests/run_protein_input_controls.py
+@@ -0,0 +1,77 @@
++#!/usr/bin/env python3
++"""Native failure controls; original wrapper swallowing error is not a pass."""
++import argparse
++import csv
++import json
++import os
++from pathlib import Path
++import subprocess
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def run(base, prefix, models, proteins, genome, before):
++    base.mkdir(parents=True)
++    bad=base/'malformed_topology.txt';bad.write_text('not-a-valid-topology-entry\n')
++    env={**os.environ,'PATH':str(prefix/'bin')+':'+os.environ['PATH']}
++    runs=[]
++    for name,old in [('original-swallowed-failure',True),('fixed-propagates-failure',False)]:
++        folder=base/name;folder.mkdir()
++        workflow=ROOT/'tests/nextflow/macsy_inputs.nf'
++        if old:
++            workflow=folder/'original.nf'
++            workflow.write_text((ROOT/'tests/nextflow/macsy_inputs.nf').read_text()
++                .replace("'../../modules/nf-core/macsyfinder/search/main'",repr(str(before.with_suffix(''))))
++                .replace(',file(params.topology,checkIfExists:true)', ''))
++        config=folder/'nextflow.config'
++        args='--db-type gembase --replicon-topology linear'
++        if old:args+=' --topology-file '+str(bad)
++        config.write_text("process { executor='local'; cpus=1; memory='1 GB'; errorStrategy='terminate'; maxRetries=0; withName:'CONJSCAN' { ext.args="+repr(args)+" } }\n"
++                          "conda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n")
++        params={'proteins':str(proteins),'models':str(models),'topology':str(bad)}
++        (folder/'params.json').write_text(json.dumps(params))
++        trace=folder/'trace.tsv'
++        cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(workflow),'-params-file',str(folder/'params.json'),'-work-dir',str(folder/'work'),'-with-trace',str(trace),'-ansi-log','false']
++        result=subprocess.run(cmd,env=env,capture_output=True,text=True)
++        (folder/'stdout.log').write_text(result.stdout);(folder/'stderr.log').write_text(result.stderr)
++        tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else []
++        errors='\n'.join(p.read_text() for p in (folder/'work').rglob('.command.err'))
++        checks={'one_native_task':len(tasks)==1,'native_topology_error':'ValueError: not enough values to unpack' in errors}
++        if old:checks['old_error_hidden']=result.returncode==0 and tasks[0]['status']=='COMPLETED'
++        else:checks['current_failure_propagates']=result.returncode!=0 and tasks[0]['status']=='FAILED'
++        record={'scenario':name,'command':cmd,'exit_code':result.returncode,'trace':tasks,'checks':checks}
++        runs.append(record);(base/'runs-progress.json').write_text(json.dumps(runs,indent=2)+'\n');assert all(checks.values()),record
++    # Correct models isolate the sequence-type bug from the separate obsolete
++    # CONJ package/model argument. This real plasmid exceeds HMMER's 100K
++    # protein limit when its nucleotide sequence is passed as one "protein".
++    for name,args in [('original-dna',['--sequence-db',str(genome),'--models','CONJScan/Plasmids','all']),
++                      ('original-model-name',['--sequence-db',str(proteins),'--models','CONJ'])]:
++        folder=base/name;folder.mkdir()
++        cmd=['macsyfinder',*args,'--models-dir',str(models),'--db-type','ordered_replicon','--worker','1','--out-dir',str(folder/'output')]
++        # MacSyLib's HMMER error handler kills its entire process group.
++        # Isolate the direct negative control so the harness survives to
++        # preserve the real exit code and diagnostic; no tool error is caught
++        # and converted into a biological empty result.
++        result=subprocess.run(cmd,env=env,capture_output=True,text=True,start_new_session=True)
++        (folder/'stdout.log').write_text(result.stdout);(folder/'stderr.log').write_text(result.stderr)
++        record={'scenario':name,'command':cmd,'exit_code':result.returncode}
++        if name=='original-dna':
++            diagnostic='\n'.join(p.read_text() for p in (folder/'output/hmmer_results').glob('*.search_hmm.err'))
++            assert result.returncode!=0 and 'Target sequence length > 100K' in diagnostic
++            assert not (folder/'output/all_systems.tsv').exists()
++            record['checks']={'native_DNA_protein_limit_failure_reproduced':True}
++        else:
++            assert result.returncode!=0 and 'CONJ' in result.stderr
++            record['checks']={'obsolete_model_name_rejected':True}
++        runs.append(record)
++    (base/'run.json').write_text(json.dumps({'pass':True,'runs':runs,
++        'limitations':['Malformed topology is an explicit error-propagation boundary, not a biological negative.',
++                       'Original DNA reaches HMMER protein length failure; no biological specificity claim.']},indent=2)+'\n')
++    print('4 native controls passed (2 Nextflow wrapper tasks,2 direct CLI controls)')
++
++
++if __name__=='__main__':
++    parser=argparse.ArgumentParser(description=__doc__)
++    for key in ['output','prefix','models','proteins','genome','before']:parser.add_argument('--'+key,type=Path,required=True)
++    args=parser.parse_args()
++    run(args.output.resolve(),args.prefix.resolve(),args.models.resolve(),args.proteins.resolve(),args.genome.resolve(),args.before.resolve())
+diff --git a/tests/nextflow/protein_inputs.nf b/tests/nextflow/protein_inputs.nf
+--- /dev/null
++++ b/tests/nextflow/protein_inputs.nf
+@@ -0,0 +1,9 @@
++nextflow.enable.dsl=2
++
++include { PLASMID_DOWNSTREAM } from '../../subworkflows/plasmid_downstream'
++
++workflow {
++    plasmids = Channel.fromList(params.records).map { row -> tuple([id:row.id],file(row.fasta,checkIfExists:true)) }
++    PLASMID_DOWNSTREAM(plasmids,Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty())
++    PLASMID_DOWNSTREAM.out.report_events.view { value -> 'PROTEIN_AUDIT_EVENT '+groovy.json.JsonOutput.toJson(value) }
++}
+diff --git a/tests/nextflow/macsy_inputs.nf b/tests/nextflow/macsy_inputs.nf
+--- /dev/null
++++ b/tests/nextflow/macsy_inputs.nf
+@@ -0,0 +1,8 @@
++nextflow.enable.dsl=2
++
++include { MACSYFINDER_SEARCH as CONJSCAN } from '../../modules/nf-core/macsyfinder/search/main'
++
++workflow {
++    proteins=Channel.value(tuple([id:'boundary'],file(params.proteins,checkIfExists:true),file(params.topology,checkIfExists:true)))
++    CONJSCAN(proteins,Channel.value(file(params.models,checkIfExists:true)),'CONJScan/Plasmids all')
++}
+diff --git a/tests/protein-input-native.lock.json b/tests/protein-input-native.lock.json
+--- /dev/null
++++ b/tests/protein-input-native.lock.json
+@@ -0,0 +1,163 @@
++{
++  "schema": 1,
++  "models": {
++    "repository": "macsy-models/CONJScan",
++    "version": "2.1.0",
++    "commit": "898f8a1a3d9076855eb8f32be9f32d4e1b375c1f",
++    "archive_sha256": "cd428945a8bd1ed11d3c356fce78ed4b59b9ff9c8c2b9414ee84a0af4ff4da26",
++    "git_blob_files": 162
++  },
++  "eggnog_fixture": {
++    "repository": "eggnogdb/eggnog-mapper",
++    "commit": "a82fac7f5534ee97fa0385718b0012c266fcf3e7",
++    "scope": "complete upstream small integration-test fixture database; not production eggNOG database",
++    "files": {
++      "eggnog.db": {
++        "git_blob": "9ed31352ce6ab0f38595b5c9328e8921017bd12a",
++        "sha256": "8f878877e7d9b68cc9d5fa44948762599a5915e43515c066164f187d226ce9b7",
++        "bytes": 19570688
++      },
++      "eggnog.taxa.db": {
++        "git_blob": "136b907a3e0843d6874b4ecb58bf0a51a5efac4a",
++        "sha256": "57a208bdc259d8a191aca4f69b2dc6b7001f1fef221167ce72415d31595e17dc",
++        "bytes": 90112
++      },
++      "eggnog.taxa.db.traverse.pkl": {
++        "git_blob": "e1e3d6590815c3f59cf020c37debe5db3615270d",
++        "sha256": "de7bb2b35489c9e5e1f2522575c8107ebd3d7117f8910dc6745aab68ac2d2173",
++        "bytes": 6628719
++      },
++      "eggnog_proteins.dmnd": {
++        "git_blob": "356f6a2235a1a5bb492bbcace11944b327cdbd1e",
++        "sha256": "54f95aaecccab962f14e0f530c8aec469e7e7b6f2f0583beee886df761bd5e34",
++        "bytes": 3603241
++      },
++      "test_queries.fa": {
++        "git_blob": "32796fad3091f52f6efd7b5955b9e52f397b01fe",
++        "sha256": "dbf71fc3878b5a60e858012393fc14f06725da784463711921f9a83477916b9f",
++        "bytes": 1188
++      },
++      "test_queries.fna": {
++        "git_blob": "ae5c1e05476af77e57d2cf3ec734249ea5badd60",
++        "sha256": "d3be5483c01925ffe32e51d1d0811ebfbc105c49df81cc307b9d20b9cb8e2536",
++        "bytes": 2263
++      },
++      "test_output.emapper.annotations": {
++        "git_blob": "22aa127212f93d072696625df78603dc64a17e42",
++        "sha256": "c9612074e797024bc29c2bdbf1f5da82bfbcc669e431e0fc412bc9f2da6b2137",
++        "bytes": 1347
++      }
++    }
++  },
++  "source_commits": {
++    "macsyfinder": "9caf84252b9cc89b9ef93173df250e764172b330",
++    "macsylib": "561f521027954ed73fd91fa2126f4e43b0a86439",
++    "eggnogmapper": "a82fac7f5534ee97fa0385718b0012c266fcf3e7"
++  },
++  "native_packages": {
++    "macsyfinder-2.1.6": [
++      {
++        "name": "hmmer",
++        "version": "3.4",
++        "build": "h7d74f8d_5",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/hmmer-3.4-h7d74f8d_5.conda",
++        "sha256": "b0ea2115beb20bbd3fe63dd8e41bfc29eab42a0c3982f91f0e018840567f37b6",
++        "md5": "7e252dc47eda3426c7a2a87122b1a3fa"
++      },
++      {
++        "name": "macsyfinder",
++        "version": "2.1.6",
++        "build": "pyhdfd78af_0",
++        "url": "https://conda.anaconda.org/bioconda/noarch/macsyfinder-2.1.6-pyhdfd78af_0.conda",
++        "sha256": "66e68c98b98126b48af2776943ad9038bb774b9c7a02c660a29860ae27e6fd29",
++        "md5": "8126185536d46525f3cfa3da0b1fd569"
++      },
++      {
++        "name": "macsylib",
++        "version": "1.0.4",
++        "build": "pyhdfd78af_1",
++        "url": "https://conda.anaconda.org/bioconda/noarch/macsylib-1.0.4-pyhdfd78af_1.conda",
++        "sha256": "61d6a9275d5cf83c520252c64e10d2ab874132e6b6c81d26907a80ef5e892a82",
++        "md5": "e6ef4689eeedd76fb40a514c64a25e4d"
++      },
++      {
++        "name": "pigz",
++        "version": "2.6",
++        "build": "h2797004_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/pigz-2.6-h2797004_1.conda",
++        "sha256": "074bfefe3552545257babaaca0d6e00a5f9732118d0824382c6eb5c7befe7c7e",
++        "md5": "5f19233669faf26889f27a2d2710e170"
++      },
++      {
++        "name": "prodigal",
++        "version": "2.6.3",
++        "build": "h577a1d6_11",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/prodigal-2.6.3-h577a1d6_11.tar.bz2",
++        "sha256": "1211d9f01128f141154cb4616aa5b15890afc26699767886f6655cabfd67ec06",
++        "md5": "7b083f573760cbd88a206e05f73f5e9d"
++      },
++      {
++        "name": "python",
++        "version": "3.12.15",
++        "build": "h5f976f7_2_cpython",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/python-3.12.15-h5f976f7_2_cpython.conda",
++        "sha256": "f8a38c33f627c68e35d02cc5a11eff25eadb853791ac40bf9cc569315d25bc54",
++        "md5": "13cef25ee4055b1fec19d35d20aadda2"
++      }
++    ],
++    "eggnog-mapper-2.1.13": [
++      {
++        "name": "biopython",
++        "version": "1.88",
++        "build": "py311h0d48ccd_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/biopython-1.88-py311h0d48ccd_1.conda",
++        "sha256": "ae9bc82d5e3731fd7fcc380c475b1c909de2d702a71c67dfbee3fe3d37d14689",
++        "md5": "a1a589904e5b8e31f6fb123bc2b83f33"
++      },
++      {
++        "name": "diamond",
++        "version": "2.0.15",
++        "build": "hb97b32f_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/diamond-2.0.15-hb97b32f_1.tar.bz2",
++        "sha256": "788ccf2daef5f7bf5e2cd088c2e3234f263aedc96b5d1fd2c7aee1323e435a39",
++        "md5": "6951be09685f9979086684bfcef47932"
++      },
++      {
++        "name": "eggnog-mapper",
++        "version": "2.1.13",
++        "build": "pyhdfd78af_2",
++        "url": "https://conda.anaconda.org/bioconda/noarch/eggnog-mapper-2.1.13-pyhdfd78af_2.conda",
++        "sha256": "35d659b4871f198c4439fdcfeb8a35338ee6925dfc20b808596cd508fc6a6c8a",
++        "md5": "4b7a8018bf11ba81d61fdf1b1bb6bb01"
++      },
++      {
++        "name": "hmmer",
++        "version": "3.4",
++        "build": "h7d74f8d_5",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/hmmer-3.4-h7d74f8d_5.conda",
++        "sha256": "b0ea2115beb20bbd3fe63dd8e41bfc29eab42a0c3982f91f0e018840567f37b6",
++        "md5": "7e252dc47eda3426c7a2a87122b1a3fa"
++      },
++      {
++        "name": "prodigal",
++        "version": "2.6.3",
++        "build": "h7b50bb2_10",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/prodigal-2.6.3-h7b50bb2_10.tar.bz2",
++        "sha256": "05018dce864a23867f302cd78e000358bc585fc5bc082b6e16d5d6200d90447d",
++        "md5": "66cc94ede7d4cd483a0412adaf9532ce"
++      },
++      {
++        "name": "python",
++        "version": "3.11.9",
++        "build": "hb806964_0_cpython",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/python-3.11.9-hb806964_0_cpython.conda",
++        "sha256": "177f33a1fb8d3476b38f73c37b42f01c0b014fa0e039a701fd9f83d83aae6d40",
++        "md5": "ac68acfa8b558ed406c75e98d3428d7b"
++      }
++    ]
++  },
++  "limitations": [
++    "Full package archive verification and installed Python/source Git blob equality recorded in results/tool-audit/20261023-protein-inputs/runtime-proof.json; images not executed.",
++    "Two MacSyFinder aliases use identical CONJScan models; not independent evidence."
++  ]
++}

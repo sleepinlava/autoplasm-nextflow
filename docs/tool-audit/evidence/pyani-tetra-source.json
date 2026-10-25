@@ -1,0 +1,9 @@
+{
+  "repository": "widdowquinn/pyani",
+  "ref": "v0.2.12",
+  "path": "pyani/tetra.py",
+  "blob_sha": "c0d11a434afd3a3b30c44418dad7772f8b34d2ea",
+  "retrieval": "GitHub connector github_fetch_file",
+  "snapshot": "results/tool-audit/20261020-tetra/pyani-v0.2.12-tetra.py",
+  "snapshot_sha256": "2f18deec7346b041b7f6372cee3b1361946849466938dff7d3ce08a50b284216"
+}

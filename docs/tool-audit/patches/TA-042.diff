@@ -1,0 +1,123 @@
+--- a/bin/plasmid_consensus.R
++++ b/bin/plasmid_consensus.R
+@@ -233,13 +233,22 @@
+ 
+ parse_weights <- function(spec) {
+   weights <- list()
+-  if (is.null(spec)) return(weights)
++  if (is.null(spec) || !nzchar(trimws(spec))) return(weights)
++  if (grepl("(^|,)[[:space:]]*(,|$)", spec))
++    die(paste0("Invalid consensus weights: empty item in ", py_repr(spec)))
+   for (item in strsplit(spec, ",", fixed = TRUE)[[1L]]) {
+-    if (grepl(":", item, fixed = TRUE)) {
+-      key <- trimws(sub(":.*$", "", item))
+-      val <- suppressWarnings(as.numeric(trimws(sub("^[^:]*:", "", item))))
+-      if (!is.na(val)) weights[[key]] <- val
+-    }
++    parts <- strsplit(item, ":", fixed = TRUE)[[1L]]
++    if (count_char(item, ":") != 1L || length(parts) != 2L)
++      die(paste0("Invalid consensus weights: expected tool:value in ", py_repr(item)))
++    key <- trimws(parts[1L])
++    if (!key %in% ENSEMBLE_TOOLS)
++      die(paste0("Invalid consensus weights: unknown tool in ", py_repr(item)))
++    if (key %in% names(weights))
++      die(paste0("Invalid consensus weights: duplicate tool in ", py_repr(item)))
++    val <- suppressWarnings(as.numeric(trimws(parts[2L])))
++    if (!is.finite(val) || val < 0)
++      die(paste0("Invalid consensus weights: expected finite nonnegative value in ", py_repr(item)))
++    weights[[key]] <- val
+   }
+   weights
+ }
+@@ -319,6 +328,10 @@
+ 
+   weights <- parse_weights(args$weights)
+   active <- names(calls)
++  total_weight <- sum(vapply(active, function(t) weight_of(weights, t), numeric(1)))
++  if (method == "weighted_vote" && (!is.finite(total_weight) || total_weight <= 0))
++    die(sprintf("Invalid consensus weights: active total must be finite and positive for weighted_vote (active: %s; specification: %s)",
++                paste(active, collapse = ","), py_repr(args$weights)))
+   all_contigs <- unique(unlist(lapply(calls, function(c) names(c$score)), use.names = FALSE))
+   if (is.null(all_contigs)) all_contigs <- character(0)
+   all_contigs <- sort(all_contigs, method = "radix")
+@@ -345,7 +358,6 @@
+                                      "classification", "length", "gc_content"))
+   write_tsv(pred_df, args$out_predictions)
+ 
+-  total_weight <- sum(vapply(active, function(t) weight_of(weights, t), numeric(1)))
+   n_active <- length(active)
+ 
+   cons_rows <- list()
+--- /dev/null
++++ b/tests/test_consensus_weights.py
+@@ -0,0 +1,58 @@
++"""Configuration validation and independently specified weighted vote controls."""
++from pathlib import Path
++import csv
++import subprocess
++import tempfile
++import unittest
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++class ConsensusWeightTests(unittest.TestCase):
++    def run_case(self, weights, invalid=False, method='weighted_vote'):
++        with tempfile.TemporaryDirectory() as directory:
++            p=Path(directory);assembly=p/'assembly.fa';summary=p/'genomad.tsv';platon=p/'S.platon.tsv'
++            assembly.write_text('>p1\nACGT\n');summary.write_text('seq_name\tplasmid_score\n')
++            platon.write_text('contig_id\np1\n')
++            outputs=[p/'out.fa',p/'pred.tsv',p/'cons.tsv']
++            args=['Rscript',str(ROOT/'bin/plasmid_consensus.R'),'--assembly',str(assembly),
++                  '--genomad-summary',str(summary),'--extra',str(platon),'--weights='+weights,
++                  '--method',method,'--out-fasta',str(outputs[0]),'--out-predictions',str(outputs[1]),'--out-consensus',str(outputs[2])]
++            r=subprocess.run(args,capture_output=True,text=True)
++            if invalid:
++                self.assertNotEqual(r.returncode,0,f'Accepted weights {weights!r}')
++                self.assertIn('Invalid consensus weights',r.stderr)
++                for path in outputs:self.assertFalse(path.exists())
++            else:
++                self.assertEqual(r.returncode,0,r.stderr)
++                with outputs[2].open() as f:rows=list(csv.DictReader(f,delimiter='\t'))
++                self.assertEqual(len(rows),1)
++                return rows[0]['plasmid_call'],outputs[0].read_text()
++
++    def test_invalid_numeric_values_rejected(self):
++        for spec in ['genomad:-1','genomad:Inf','genomad:NaN','platon:garbage']:
++            with self.subTest(spec=spec):self.run_case(spec,invalid=True)
++
++    def test_malformed_items_rejected(self):
++        for spec in ['genomad','genomad:1,',':1','genomad:1:2',',genomad:1','genomad:1:','genomad:']:
++            with self.subTest(spec=spec):self.run_case(spec,invalid=True)
++
++    def test_unknown_and_duplicate_keys_rejected(self):
++        for spec in ['genomda:1','genomad:1,genomad:2']:
++            with self.subTest(spec=spec):self.run_case(spec,invalid=True)
++
++    def test_active_total_must_be_finite_positive(self):
++        for spec in ['genomad:0,platon:0,plasme:5','genomad:1e308,platon:1e308']:
++            with self.subTest(spec=spec):self.run_case(spec,invalid=True)
++
++    def test_positive_scaling_and_missing_tool_defaults_preserved(self):
++        for spec in ['genomad:0.4,platon:0.6','genomad:4,platon:6','genomad:0.4','']:
++            with self.subTest(spec=spec):
++                call,fasta=self.run_case(spec)
++                self.assertEqual(call,'plasmid');self.assertIn('>p1',fasta)
++
++    def test_zero_weights_do_not_block_nonweighted_method(self):
++        self.run_case('genomad:0,platon:0',method='single_tool')
++
++
++if __name__=='__main__':unittest.main()
+--- a/README.md
++++ b/README.md
+@@ -129,6 +129,9 @@
+ - 共识策略：`--consensus_method weighted_vote`（另支持 `intersection` /
+   `majority_vote` / `single_tool`），`--consensus_weights
+   'genomad:0.6,platon:0.15,plasme:0.15,plasx:0.1'`。
++  权重键限 `genomad/platon/plasme/plasx/scapp`，不得重复，数值须有限且非负；
++  `weighted_vote` 的实际参与工具权重总和须大于零。未指定的工具权重为 1，
++  空权重串也沿用此默认；格式或数值错误会在写出共识结果前失败。
+ - 组装器选择：`--short_read_assembler megahit|metaspades`、
+   `--hybrid_assembler opera_ms|hybridspades`。
+ - 宿主去除：样本表 `host_reference` 列或全局 `--host_reference`。

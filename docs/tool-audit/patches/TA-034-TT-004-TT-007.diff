@@ -1,0 +1,715 @@
+--- a/modules/nf-core/fastp/main.nf
++++ b/modules/nf-core/fastp/main.nf
+@@ -13,11 +13,8 @@
+     val   save_trimmed_fail
+     val   save_merged
+ 
+-    // Local patch (refactor/nf-core-modules): paired clean reads keep the
+-    // legacy names <prefix>_R1.clean.fastq.gz / <prefix>_R2.clean.fastq.gz
+-    // (upstream hard-codes <prefix>_R{1,2}.fastp.fastq.gz). The pipeline's
+-    // downstream consumers and the mock e2e assert the '.clean.fastq.gz'
+-    // suffix, so the paired branch below is renamed accordingly.
++    // Local output contract: all passing-read branches use .clean.fastq.gz,
++    // including single-end/interleaved input and their stubs.
+     output:
+     tuple val(meta), path('*.clean.fastq.gz') , optional:true, emit: reads
+     tuple val(meta), path('*.json')           , emit: json
+@@ -35,7 +32,7 @@
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     def adapter_list = adapter_fasta ? "--adapter_fasta ${adapter_fasta}" : ""
+     def fail_fastq = save_trimmed_fail && meta.single_end ? "--failed_out ${prefix}.fail.fastq.gz" : save_trimmed_fail && !meta.single_end ? "--failed_out ${prefix}.paired.fail.fastq.gz --unpaired1 ${prefix}_R1.fail.fastq.gz --unpaired2 ${prefix}_R2.fail.fastq.gz" : ''
+-    def out_fq1 = discard_trimmed_pass ?: ( meta.single_end ? "--out1 ${prefix}.fastp.fastq.gz" : "--out1 ${prefix}_R1.clean.fastq.gz" )
++    def out_fq1 = discard_trimmed_pass ?: ( meta.single_end ? "--out1 ${prefix}.clean.fastq.gz" : "--out1 ${prefix}_R1.clean.fastq.gz" )
+     def out_fq2 = discard_trimmed_pass ?: "--out2 ${prefix}_R2.clean.fastq.gz"
+     // fastp (1.3.6) --thread excludes its reader threads (and gzip if interleaved); keep >= 2 so workers do the gz compression
+     def is_interleaved = task.ext.args?.contains('--interleaved_in')
+@@ -56,7 +53,7 @@
+             $fail_fastq \\
+             $args \\
+             2>| >(tee ${prefix}.fastp.log >&2) \\
+-        | gzip -c > ${prefix}.fastp.fastq.gz
++        | gzip -c > ${prefix}.clean.fastq.gz
+         """
+     } else if (meta.single_end) {
+         """
+@@ -98,7 +95,7 @@
+     stub:
+     def prefix              = task.ext.prefix ?: "${meta.id}"
+     def is_single_output    = task.ext.args?.contains('--interleaved_in') || meta.single_end
+-    def touch_reads         = (discard_trimmed_pass) ? "" : (is_single_output) ? "echo '' | gzip > ${prefix}.fastp.fastq.gz" : "echo '' | gzip > ${prefix}_R1.clean.fastq.gz ; echo '' | gzip > ${prefix}_R2.clean.fastq.gz"
++    def touch_reads         = (discard_trimmed_pass) ? "" : (is_single_output) ? "echo '' | gzip > ${prefix}.clean.fastq.gz" : "echo '' | gzip > ${prefix}_R1.clean.fastq.gz ; echo '' | gzip > ${prefix}_R2.clean.fastq.gz"
+     def touch_merged        = (!is_single_output && save_merged) ? "echo '' | gzip >  ${prefix}.merged.fastq.gz" : ""
+     def touch_fail_fastq    = (!save_trimmed_fail) ? "" : meta.single_end ? "echo '' | gzip > ${prefix}.fail.fastq.gz" : "echo '' | gzip > ${prefix}.paired.fail.fastq.gz ; echo '' | gzip > ${prefix}_R1.fail.fastq.gz ; echo '' | gzip > ${prefix}_R2.fail.fastq.gz"
+     """
+--- a/modules/nf-core/integronfinder/main.nf
++++ b/modules/nf-core/integronfinder/main.nf
+@@ -43,7 +43,7 @@
+     stub:
+     def args = task.ext.args ?: ''
+     def prefix = task.ext.prefix ?: "${meta.id}"
+-    def gbk_create = args.contains("--gbk") ? "Results_Integron_Finder_${prefix}/${prefix}.gbk" : ""
++    def gbk_create = args.contains("--gbk") ? "touch Results_Integron_Finder_${prefix}/${prefix}.gbk" : ""
+ 
+     """
+     mkdir -p Results_Integron_Finder_${prefix}
+--- /dev/null
++++ b/tests/nextflow/qc_output_contract.nf
+@@ -0,0 +1,24 @@
++nextflow.enable.dsl=2
++include { FASTP } from '../../modules/nf-core/fastp'
++include { INTEGRONFINDER } from '../../modules/nf-core/integronfinder'
++
++workflow {
++    if (params.contract_tool == 'fastp') {
++        FASTP(Channel.of(tuple([id:'sample', single_end:params.input_mode != 'pe'],
++            params.reads.collect { file(it, checkIfExists:true) }, [])), false, false, false)
++        FASTP.out.reads.toList().map { rows ->
++            groovy.json.JsonOutput.toJson(rows.collect { meta, reads ->
++                [id:meta.id, files:(reads instanceof List ? reads : [reads]).collect { it.toString() }]
++            })
++        }.collectFile(name:'reads-channel.json', storeDir:params.observe_dir)
++    } else if (params.contract_tool == 'integronfinder') {
++        INTEGRONFINDER(Channel.of(tuple([id:'sample'], file(params.fasta, checkIfExists:true))))
++        INTEGRONFINDER.out.gbk.toList().map { rows ->
++            groovy.json.JsonOutput.toJson(rows.collect { meta, files ->
++                [id:meta.id, files:(files instanceof List ? files : [files]).collect { it.toString() }]
++            })
++        }.collectFile(name:'gbk-channel.json', storeDir:params.observe_dir)
++    } else {
++        error "Unknown contract_tool: ${params.contract_tool}"
++    }
++}
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -113,9 +113,20 @@
+ export ENA_TEST_DATA="$PWD/results/nf-test/ena-multi"
+ ```
+ 
+-需要数据库的节点（platon 等）：`tests/nf-test/download_databases.sh` 下载官方固定版本
+-数据库到 `results/nf-test/databases/` 并在 `manifest.txt` 记录 size+sha256；
+-运行时导出 `AUTOPLASM_DB="$PWD/results/nf-test/databases"`。
++需要数据库的节点（platon 等）：`tests/nf-test/download_databases.sh` 下载资产到
++`results/nf-test/databases/`，全部成功才返回 0；某项失败时继续处理其余项，最后返回非零。
++下载先写临时文件，确认非空、归档可读取且已知 SHA256 匹配后发布。
++`manifest.txt` 记录 size+sha256，并在重用或重新下载时校验；首次下载产生的本地摘要只是重放锁，不能代替独立上游校验和。
++现存文件没有记录时拒绝直接采用，避免把旧的中断下载记成完整数据库；不会删除损坏的现存文件。
++运行时导出 `AUTOPLASM_DB="$PWD/results/nf-test/databases"`。各节点仍需按自己的数据锁核对版本与摘要。
++
++可用 `--outdir DIR --asset-list FILE` 指定资产清单。清单是 TSV，每行两列 `name URL`，
++或三列 `name URL independent_sha256`；第三列必须是 64 位小写十六进制。
++默认清单仍是原来的十项资产，脚本不自动运行任何分析。
++
++下载逻辑回归：`python3 -m unittest discover -s tests -p test_database_downloads.py -v`。
++测试使用真实 curl、归档程序与临时本机 HTTP 服务，覆盖截断、空响应、HTTP 失败、损坏文件和重放；
++默认十项资产和清单写入故障使用明确的失败模拟，不下载生产数据库。
+ 
+ P3 单节点套件按域拆分（一个文件一个 suite 块；nf-test 不读取同文件后续块）：
+ 
+--- a/tests/nf-test/download_databases.sh
++++ b/tests/nf-test/download_databases.sh
+@@ -1,54 +1,139 @@
+ #!/usr/bin/env bash
+ # Download small/medium databases and tool assets for W3 real-node tests.
+-# Every artifact gets size + sha256 recorded in manifest.txt (for lock entries).
+-# Artifacts live in results/nf-test/databases/ (home disk, survives reboot).
+-set -u
++# Downloads are published only after transfer, digest and archive checks succeed.
++# A recorded digest is a local replay lock, not an independent upstream checksum.
++set -uo pipefail
+ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ OUT="$ROOT/results/nf-test/databases"
+-mkdir -p "$OUT"
+-cd "$OUT"
+-touch manifest.txt
++ASSETS=""
++while (($#)); do
++    case "$1" in
++        --outdir|--asset-list)
++            (($# >= 2)) || { echo "Missing value for $1" >&2; exit 2; }
++            if [[ "$1" == --outdir ]]; then OUT="$2"; else ASSETS="$2"; fi
++            shift 2 ;;
++        *) echo "Unknown argument: $1" >&2; exit 2 ;;
++    esac
++done
++mkdir -p "$OUT" || exit 1
++MANIFEST="$OUT/manifest.txt"
++[[ ! -L "$MANIFEST" && ( ! -e "$MANIFEST" || -f "$MANIFEST" ) ]] || {
++    echo "Invalid manifest path: $MANIFEST" >&2; exit 1;
++}
++touch "$MANIFEST" || exit 1
++PART=""
++trap '[[ -z "$PART" ]] || rm -f -- "$PART"' EXIT
+ 
+-fetch() { # fetch <name> <url>
+-    local name="$1" url="$2"
++log() { printf '%s\n' "$*" | tee -a "$MANIFEST"; }
++
++check_archive() {
++    case "$1" in
++        *.tar.gz|*.tar.xz|*.tar.bz2|*.tgz|*.tar) tar -tf "$2" >/dev/null ;;
++        *.zip) unzip -tq "$2" >/dev/null ;;
++        *) return 0 ;;
++    esac
++}
++
++fetch() { # fetch <name> <url> <optional independent sha256>
++    local name="$1" url="$2" expected="$3" recorded="" value actual size
+     local file="$OUT/$name"
+-    if [ -s "$file" ]; then
+-        # Re-verify existing artifacts against the recorded sha256.
+-        local recorded
+-        recorded=$(grep -m1 "^ARTIFACT $name " manifest.txt | sed 's/.*sha256=\([0-9a-f]*\).*/\1/')
+-        if [ -n "$recorded" ]; then
+-            local actual
+-            actual=$(sha256sum "$file" | cut -d' ' -f1)
+-            if [ "$actual" != "$recorded" ]; then
+-                echo "CORRUPT $name (recorded $recorded != actual $actual)" | tee -a manifest.txt
+-                return 1
+-            fi
+-            echo "== $name present, sha256 verified" | tee -a manifest.txt
+-            return 0
+-        fi
+-        echo "== $name already present (no manifest entry to verify)" | tee -a manifest.txt
++    # Compare the name literally: dots in asset names are not regex wildcards.
++    value=$(awk -v name="$name" '$1 == "ARTIFACT" && $2 == name {
++        hash=""; for (i=3; i<=NF; i++) if ($i ~ /^sha256=/) hash=substr($i,8);
++        print hash == "" ? "INVALID" : hash
++    }' "$MANIFEST") || return 1
++    while IFS= read -r actual; do
++        [[ -n "$actual" ]] || continue
++        [[ "$actual" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid manifest digest for $name" >&2; return 1; }
++        [[ -z "$recorded" || "$recorded" == "$actual" ]] || {
++            echo "Conflicting manifest digests for $name" >&2; return 1;
++        }
++        recorded="$actual"
++    done <<< "$value"
++    [[ -z "$expected" || -z "$recorded" || "$expected" == "$recorded" ]] || {
++        echo "Expected/recorded digest conflict for $name" >&2; return 1;
++    }
++    expected="${expected:-$recorded}"
++    [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || {
++        echo "Invalid artifact path: $name" >&2; return 1;
++    }
++    if [[ -e "$file" ]]; then
++        [[ -s "$file" && -n "$expected" ]] || {
++            echo "Unverified existing artifact: $name; supply an independent digest or remove it explicitly" >&2; return 1;
++        }
++        actual=$(sha256sum "$file" | cut -d' ' -f1) || return 1
++        [[ "$actual" == "$expected" ]] || { echo "CORRUPT $name" >&2; return 1; }
++        check_archive "$name" "$file" || return 1
++        if [[ -n "$recorded" ]]; then log "== $name present, sha256 verified"; return $?; fi
+     else
+-        echo "== downloading $name" | tee -a manifest.txt
+-        if ! curl -fL --retry 3 --connect-timeout 30 -o "$file" "$url"; then
+-            echo "FAILED $name $url" | tee -a manifest.txt
+-            rm -f "$file"
++        log "== downloading $name" || return 1
++        PART=$(mktemp "$OUT/.${name}.XXXXXX.part") || return 1
++        if ! curl -fL --retry 3 --connect-timeout 30 -o "$PART" -- "$url"; then
++            rm -f -- "$PART"; PART=""
+             return 1
+         fi
++        [[ -s "$PART" ]] || { rm -f -- "$PART"; PART=""; echo "Empty download: $name" >&2; return 1; }
++        actual=$(sha256sum "$PART" | cut -d' ' -f1) || return 1
++        if [[ -n "$expected" && "$actual" != "$expected" ]] || ! check_archive "$name" "$PART"; then
++            rm -f -- "$PART"; PART=""
++            echo "Digest/archive validation failed: $name" >&2; return 1
++        fi
++        mv -- "$PART" "$file" || return 1
++        PART=""
+     fi
+-    local size sha
+-    size=$(stat -c %s "$file")
+-    sha=$(sha256sum "$file" | cut -d' ' -f1)
+-    echo "ARTIFACT $name size=$size sha256=$sha url=$url" | tee -a manifest.txt
++    size=$(stat -c %s "$file") || return 1
++    log "ARTIFACT $name size=$size sha256=$actual url=$url"
+ }
+ 
+-fetch conjscan-2.1.0.tar.gz   https://github.com/macsy-models/CONJScan/archive/refs/tags/2.1.0.tar.gz
+-fetch txsscan-1.1.4.tar.gz    https://github.com/macsy-models/TXSScan/archive/refs/tags/1.1.4.tar.gz
+-fetch plasmidhostfinder-repo.tar.gz https://bitbucket.org/deaytan/plasmid-host-prediction/get/bb9316d1.tar.gz
+-fetch plasmidfinder-db-3.0.3.tar.gz https://bitbucket.org/genomicepidemiology/plasmidfinder_db/get/plasmidfinder-3.0.3.tar.gz
+-fetch 'dna_r10.4.1_e8.2_400bps_fast@v4.3.0.zip' 'https://cdn.oxfordnanoportal.com/software/analysis/dorado/dna_r10.4.1_e8.2_400bps_fast@v4.3.0.zip'
+-fetch mobsuite-data.tar.gz    https://zenodo.org/records/10304948/files/data.tar.gz
+-fetch platon-db.tar.gz        https://zenodo.org/records/4066768/files/db.tar.gz
+-fetch bakta-db-light.tar.xz   https://zenodo.org/record/14916843/files/db-light.tar.xz
+-fetch checkm2-database.tar.gz https://zenodo.org/record/14897628/files/checkm2_database.tar.gz
+-fetch dorado-2.1.2-linux-x64.tar.gz https://cdn.oxfordnanoportal.com/software/analysis/dorado-2.1.2-linux-x64.tar.gz
+-echo "ALL DONE" | tee -a manifest.txt
++default_assets() {
++    # name, URL, optional independently verified SHA256 (TSV).
++    cat <<'ASSET_LIST'
++conjscan-2.1.0.tar.gz	https://github.com/macsy-models/CONJScan/archive/refs/tags/2.1.0.tar.gz
++txsscan-1.1.4.tar.gz	https://github.com/macsy-models/TXSScan/archive/refs/tags/1.1.4.tar.gz
++plasmidhostfinder-repo.tar.gz	https://bitbucket.org/deaytan/plasmid-host-prediction/get/bb9316d1.tar.gz
++plasmidfinder-db-3.0.3.tar.gz	https://bitbucket.org/genomicepidemiology/plasmidfinder_db/get/plasmidfinder-3.0.3.tar.gz
++dna_r10.4.1_e8.2_400bps_fast@v4.3.0.zip	https://cdn.oxfordnanoportal.com/software/analysis/dorado/dna_r10.4.1_e8.2_400bps_fast@v4.3.0.zip
++mobsuite-data.tar.gz	https://zenodo.org/records/10304948/files/data.tar.gz
++platon-db.tar.gz	https://zenodo.org/records/4066768/files/db.tar.gz
++bakta-db-light.tar.xz	https://zenodo.org/record/14916843/files/db-light.tar.xz
++checkm2-database.tar.gz	https://zenodo.org/record/14897628/files/checkm2_database.tar.gz
++dorado-2.1.2-linux-x64.tar.gz	https://cdn.oxfordnanoportal.com/software/analysis/dorado-2.1.2-linux-x64.tar.gz
++ASSET_LIST
++}
++
++names=(); urls=(); hashes=()
++if [[ -n "$ASSETS" ]]; then
++    exec 3< "$ASSETS" || exit 2
++else
++    exec 3< <(default_assets)
++fi
++# Validate the complete list before any network activity.
++while IFS= read -r line <&3 || [[ -n "$line" ]]; do
++    [[ -n "$line" && "$line" != \#* ]] || continue
++    [[ "$line" == *$'\t'* ]] || { echo "Asset list requires TSV columns" >&2; exit 2; }
++    name="${line%%$'\t'*}"; rest="${line#*$'\t'}"; hash=""
++    if [[ "$rest" == *$'\t'* ]]; then url="${rest%%$'\t'*}"; hash="${rest#*$'\t'}"; else url="$rest"; fi
++    [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._@+-]*$ && "$name" != manifest.txt &&
++       "$url" =~ ^(https?|file)://[^[:space:]]+$ &&
++       ( -z "$hash" || "$hash" =~ ^[0-9a-f]{64}$ ) ]] || {
++        echo "Invalid asset list entry: $name" >&2; exit 2;
++    }
++    for previous in "${names[@]}"; do
++        [[ "$name" != "$previous" ]] || { echo "Duplicate asset: $name" >&2; exit 2; }
++    done
++    names+=("$name"); urls+=("$url"); hashes+=("$hash")
++done
++exec 3<&-
++((${#names[@]})) || { echo "Empty asset list" >&2; exit 2; }
++failed=0
++for i in "${!names[@]}"; do
++    if ! fetch "${names[i]}" "${urls[i]}" "${hashes[i]}"; then
++        log "FAILED ${names[i]} ${urls[i]}" || true
++        ((failed+=1))
++    fi
++done
++if ((failed)); then
++    log "FAILED $failed of ${#names[@]} artifacts" || true
++    exit 1
++fi
++log "ALL DONE" || exit 1
+--- /dev/null
++++ b/tests/run_qc_output_contract.py
+@@ -0,0 +1,147 @@
++#!/usr/bin/env python3
++"""Original modules: real fastp1.3.6 outputs plus explicit IntegronFinder stubs."""
++import argparse
++import csv
++import gzip
++import hashlib
++import json
++import os
++from pathlib import Path
++import random
++import shlex
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def read_fastq(path):
++    with gzip.open(path, 'rt') as stream:
++        lines = stream.read().splitlines()
++    assert len(lines) % 4 == 0, path
++    assert all(lines[i].startswith('@') and lines[i+2] == '+' and
++               len(lines[i+1]) == len(lines[i+3]) for i in range(0, len(lines), 4)), path
++    return [(lines[i][1:], lines[i+1], lines[i+3]) for i in range(0, len(lines), 4)]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', type=Path, required=True)
++    parser.add_argument('--before-dir', type=Path, required=True)
++    parser.add_argument('--fastp-prefix', type=Path, required=True)
++    parser.add_argument('--phase', choices=['before', 'current'], required=True)
++    args = parser.parse_args()
++    base, before, prefix = args.work_dir.resolve(), args.before_dir.resolve(), args.fastp_prefix.resolve()
++    base.mkdir(parents=True, exist_ok=False)
++    version = subprocess.run([str(prefix/'bin/fastp'), '--version'], text=True, capture_output=True, check=True)
++    assert (version.stdout+version.stderr).strip() == 'fastp 1.3.6'
++    fixture = base / 'fixture'
++    fixture.mkdir()
++    rng = random.Random(201034)
++    expected = {mate:[(f'read{i}/{mate}', ''.join(rng.choices('ACGT', k=100)), 'I'*100)
++                     for i in range(12)] for mate in [1,2]}
++    for name, records in [('r1',expected[1]), ('r2',expected[2]),
++                          ('il',[record for pair in zip(expected[1],expected[2]) for record in pair])]:
++        with gzip.open(fixture/f'{name}.fastq.gz', 'wt') as stream:
++            for rid, dna, qual in records:
++                stream.write(f'@{rid}\n{dna}\n+\n{qual}\n')
++    fasta = fixture / 'sample.fna'
++    fasta.write_text('>sample\nACGTACGT\n')
++    shim = base / 'stub-version-observer'
++    shim.mkdir()
++    # No native IntegronFinder analysis is claimed. Only its stub body is tested.
++    observer = shim / 'integron_finder'
++    observer.write_text('#!/usr/bin/env bash\n[[ "$1" == --version ]] || exit 90\necho "integron_finder version 2.0.5"\n')
++    observer.chmod(0o755)
++    sources = ['modules/nf-core/fastp/main.nf','modules/nf-core/integronfinder/main.nf',
++               'tests/nextflow/qc_output_contract.nf','tests/run_qc_output_contract.py']
++    hashes = {name:sha(ROOT/name) for name in sources}
++    before_hashes = {name:sha(before/name) for name in ['fastp.nf','integronfinder.nf']}
++    runs = []
++    cases = [('fastp',mode,stub,False) for stub in [False,True] for mode in ['se','pe','il']]
++    cases += [('integronfinder','fasta',True,gbk) for gbk in [False,True]]
++    for tool, mode, stub, gbk in cases:
++        name = f'{tool}-{mode}-' + ('stub' if stub else 'native') + ('-gbk' if gbk else '')
++        d = base/name
++        d.mkdir()
++        reads = [str(fixture/'r1.fastq.gz'),str(fixture/'r2.fastq.gz')] if mode == 'pe' else [str(fixture/('il.fastq.gz' if mode == 'il' else 'r1.fastq.gz'))]
++        params = {'contract_tool':tool, 'input_mode':mode, 'reads':reads, 'fasta':str(fasta),
++                  'observe_dir':str(d/'observed')}
++        pf = d/'params.json'
++        pf.write_text(json.dumps(params))
++        fastp_args = '--disable_adapter_trimming --disable_trim_poly_g --disable_quality_filtering --disable_length_filtering'
++        if mode == 'il':
++            fastp_args += ' --interleaved_in'
++        setup = 'export PATH='+shlex.quote(str(prefix/'bin'))+':'+shlex.quote(str(shim))+':"$PATH"'
++        literal = "'" + setup.replace('\\', '\\\\').replace("'", "\\'") + "'"
++        config = d/'native.config'
++        config.write_text("process.executor='local'\nprocess.cpus=4\nprocess.memory='1 GB'\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n"
++                          "trace.fields='task_id,hash,name,status,exit,workdir'\nprocess.beforeScript="+literal+"\n"
++                          "process { withName: FASTP { ext.args="+repr(fastp_args)+" }\n"
++                          "withName: INTEGRONFINDER { ext.args="+repr('--gbk' if gbk else '')+" } }\n")
++        harness = ROOT/'tests/nextflow/qc_output_contract.nf'
++        if args.phase == 'before':
++            old = d/'old.nf'
++            text = harness.read_text().replace("'../../modules/nf-core/fastp'", repr(str(before/'fastp.nf')))
++            text = text.replace("'../../modules/nf-core/integronfinder'", repr(str(before/'integronfinder.nf')))
++            old.write_text(text)
++            harness = old
++        cmd = [shutil.which('nextflow') or 'nextflow','-C',str(config),'run',str(harness),'-params-file',str(pf),
++               '-work-dir',str(d/'work'),'-with-trace',str(d/'trace.tsv'),'-ansi-log','false']
++        if stub:
++            cmd += ['-stub-run']
++        result = subprocess.run(cmd, cwd=d, capture_output=True, text=True)
++        (d/'console.log').write_text(result.stdout+result.stderr)
++        assert (d/'trace.tsv').exists(), result.stdout+result.stderr
++        with (d/'trace.tsv').open() as stream:
++            tasks = list(csv.DictReader(stream, delimiter='\t'))
++        assert len(tasks) == 1, tasks
++        work = Path(tasks[0]['workdir'])
++        failure = args.phase == 'before' and tool == 'integronfinder' and gbk
++        assert (result.returncode != 0) == failure, result.stdout+result.stderr
++        channel_file = d/'observed'/('reads-channel.json' if tool == 'fastp' else 'gbk-channel.json')
++        emitted = json.loads(channel_file.read_text()) if channel_file.exists() else []
++        if failure:
++            assert tasks[0]['status'] == 'FAILED' and 'command not found' not in (work/'.command.err').read_text()
++            assert 'No such file or directory' in (work/'.command.err').read_text()
++        else:
++            assert tasks[0]['status'] == 'COMPLETED'
++            if tool == 'fastp':
++                missing = args.phase == 'before' and mode in ['se','il']
++                assert bool(emitted) != missing, emitted
++                names = ['sample_R1.clean.fastq.gz','sample_R2.clean.fastq.gz'] if mode == 'pe' else ['sample.clean.fastq.gz']
++                if not missing:
++                    assert len(emitted) == 1 and emitted[0]['id'] == 'sample'
++                    assert sorted(Path(p).name for p in emitted[0]['files']) == names
++                if not stub:
++                    actual_names = names if not missing else ['sample.fastp.fastq.gz']
++                    actual = [record for name in actual_names for record in read_fastq(work/name)]
++                    wanted = expected[1] + expected[2] if mode == 'pe' else ([r for pair in zip(expected[1],expected[2]) for r in pair] if mode == 'il' else expected[1])
++                    assert actual == wanted, (name, actual[:2], wanted[:2])
++                    report = json.loads((work/'sample.fastp.json').read_text())
++                    assert report['summary']['before_filtering']['total_reads'] == len(wanted)
++                    assert report['summary']['after_filtering']['total_reads'] == len(wanted)
++                    for ext in ['html','log']:
++                        assert (work/f'sample.fastp.{ext}').stat().st_size > 0
++            else:
++                assert bool(emitted) == gbk, emitted
++                if gbk:
++                    assert emitted[0]['id'] == 'sample' and Path(emitted[0]['files'][0]).name == 'sample.gbk'
++        assert hashes == {name:sha(ROOT/name) for name in sources}
++        assert before_hashes == {name:sha(before/name) for name in before_hashes}
++        runs.append({'case':name,'command':cmd,'exit':result.returncode,'tasks':tasks,'emitted':emitted,
++                     'expected_old_failure':failure})
++        (base/'run.json').write_text(json.dumps({'pass':len(runs)==len(cases),'runs':runs,'source_sha256':hashes,
++            'before_sha256':before_hashes,'fastp_version':'1.3.6','phase':args.phase,
++            'limitations':['fastp real native controlled DNA/quality, not biological QC performance or container certification',
++                           'IntegronFinder stub only; version command is explicit observer; no native annotation',
++                           'Module contract only; no single-end or interleaved full pipeline support implied']},indent=2)+'\n')
++        print('PASS',name,flush=True)
++
++
++if __name__ == '__main__':
++    main()
+--- /dev/null
++++ b/tests/test_database_downloads.py
+@@ -0,0 +1,271 @@
++#!/usr/bin/env python3
++"""Exercise the complete asset downloader with real curl and local HTTP/files."""
++import functools
++import hashlib
++import http.server
++import io
++import os
++from pathlib import Path
++import subprocess
++import tarfile
++import tempfile
++import threading
++import unittest
++import zipfile
++
++SCRIPT = Path(__file__).resolve().parent / 'nf-test/download_databases.sh'
++
++
++def digest(data):
++    return hashlib.sha256(data).hexdigest()
++
++
++class Handler(http.server.SimpleHTTPRequestHandler):
++    requests = []
++
++    def log_message(self, *args):
++        pass
++
++    def do_GET(self):
++        self.requests.append(self.path)
++        if self.path == '/truncated':
++            self.send_response(200)
++            self.send_header('Content-Length', '1000')
++            self.end_headers()
++            self.wfile.write(b'incomplete')
++            self.close_connection = True
++        else:
++            super().do_GET()
++
++
++class Downloads(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.served = tempfile.TemporaryDirectory()
++        cls.web = Path(cls.served.name)
++        (cls.web / 'good.dat').write_bytes(b'complete reference\n')
++        (cls.web / 'empty.dat').touch()
++        (cls.web / 'bad.tar.gz').write_bytes(b'<html>not an archive</html>')
++        with tarfile.open(cls.web / 'good.tar.gz', 'w:gz') as archive:
++            data = b'fixture database\n'
++            info = tarfile.TarInfo('database.txt')
++            info.size = len(data)
++            archive.addfile(info, io.BytesIO(data))
++        with zipfile.ZipFile(cls.web / 'good.zip', 'w') as archive:
++            archive.writestr('database.txt', 'fixture database\n')
++        cls.server = http.server.ThreadingHTTPServer(
++            ('127.0.0.1', 0), functools.partial(Handler, directory=cls.web))
++        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
++        cls.thread.start()
++        cls.base = f'http://127.0.0.1:{cls.server.server_port}'
++
++    @classmethod
++    def tearDownClass(cls):
++        cls.server.shutdown()
++        cls.server.server_close()
++        cls.thread.join()
++        cls.served.cleanup()
++
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        self.root = Path(self.temp.name)
++        self.out = self.root / 'assets with spaces'
++        self.out.mkdir()
++        self.assets = self.root / 'assets.tsv'
++        Handler.requests.clear()
++
++    def run_list(self, rows, *extra):
++        self.assets.write_text(''.join('\t'.join(row) + '\n' for row in rows))
++        return subprocess.run(
++            ['bash', str(SCRIPT), '--outdir', str(self.out), '--asset-list', str(self.assets), *extra],
++            capture_output=True, text=True, timeout=30,
++            env={**os.environ, 'NO_PROXY': '127.0.0.1', 'no_proxy': '127.0.0.1'})
++
++    def row(self, name='good.dat', path=None, sha=None):
++        return (name, self.base + '/' + (path or name), *(() if sha is None else (sha,)))
++
++    def lock(self, name, sha):
++        with (self.out / 'manifest.txt').open('a') as stream:
++            stream.write(f'ARTIFACT {name} size=1 sha256={sha} url={self.base}/{name}\n')
++
++    def assert_failure(self, result):
++        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertNotIn('ALL DONE', result.stdout)
++        self.assertFalse(list(self.out.glob('.*.part')))
++
++    def test_success_and_verified_replay_without_transfer(self):
++        rows = [self.row(), self.row('good.tar.gz'), self.row('good.zip')]
++        first = self.run_list(rows)
++        self.assertEqual(first.returncode, 0, first.stderr)
++        self.assertEqual(len(Handler.requests), 3)
++        for name in ['good.dat', 'good.tar.gz', 'good.zip']:
++            self.assertEqual((self.out / name).read_bytes(), (self.web / name).read_bytes())
++        self.assertIn('ALL DONE', first.stdout)
++        Handler.requests.clear()
++        second = self.run_list(rows)
++        self.assertEqual(second.returncode, 0, second.stderr)
++        self.assertEqual(Handler.requests, [])
++        self.assertEqual((self.out / 'manifest.txt').read_text().count('ARTIFACT '), 3)
++
++    def test_mixed_failure_continues_and_never_reports_success(self):
++        result = self.run_list([self.row('missing.dat'), self.row()])
++        self.assert_failure(result)
++        self.assertIn('FAILED 1 of 2 artifacts', result.stdout)
++        self.assertFalse((self.out / 'missing.dat').exists())
++        self.assertEqual((self.out / 'good.dat').read_bytes(), (self.web / 'good.dat').read_bytes())
++        self.assertEqual(Handler.requests, ['/missing.dat', '/good.dat'])
++
++    def test_recorded_corruption_is_preserved_and_fails(self):
++        (self.out / 'good.dat').write_bytes(b'corrupted')
++        self.lock('good.dat', digest((self.web / 'good.dat').read_bytes()))
++        result = self.run_list([self.row()])
++        self.assert_failure(result)
++        self.assertIn('CORRUPT', result.stderr)
++        self.assertEqual((self.out / 'good.dat').read_bytes(), b'corrupted')
++        self.assertEqual(Handler.requests, [])
++
++    def test_unrecorded_partial_is_not_blessed(self):
++        (self.out / 'good.dat').write_bytes(b'partial')
++        result = self.run_list([self.row()])
++        self.assert_failure(result)
++        self.assertNotIn('ARTIFACT ', (self.out / 'manifest.txt').read_text())
++        self.assertEqual((self.out / 'good.dat').read_bytes(), b'partial')
++
++    def test_independent_digest_can_adopt_existing_file(self):
++        data = (self.web / 'good.dat').read_bytes()
++        (self.out / 'good.dat').write_bytes(data)
++        result = self.run_list([self.row(sha=digest(data))])
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertIn(f'sha256={digest(data)}', (self.out / 'manifest.txt').read_text())
++        self.assertEqual(Handler.requests, [])
++
++    def test_empty_existing_file_is_not_blessed(self):
++        (self.out / 'good.dat').touch()
++        self.lock('good.dat', digest(b''))
++        self.assert_failure(self.run_list([self.row()]))
++
++    def test_truncated_response_does_not_publish(self):
++        self.assert_failure(self.run_list([self.row('good.dat', 'truncated')]))
++        self.assertFalse((self.out / 'good.dat').exists())
++
++    def test_empty_http_success_does_not_publish(self):
++        self.assert_failure(self.run_list([self.row('good.dat', 'empty.dat')]))
++        self.assertFalse((self.out / 'good.dat').exists())
++
++    def test_wrong_digest_does_not_publish(self):
++        self.assert_failure(self.run_list([self.row(sha='0' * 64)]))
++        self.assertFalse((self.out / 'good.dat').exists())
++
++    def test_invalid_archive_is_rejected_even_with_matching_digest(self):
++        data = (self.web / 'bad.tar.gz').read_bytes()
++        self.assert_failure(self.run_list([self.row('bad.tar.gz', sha=digest(data))]))
++        self.assertFalse((self.out / 'bad.tar.gz').exists())
++
++    def test_stale_partial_does_not_replace_download(self):
++        stale = self.out / '.good.dat.old.part'
++        stale.write_bytes(b'old interrupted bytes')
++        result = self.run_list([self.row()])
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual(stale.read_bytes(), b'old interrupted bytes')
++        self.assertEqual((self.out / 'good.dat').read_bytes(), (self.web / 'good.dat').read_bytes())
++
++    def test_missing_locked_file_cannot_be_relocked_to_new_bytes(self):
++        self.lock('good.dat', digest(b'older upstream bytes'))
++        self.assert_failure(self.run_list([self.row()]))
++        self.assertFalse((self.out / 'good.dat').exists())
++        self.assertEqual((self.out / 'manifest.txt').read_text().count('ARTIFACT '), 1)
++
++    def test_manifest_names_are_literal(self):
++        (self.out / 'good.dat').write_bytes(b'partial')
++        self.lock('goodXdat', digest(b'partial'))
++        self.assert_failure(self.run_list([self.row()]))
++        self.assertEqual(Handler.requests, [])
++
++    def test_conflicting_or_invalid_locks_fail_without_transfer(self):
++        for values in [('0' * 64, '1' * 64), ('INVALID',), ('0' * 64,)]:
++            with self.subTest(values=values):
++                (self.out / 'manifest.txt').write_text('')
++                for value in values:
++                    self.lock('good.dat', value)
++                expected = '2' * 64 if len(values) == 1 and values[0] != 'INVALID' else None
++                self.assert_failure(self.run_list([self.row(sha=expected)]))
++                self.assertEqual(Handler.requests, [])
++
++    def test_invalid_lists_are_rejected_before_any_transfer(self):
++        for bad in [('../escape', self.base + '/good.dat'), ('manifest.txt', self.base + '/good.dat'),
++                    ('bad name', self.base + '/good.dat'), ('x', 'https://bad url'),
++                    ('x', self.base + '/good.dat', 'x'), ('x', self.base + '/good.dat', '', 'extra')]:
++            with self.subTest(bad=bad):
++                self.assert_failure(self.run_list([self.row(), bad]))
++                self.assertEqual(Handler.requests, [])
++        self.assert_failure(self.run_list([self.row(), self.row()]))
++        self.assert_failure(self.run_list([]))
++        self.assert_failure(self.run_list([('not TSV',)]))
++
++    def test_symlink_asset_and_manifest_are_not_followed(self):
++        target = self.root / 'target'
++        target.write_bytes(b'keep me')
++        artifact = self.out / 'good.dat'
++        artifact.symlink_to(target)
++        self.assert_failure(self.run_list([self.row(sha=digest(b'keep me'))]))
++        self.assertEqual(target.read_bytes(), b'keep me')
++        artifact.unlink()
++        (self.out / 'manifest.txt').unlink()
++        (self.out / 'manifest.txt').symlink_to(target)
++        self.assert_failure(self.run_list([self.row()]))
++        self.assertEqual(target.read_bytes(), b'keep me')
++
++    def test_file_transport_and_missing_file(self):
++        result = self.run_list([('file.dat', (self.web / 'good.dat').as_uri()),
++                                ('missing.dat', (self.web / 'missing.dat').as_uri())])
++        self.assert_failure(result)
++        self.assertEqual((self.out / 'file.dat').read_bytes(), (self.web / 'good.dat').read_bytes())
++
++    def test_invalid_manifest_destination_fails_before_transfer(self):
++        (self.out / 'manifest.txt').mkdir()
++        self.assert_failure(self.run_list([self.row()]))
++        self.assertEqual(Handler.requests, [])
++
++    def test_manifest_append_failure_is_not_reported_as_success(self):
++        # Only tee is an I/O failure observer; HTTP and curl remain real.
++        shim = self.root / 'shim'
++        shim.mkdir()
++        tee = shim / 'tee'
++        tee.write_text('#!/usr/bin/env bash\ntext=$(cat)\n'
++                       'if [[ "$text" == ARTIFACT* ]]; then exit 1; fi\n'
++                       'printf "%s\\n" "$text" | /usr/bin/tee "$@"\n')
++        tee.chmod(0o755)
++        previous = os.environ.get('PATH', '')
++        try:
++            os.environ['PATH'] = str(shim) + os.pathsep + previous
++            result = self.run_list([self.row()])
++        finally:
++            os.environ['PATH'] = previous
++        self.assert_failure(result)
++        self.assertTrue((self.out / 'good.dat').is_file())
++        self.assertNotIn('ARTIFACT ', (self.out / 'manifest.txt').read_text())
++        # Fully transferred but unrecorded bytes remain untrusted on replay.
++        self.assert_failure(self.run_list([self.row()]))
++
++    def test_default_list_attempts_all_ten_assets_and_aggregates_failures(self):
++        # Explicit transport observer: avoid downloading the multi-GB default DBs.
++        shim = self.root / 'shim'
++        shim.mkdir()
++        curl = shim / 'curl'
++        calls = self.root / 'calls.txt'
++        curl.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "${@: -1}" >> "$CALLS"\nexit 22\n')
++        curl.chmod(0o755)
++        result = subprocess.run(['bash', str(SCRIPT), '--outdir', str(self.out)],
++                                capture_output=True, text=True, timeout=10,
++                                env={**os.environ, 'PATH': str(shim) + os.pathsep + os.environ['PATH'],
++                                     'CALLS': str(calls)})
++        self.assert_failure(result)
++        urls = calls.read_text().splitlines()
++        self.assertEqual(len(urls), 10)
++        self.assertEqual(len(set(urls)), 10)
++        self.assertIn('FAILED 10 of 10 artifacts', result.stdout)
++
++
++if __name__ == '__main__':
++    unittest.main()

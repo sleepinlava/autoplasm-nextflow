@@ -1,0 +1,334 @@
+{
+  "scope": "lexical route token coverage only; not execution/capability certificate",
+  "route_occurrences": [
+    {
+      "path": "subworkflows/comparative.nf",
+      "line": 25,
+      "parameter": "comparative_tools",
+      "tool": "mmseqs2",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/comparative.nf",
+      "line": 36,
+      "parameter": "comparative_optional_tools",
+      "tool": "blast",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/comparative.nf",
+      "line": 45,
+      "parameter": "comparative_optional_tools",
+      "tool": "mummer",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/comparative.nf",
+      "line": 48,
+      "parameter": "comparative_optional_tools",
+      "tool": "clinker",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/host_linking.nf",
+      "line": 29,
+      "parameter": "host_linking_optional_methods",
+      "tool": "crispr",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/host_linking.nf",
+      "line": 35,
+      "parameter": "host_linking_methods",
+      "tool": "co_abundance",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/host_linking.nf",
+      "line": 51,
+      "parameter": "host_linking_methods",
+      "tool": "sequence",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/host_linking.nf",
+      "line": 64,
+      "parameter": "host_linking_methods",
+      "tool": "long_read",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/host_linking.nf",
+      "line": 69,
+      "parameter": "host_linking_optional_methods",
+      "tool": "hotspot",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/host_prediction.nf",
+      "line": 41,
+      "parameter": "host_prediction_tools",
+      "tool": "metaphlan",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/host_prediction.nf",
+      "line": 50,
+      "parameter": "host_prediction_tools",
+      "tool": "kraken2",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/host_prediction.nf",
+      "line": 58,
+      "parameter": "host_prediction_tools",
+      "tool": "plasmidhostfinder",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/mag_host.nf",
+      "line": 44,
+      "parameter": "mag_tools",
+      "tool": "metabat2",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/mag_host.nf",
+      "line": 51,
+      "parameter": "mag_tools",
+      "tool": "concoct",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/mag_host.nf",
+      "line": 64,
+      "parameter": "mag_tools",
+      "tool": "semibin",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/mag_host.nf",
+      "line": 69,
+      "parameter": "mag_tools",
+      "tool": "das_tool",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/mag_host.nf",
+      "line": 79,
+      "parameter": "mag_tools",
+      "tool": "checkm2",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/mag_host.nf",
+      "line": 87,
+      "parameter": "mag_tools",
+      "tool": "gtdbtk",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/ont.nf",
+      "line": 85,
+      "parameter": "polishing_tools",
+      "tool": "medaka",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_detection.nf",
+      "line": 26,
+      "parameter": "plasmid_detection_tools",
+      "tool": "plasme",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_detection.nf",
+      "line": 31,
+      "parameter": "plasmid_detection_tools",
+      "tool": "plasx",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_detection.nf",
+      "line": 38,
+      "parameter": "plasmid_detection_tools",
+      "tool": "platon",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_detection.nf",
+      "line": 43,
+      "parameter": "plasmid_detection_tools",
+      "tool": "scapp",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 44,
+      "parameter": "typing_tools",
+      "tool": "plasmidfinder",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 48,
+      "parameter": "typing_tools",
+      "tool": "mob_typer",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 55,
+      "parameter": "typing_optional_tools",
+      "tool": "copla",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 60,
+      "parameter": "typing_optional_tools",
+      "tool": "conjscan",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 61,
+      "parameter": "typing_optional_tools",
+      "tool": "macsyfinder",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 75,
+      "parameter": "annotation_tools",
+      "tool": "bakta",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 83,
+      "parameter": "annotation_tools",
+      "tool": "amrfinderplus",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 86,
+      "parameter": "annotation_tools",
+      "tool": "abricate",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 90,
+      "parameter": "annotation_tools",
+      "tool": "isescan",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 93,
+      "parameter": "annotation_tools",
+      "tool": "integronfinder",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 96,
+      "parameter": "annotation_tools",
+      "tool": "prodigal",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 96,
+      "parameter": "annotation_optional_tools",
+      "tool": "prodigal",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 99,
+      "parameter": "annotation_optional_tools",
+      "tool": "mob_suite",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 103,
+      "parameter": "annotation_optional_tools",
+      "tool": "rgi",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 109,
+      "parameter": "annotation_optional_tools",
+      "tool": "eggnog_mapper",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 117,
+      "parameter": "plasmid_binning_tools",
+      "tool": "plasmaag",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 120,
+      "parameter": "plasmid_binning_tools",
+      "tool": "gplas2",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 123,
+      "parameter": "plasmid_binning_tools",
+      "tool": "mob_suite",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 123,
+      "parameter": "plasmid_binning_tools",
+      "tool": "mob_recon",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 127,
+      "parameter": "plasmid_binning_tools",
+      "tool": "scapp",
+      "present_in_proposal": true
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "line": 130,
+      "parameter": "plasmid_binning_tools",
+      "tool": "recycler",
+      "present_in_proposal": true
+    }
+  ],
+  "unique_route_pairs": 44,
+  "all_route_tokens_represented": true,
+  "registry_sources": "docs/tool-audit/tool-selection-registry.tsv",
+  "source_sha256": {
+    "subworkflows/cross_sample.nf": "4080a0825ef5c750e99d62aea24233fe3fac9d9a707cb674d2f11bf69b08c6d6",
+    "subworkflows/sample_id_validation.nf": "bed6a426346d6a66e3df819ba5eb6c6ac9f2a2430c3ae51f77a0c98cbef1dbed",
+    "subworkflows/assembly.nf": "77c584b0e0eadccd259131a5b0da3c963e4b85be0a5f892567e9e297b9ac35bf",
+    "subworkflows/comparative.nf": "8fa0c49a42f8cf568478cf6f2f20bf41a96c4940732ee9bcf50478905169eb07",
+    "subworkflows/contig_coverage.nf": "c031fec10e89d71bcbf7ed0dca37a71fa6afa96f1d0b3df405d8f38779928e1a",
+    "subworkflows/host_linking.nf": "745db9977e7db75acb3959a465fd0f8fa59ad63f0b23c5fcfcdae4e6147781c6",
+    "subworkflows/host_prediction.nf": "43e0702cc93b445f2b58b0021fc716229e8b1531b60c98ccf6fbf77dc2cb9965",
+    "subworkflows/hybrid.nf": "55e29aa61ec7d657b3b65f2c88e7581d4cb5457784913c2e0b636c8dc7f2a343",
+    "subworkflows/illumina.nf": "4c84712fc7198b4c1d1ff61a175db057c70fddeb09f5e1a02f9e75acb5d39999",
+    "subworkflows/mag_host.nf": "36af6725ebf31024a6b1060c9907b8a97c8efaa2623544aa738f914d590d8964",
+    "subworkflows/ont.nf": "f9a89f53ad1c4d1d352d1a10bca1ad2c595ad64f27259338b7d9b42e963b2c78",
+    "subworkflows/pacbio_hifi.nf": "864c653935f36dde0cdbb0defa4e632dc47ee423f135bda258f8df3b2c6eadbd",
+    "subworkflows/plasmid_abundance.nf": "d6f0a4846699158fc0ed084c5ea44554eae6ffc1c9fb15656adf9cbda461a62b",
+    "subworkflows/plasmid_detection.nf": "3b0b6357b7f3e7bd2dd97faf3422b569230d99ced6e383f8c279160eba0cc929",
+    "subworkflows/plasmid_downstream.nf": "6447c78158e34655b399ecaf3b8e1ca3a7459442026c203871681aa4d33b4d64",
+    "subworkflows/short_read_multiqc_inputs.nf": "fd01b160be021e3868cb40774676abbc8148b91bfd385d4573ed9f71a171c1d9"
+  }
+}

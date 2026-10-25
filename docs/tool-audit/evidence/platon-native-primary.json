@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-24",
+  "verified_findings": [
+    "TA-005",
+    "TA-082",
+    "TA-083",
+    "TA-084",
+    "TA-085",
+    "TA-086"
+  ],
+  "source_commit": "3cce2dd295348e25be4b5bd64f3622c2603d6ba0",
+  "source_blobs": 79,
+  "installed_python_blobs": 7,
+  "database_files": 31,
+  "database_bytes": 2899290072,
+  "native_packages": 85,
+  "unit_unique_methods": 8,
+  "real_transport_methods": 2,
+  "framework_cases": 2,
+  "native_trace_entries": 24,
+  "native_status_counts": {
+    "COMPLETED": 12,
+    "CACHED": 4,
+    "FAILED": 6,
+    "ABORTED": 2
+  },
+  "old_trace_entries": 5,
+  "old_false_completed_hidden_child": 1,
+  "old_stale_cached": 1,
+  "route_status_counts": {
+    "COMPLETED": 26
+  },
+  "scientific_method": "unchanged default accuracy+meta/search/thresholds; explicit four summary log repairs only",
+  "artifacts": {
+    "results/tool-audit/20261024-platon-native/source-proof.json": "ff39580eeeb451aa7a03b72f77dd0b65de372d99896023e4cad5267ecc89ab33",
+    "results/tool-audit/20261024-platon-native/package-proof.json": "9a8dc949f94891b95148a16d6398972dccc7413a6ea26bd148e88d6d29dde96c",
+    "results/tool-audit/20261024-platon-native/source-proof-primary.json": "a1aa5c93a2668501b0bed331e8d23d8ebd68c40225ebcbba85548067c806783e",
+    "results/tool-audit/20261024-platon-native/database-proof.json": "4953c04227453d0b142814722ab6a84e06c2c5aa1de92eab83e413075378712c",
+    "results/tool-audit/20261024-platon-native/native-workflow/run.json": "51db44b1584e82a6ef933354f793d87a7060c21ea8bbe88ccf4af75e109bf3f6",
+    "results/tool-audit/20261024-platon-native/selected-traces.json": "89039d9f69552506b7b7cb9e15aa3d9a32786bdb95ec4da01b3d5e866053efaa",
+    "results/tool-audit/20261024-platon-native/classification-parity.json": "85d0bcc60737a168f37e3c90bf7f30ced1547921b978560039b651570213ec36",
+    "tests/platon-native.lock.json": "c0bc1b46e7100749a4848ada47ca69ab042a3aa44df3b551fe0d2c242bb4dec8",
+    "docs/tool-audit/patches/platon-1.7-zero-hit-logging.diff": "2b427349ccb53142d19ed9c97b563343ef09e0a67b89cfd594b119c4c0287475"
+  },
+  "limitations": [
+    "Actual fixed source/default accuracy/meta/full original v1.5.0 DB; four summary log repairs only, recorded per task. No classifier observer.",
+    "pUTI89 reused across plain/gzip/native/Conda/resume is one biological positive; official negative fixture is a software control, not independent classifier sensitivity/specificity validation.",
+    "Corrupt private HMM/cache/failure boundaries and short input domain state are not alternative biological methods.",
+    "No OCI or full-platform certification.",
+    "classifier CLI observers including explicit Platon checked-runtime Python transport and controlled PLASMe/PlasX outputs; production auditor/classification/format is NOT evaluated by this routing test",
+    "native original full detection subworkflow and R consumers; no classifier inference, real DB/models, image or scientific accuracy"
+  ]
+}

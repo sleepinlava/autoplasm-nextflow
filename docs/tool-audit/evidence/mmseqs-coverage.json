@@ -1,0 +1,11 @@
+{
+  "retrieved": "2026-10-20",
+  "version": "18-8cc5c",
+  "blob_sha": "7d74ad4856f300a1701a6910be499d9bfb5cde6a",
+  "url": "https://github.com/soedinglab/MMseqs2/blob/18-8cc5c/src/commons/Parameters.cpp",
+  "source": "src/commons/Parameters.cpp",
+  "line_start": 74,
+  "line_end": 75,
+  "excerpt": "        PARAM_C(PARAM_C_ID, \"-c\", \"Coverage threshold\", \"List matches above this fraction of aligned (covered) residues (see --cov-mode)\", typeid(float), (void *) &covThr, \"^0(\\\\.[0-9]+)?|^1(\\\\.0+)?$\", MMseqsParameter::COMMAND_ALIGN | MMseqsParameter::COMMAND_CLUSTLINEAR),\n        PARAM_COV_MODE(PARAM_COV_MODE_ID, \"--cov-mode\", \"Coverage mode\", \"0: coverage of query and target\\n1: coverage of target\\n2: coverage of query\\n3: target seq. length has to be at least x% of query length\\n4: query seq. length has to be at least x% of target length\\n5: short seq. needs to be at least x% of the other seq. length\", typeid(int), (void *) &covMode, \"^[0-5]{1}$\", MMseqsParameter::COMMAND_ALIGN),",
+  "limitation": "Parameter definition only; no MMseqs execution or cluster benchmark"
+}

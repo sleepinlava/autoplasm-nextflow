@@ -1,0 +1,52 @@
+--- upstream/spades@6d46786420b4d7bc88eba026eb389c0c5535d120
++++ modules/nf-core/spades/main.nf
+@@ -18,6 +18,12 @@
+     tuple val(meta), path('*.transcripts.fa.gz')  , optional:true, emit: transcripts
+     tuple val(meta), path('*.gene_clusters.fa.gz'), optional:true, emit: gene_clusters
+     tuple val(meta), path('*.assembly.gfa.gz')    , optional:true, emit: gfa
++    // Local patch (refactor/nf-core-modules): also export SPAdes'
++    // assembly_graph.fastg. The pipeline's Recycler plasmid binning
++    // consumes the FASTG graph (upstream only exports the GFA sibling).
++    tuple val(meta), path('*.assembly_graph.fastg'), optional:true, emit: fastg
++    // Local interface: graph and k provenance come from this same successful task.
++    tuple val(meta), path('*.assembly_graph.fastg'), path('*.graph_provenance.json'), optional:true, emit: recycler_graph
+     tuple val(meta), path('*.warnings.log')         , optional:true, emit: warnings
+     tuple val(meta), path('*.spades.log')         , emit: log
+     tuple val("${task.process}"), val('spades'), eval("spades.py --version 2>&1 | sed -n 's/^.*SPAdes genome assembler v//p'"), topic: versions, emit: versions_spades
+@@ -34,6 +40,9 @@
+     def nanopore_reads = nanopore ? "--nanopore $nanopore" : ""
+     def custom_hmms = hmm ? "--custom-hmms $hmm" : ""
+     def reads = yml ? "--dataset $yml" : "$illumina_reads $pacbio_reads $nanopore_reads"
++    // Embed the helper in the task script so containers/test harnesses do not
++    // depend on a host-only repository path. Its contents enter the task hash.
++    def graphProvenanceScript = file("${moduleDir}/../../../bin/spades_graph_provenance.py").text
+     """
+     spades.py \\
+         $args \\
+@@ -61,6 +70,17 @@
+         gzip -n ${prefix}.assembly.gfa
+     fi
+ 
++    # Local patch (refactor/nf-core-modules): keep the FASTG graph for Recycler and graph consumers.
++    if [ -f assembly_graph.fastg ]; then
++        cp assembly_graph.fastg ${prefix}.assembly_graph.fastg
++        cat > .spades_graph_provenance.py <<'SPADES_GRAPH_PROVENANCE_PY'
++${graphProvenanceScript}
++SPADES_GRAPH_PROVENANCE_PY
++        python3 .spades_graph_provenance.py --assembly-dir . \\
++            --graph ${prefix}.assembly_graph.fastg --log ${prefix}.spades.log \\
++            --out ${prefix}.graph_provenance.json
++    fi
++
+     if [ -f gene_clusters.fasta ]; then
+         mv gene_clusters.fasta ${prefix}.gene_clusters.fa
+         gzip -n ${prefix}.gene_clusters.fa
+@@ -79,6 +99,8 @@
+     echo "" | gzip > ${prefix}.transcripts.fa.gz
+     echo "" | gzip > ${prefix}.gene_clusters.fa.gz
+     echo "" | gzip > ${prefix}.assembly.gfa.gz
++    touch ${prefix}.assembly_graph.fastg
++    echo '{"stub":true}' > ${prefix}.graph_provenance.json
+     touch ${prefix}.spades.log
+     touch ${prefix}.warnings.log
+     """

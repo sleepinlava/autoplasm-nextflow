@@ -1,0 +1,10 @@
+{
+  "repository": "Orin-beep/HOTSPOT",
+  "retrieved_ref": "main",
+  "files": {
+    "hotspot.py": "6dbf02672f9f641f68282f502b7af586c0994546",
+    "preprocessing.py": "a6909709a3d65a5f8ce96d0f6cb5d044a50a519c"
+  },
+  "retrieval": "GitHub connector github_fetch_file",
+  "limitation": "not locked deployed checkout; no weights/inference"
+}

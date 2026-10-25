@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-23",
+  "verified_findings": [
+    "TA-049",
+    "TA-079"
+  ],
+  "scope": "bounded native CPU default method output states, actual checkpoint and affected routes",
+  "commit": "932d98b13761c3f64a928e1b74e41649d3c8bf14",
+  "source_blobs": 169,
+  "native_package_entries": 128,
+  "installed_source_and_model_blobs": 32,
+  "unit_unique_methods": 4,
+  "native_trace_entries": 7,
+  "native_status_counts": {
+    "COMPLETED": 4,
+    "CACHED": 1,
+    "FAILED": 2
+  },
+  "native_stub_entries": 1,
+  "route_scenarios": 11,
+  "route_trace_entries": 126,
+  "route_status_counts": {
+    "COMPLETED": 124,
+    "FAILED": 2
+  },
+  "artifacts": {
+    "results/tool-audit/20261023-optional-boundaries/semibin-source-proof.json": "a938c07f4a41f68c7314b6a9a60acfaf7a02f1ebc9619e04f726eb3cd8d0735b",
+    "results/tool-audit/20261023-optional-boundaries/semibin-runtime-proof.json": "6d6fd9f7625ce9fa15f629995fbca6046345d67ba1d62f60cb202deed7303180",
+    "results/tool-audit/20261023-optional-boundaries/semibin-native-states/run.json": "992e3dba3b52d7eb02603a857259560702f6ae0706953b42d81ad880cc8c6140",
+    "results/tool-audit/20261023-optional-boundaries/semibin-no-bin-original-module/run.json": "e08a0d00348aafb2d7c685dd9c7017b591464e2b3942052bb3fbcd9be4d266a0",
+    "results/tool-audit/20261023-optional-boundaries/mag-regression-declared-prefix/run.json": "b0866c09afc16359762588feb1fd23e127e6d4be5b8a929fa2982312932f625a",
+    "tests/semibin-state-native.lock.json": "fb3b73cbc39c8c2bd0a65792ce07e4be5cc16607383783f745cfd38e0b76b0a9"
+  },
+  "limitations": [
+    "Native CPU only; exact official fixture identity and DNA/metrics verified, not biological clustering accuracy/MAG quality.",
+    "No-bin uses declared size-filter boundary greater than total input; default self-supervised 15epochs retained; random seed0 fixed.",
+    "Original legitimate-zero failure is a separate retained original module run; original missing model emit and current .pt model load are checked here.",
+    "Stub performs no inference; model/status assertions replace outdated empty-model/positive-stub snapshots. Vendored nf-test/GPU/images/full platforms not certified.",
+    "explicit synthetic binner/DAS/CheckM/GTDB observers, fake BAM/db inputs; no tool inference or scientific accuracy claim",
+    "actual original workflow + gzip/converter helper + native R host linking; per-sample bin identity/DNA/metadata/multiplicity checks",
+    "GTDB observer verifies private normalized staging and unchanged final-bin identities, not the actual classifier; separate real2.7.2 parser/selection tests, no image/nf-test framework/full platform",
+    "HOTSPOT pinned source preparation only; no TA-046/model repair claimed. Full M0-M4/TETRA/GTDB/AWS unfinished."
+  ]
+}

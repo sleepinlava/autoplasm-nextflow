@@ -1,0 +1,17 @@
+[
+  {
+    "path": "docs/tool-audit/evidence/coverm-0.7.0-README.md",
+    "sha": "850f368fd45bc94792c567a3d62cddaf932e4879",
+    "url": "https://github.com/wwood/CoverM/blob/v0.7.0/README.md"
+  },
+  {
+    "path": "docs/tool-audit/evidence/bowtie2-2.5.4-MANUAL.markdown",
+    "sha": "7640718b9010d006ff97250b3e7a2cfaba4dab92",
+    "url": "https://github.com/BenLangmead/bowtie2/blob/v2.5.4/MANUAL.markdown"
+  },
+  {
+    "path": "docs/tool-audit/evidence/minimap2-2.30-manual.1",
+    "sha": "dd1516eccbedd05838f7b2bfdbe65acf2625903c",
+    "url": "https://github.com/lh3/minimap2/blob/v2.30/minimap2.1"
+  }
+]

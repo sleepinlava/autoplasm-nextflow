@@ -1,0 +1,231 @@
+{
+  "repository": "BigDataBiology/SemiBin",
+  "ref": "v2.4.1",
+  "files": [
+    {
+      "path": "SemiBin/main.py",
+      "sha": "b36c5cbe0a6b57aaaa882032c68964813de12070",
+      "compression_default_lines": [
+        "        p.add_argument('--compression',",
+        "                required=False,",
+        "                type=str,",
+        "                help='Compression type for the output files (accepted values: gz [default]/xz/bz2/none).',",
+        "                dest='output_compression',",
+        "                default='gz')",
+        ""
+      ]
+    },
+    {
+      "path": "SemiBin/utils.py",
+      "sha": "cfff631baf93ed6b8915553a66a4c9c7cd6fcc87",
+      "write_bins_lines": [
+        {
+          "line": 355,
+          "text": "def write_bins(namelist, contig_labels, output, contig_seqs,"
+        },
+        {
+          "line": 356,
+          "text": "               minfasta = 200000, output_tag=None, output_compression='none'):"
+        },
+        {
+          "line": 357,
+          "text": "    '''"
+        },
+        {
+          "line": 358,
+          "text": "    Write binned FASTA files"
+        },
+        {
+          "line": 359,
+          "text": ""
+        },
+        {
+          "line": 360,
+          "text": "    Returns: DataFrame with information on the bins"
+        },
+        {
+          "line": 361,
+          "text": "    '''"
+        },
+        {
+          "line": 362,
+          "text": "    from collections import defaultdict"
+        },
+        {
+          "line": 363,
+          "text": "    import pandas as pd"
+        },
+        {
+          "line": 364,
+          "text": ""
+        },
+        {
+          "line": 365,
+          "text": "    res = defaultdict(list)"
+        },
+        {
+          "line": 366,
+          "text": "    for label, name in zip(contig_labels, namelist, strict=True):"
+        },
+        {
+          "line": 367,
+          "text": "        if label != -1:"
+        },
+        {
+          "line": 368,
+          "text": "            res[label].append(name)"
+        },
+        {
+          "line": 369,
+          "text": ""
+        },
+        {
+          "line": 370,
+          "text": "    os.makedirs(output, exist_ok=True)"
+        },
+        {
+          "line": 371,
+          "text": ""
+        },
+        {
+          "line": 372,
+          "text": "    written = []"
+        },
+        {
+          "line": 373,
+          "text": "    for label, contigs in res.items():"
+        },
+        {
+          "line": 374,
+          "text": "        sizes = [len(contig_seqs[contig]) for contig in contigs]"
+        },
+        {
+          "line": 375,
+          "text": "        whole_bin_bp = sum(sizes)"
+        },
+        {
+          "line": 376,
+          "text": ""
+        },
+        {
+          "line": 377,
+          "text": "        if whole_bin_bp >= minfasta:"
+        },
+        {
+          "line": 378,
+          "text": "            if output_tag is None:"
+        },
+        {
+          "line": 379,
+          "text": "                ofname = f'bin.{label}.fa'"
+        },
+        {
+          "line": 380,
+          "text": "            else:"
+        },
+        {
+          "line": 381,
+          "text": "                ofname = f'{output_tag}_{label}.fa'"
+        },
+        {
+          "line": 382,
+          "text": "            ofname = os.path.join(output, ofname)"
+        },
+        {
+          "line": 383,
+          "text": "            if output_compression != 'none':"
+        },
+        {
+          "line": 384,
+          "text": "                ofname += '.' + output_compression"
+        },
+        {
+          "line": 385,
+          "text": "            n50, l50 = n50_l50(sizes)"
+        },
+        {
+          "line": 386,
+          "text": "            written.append([ofname, whole_bin_bp, len(contigs), n50, l50])"
+        },
+        {
+          "line": 387,
+          "text": "            with possibly_compressed_write(ofname) as ofile:"
+        },
+        {
+          "line": 388,
+          "text": "                for contig in contigs:"
+        },
+        {
+          "line": 389,
+          "text": "                    ofile.write(f'>{contig}\\n{contig_seqs[contig]}\\n')"
+        },
+        {
+          "line": 390,
+          "text": "    return pd.DataFrame(written, columns=['filename', 'nbps', 'nr_contigs', 'N50', 'L50'])"
+        },
+        {
+          "line": 391,
+          "text": ""
+        },
+        {
+          "line": 392,
+          "text": ""
+        }
+      ]
+    },
+    {
+      "path": "SemiBin/cluster.py",
+      "sha": "e034bec0a63ee936de5ab52e7de5dcbe30126025",
+      "output_table_lines": [
+        {
+          "line": 7,
+          "text": "from .utils import write_bins, log_binning_stats"
+        },
+        {
+          "line": 282,
+          "text": "        bin_files = write_bins(data.index.tolist(),"
+        },
+        {
+          "line": 288,
+          "text": "                            output_compression=args.output_compression)"
+        },
+        {
+          "line": 294,
+          "text": "            bin_files.to_csv(os.path.join(out, 'bins_info.tsv'), index=False, sep='\\t')"
+        },
+        {
+          "line": 295,
+          "text": "            pd.DataFrame({'contig': data.index, 'bin': contig_labels}).to_csv("
+        },
+        {
+          "line": 296,
+          "text": "                os.path.join(out, 'contig_bins.tsv'), index=False, sep='\\t')"
+        },
+        {
+          "line": 336,
+          "text": "        outputs = write_bins(data.index.tolist(),"
+        },
+        {
+          "line": 342,
+          "text": "                            output_compression=args.output_compression)"
+        },
+        {
+          "line": 344,
+          "text": "        outputs.to_csv(os.path.join(out, 'recluster_bins_info.tsv'), index=False, sep='\\t')"
+        },
+        {
+          "line": 345,
+          "text": "        pd.DataFrame({'contig': data.index, 'bin': contig_labels_reclustered}).to_csv("
+        },
+        {
+          "line": 346,
+          "text": "            os.path.join(out, 'contig_bins.tsv'), index=False, sep='\\t')"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "source confirms legitimate empty bin set after minfasta filtering",
+    "no actual training/binning run"
+  ]
+}

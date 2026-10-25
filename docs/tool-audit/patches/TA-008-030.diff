@@ -1,0 +1,834 @@
+--- a/main.nf
++++ b/main.nf
+@@ -9,6 +9,7 @@
+ nextflow.enable.dsl = 2
+ 
+ include { selectedTools } from './lib/tool_selection'
++include { magSelectionError } from './lib/mag_selection'
+ 
+ include { ILLUMINA } from './subworkflows/illumina'
+ include { ONT } from './subworkflows/ont'
+@@ -99,6 +100,8 @@
+ }
+ 
+ def validateParams() {
++    def magError = magSelectionError(params.mag_tools)
++    if (magError) paramError(magError)
+     if (params.host_plasmid_linking && selectedTools(params.host_linking_optional_methods).contains('crispr')) {
+         paramError("CRISPR host-plasmid linking is not implemented; remove 'crispr' from --host_linking_optional_methods")
+     }
+--- /dev/null
++++ b/lib/mag_selection.nf
+@@ -0,0 +1,16 @@
++include { selectedTools } from './tool_selection'
++
++// One final bin set per sample: a single binner, or an explicitly selected
++// DAS Tool aggregation. Keep this guard usable by direct subworkflow callers.
++def magSelectionError(value) {
++    def tools = selectedTools(value).unique()
++    def allowed = ['metabat2', 'concoct', 'semibin', 'das_tool', 'checkm2', 'gtdbtk']
++    def unknown = tools.findAll { !allowed.contains(it) }
++    if (unknown) return "--mag_tools has unknown tools: ${unknown}"
++    def binners = ['metabat2', 'concoct', 'semibin'].findAll { tools.contains(it) }
++    if (tools && !binners) return '--mag_tools requires at least one binner: metabat2, concoct or semibin'
++    if (binners.size() > 1 && !tools.contains('das_tool')) {
++        return 'Multiple MAG binners require explicitly selecting das_tool in --mag_tools'
++    }
++    return null
++}
+--- a/subworkflows/mag_host.nf
++++ b/subworkflows/mag_host.nf
+@@ -1,4 +1,5 @@
+ include { selectedTools } from '../lib/tool_selection'
++include { magSelectionError } from '../lib/mag_selection'
+ 
+ /*
+  * MAG host-genome subworkflow (mag_host_genomes): MetaBAT2 /
+@@ -23,6 +24,7 @@
+ include { SEMIBIN_SINGLEEASYBIN as SEMIBIN } from '../modules/nf-core/semibin/singleeasybin/main'
+ include { DASTOOL_FASTATOCONTIG2BIN as SCAFFOLDS2BIN_METABAT2 } from '../modules/nf-core/dastool/fastatocontig2bin/main'
+ include { DASTOOL_FASTATOCONTIG2BIN as SCAFFOLDS2BIN_CONCOCT } from '../modules/nf-core/dastool/fastatocontig2bin/main'
++include { DASTOOL_FASTATOCONTIG2BIN as SCAFFOLDS2BIN_SEMIBIN } from '../modules/nf-core/dastool/fastatocontig2bin/main'
+ include { DASTOOL_DASTOOL as DAS_TOOL } from '../modules/nf-core/dastool/dastool/main'
+ include { CHECKM2_PREDICT as CHECKM2 } from '../modules/nf-core/checkm2/predict/main'
+ include { GTDBTK_CLASSIFYWF as GTDBTK } from '../modules/nf-core/gtdbtk/classifywf/main'
+@@ -34,18 +36,21 @@
+     ch_contig_table // tuple(meta, coverm tsv); unused by the nf-core CONCOCT chain
+ 
+     main:
++    def magError = magSelectionError(params.mag_tools)
++    if (magError) error(magError)
+     // Only index when a MAG tool actually consumes the BAM; the bridge is
+     // pointless (and fails container-less hosts) when mag_tools is empty.
+     ch_bam_bai = Channel.empty()
+-    if (selectedTools(params.mag_tools)) {
++    if (selectedTools(params.mag_tools).any { it in ['metabat2', 'concoct'] }) {
+         ch_bam_bai = ch_contig_bam
+-            .join(SAMTOOLS_INDEX(ch_contig_bam).bai)
++            .join(SAMTOOLS_INDEX(ch_contig_bam).bai, failOnDuplicate: true, failOnMismatch: true)
+     }
+ 
+     ch_metabat2_bins = Channel.empty()
+     if (selectedTools(params.mag_tools).contains('metabat2')) {
+         METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS(ch_bam_bai)
+-        METABAT2(ch_assembly.join(METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.out.depth))
++        METABAT2(ch_assembly.join(METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.out.depth,
++                                 failOnDuplicate: true, failOnMismatch: true))
+         ch_metabat2_bins = METABAT2.out.fasta
+     }
+ 
+@@ -53,26 +58,39 @@
+     if (selectedTools(params.mag_tools).contains('concoct')) {
+         CONCOCT_CUTUPFASTA(ch_assembly, Channel.value(true))
+         CONCOCT_CONCOCTCOVERAGETABLE(
+-            CONCOCT_CUTUPFASTA.out.bed.join(ch_bam_bai)
++            CONCOCT_CUTUPFASTA.out.bed.join(ch_bam_bai, failOnDuplicate: true, failOnMismatch: true)
+         )
+         CONCOCT_CONCOCT(
+-            CONCOCT_CONCOCTCOVERAGETABLE.out.tsv.join(CONCOCT_CUTUPFASTA.out.fasta)
++            CONCOCT_CONCOCTCOVERAGETABLE.out.tsv.join(CONCOCT_CUTUPFASTA.out.fasta,
++                                                   failOnDuplicate: true, failOnMismatch: true)
+         )
+         CONCOCT_MERGECUTUPCLUSTERING(CONCOCT_CONCOCT.out.clustering_csv)
+-        CONCOCT(ch_assembly.join(CONCOCT_MERGECUTUPCLUSTERING.out.csv))
++        CONCOCT(ch_assembly.join(CONCOCT_MERGECUTUPCLUSTERING.out.csv,
++                                failOnDuplicate: true, failOnMismatch: true))
+         ch_concoct_bins = CONCOCT.out.fasta
+     }
+ 
++    ch_semibin_bins = Channel.empty()
+     if (selectedTools(params.mag_tools).contains('semibin')) {
+-        SEMIBIN(ch_assembly.join(ch_contig_bam))
++        SEMIBIN(ch_assembly.join(ch_contig_bam, failOnDuplicate: true, failOnMismatch: true))
++        ch_semibin_bins = SEMIBIN.out.output_fasta
+     }
+ 
+-    ch_final_bins = ch_metabat2_bins
++    // Without DAS Tool the entry guard permits exactly one selected binner.
++    ch_final_bins = ch_metabat2_bins.mix(ch_concoct_bins, ch_semibin_bins)
+     if (selectedTools(params.mag_tools).contains('das_tool')) {
+         ch_s2b_metabat2 = SCAFFOLDS2BIN_METABAT2(ch_metabat2_bins, Channel.value('fa')).fastatocontig2bin
+         ch_s2b_concoct = SCAFFOLDS2BIN_CONCOCT(ch_concoct_bins, Channel.value('fa')).fastatocontig2bin
++        ch_s2b_semibin = SCAFFOLDS2BIN_SEMIBIN(ch_semibin_bins, Channel.value('fa')).fastatocontig2bin
+         ch_das_in = ch_assembly
+-            .join(ch_s2b_metabat2.mix(ch_s2b_concoct).groupTuple())
++            // Group all available predictions by sample. A binner returning no
++            // bins must not discard another binner's nonempty predictions.
++            .join(ch_s2b_metabat2.mix(ch_s2b_concoct, ch_s2b_semibin).groupTuple(),
++                  remainder: true, failOnDuplicate: true)
++            .filter { meta, assembly, tsvs ->
++                if (!assembly) error("MAG predictions have no assembly for ${meta.id}")
++                tsvs != null
++            }
+             .map { meta, assembly, tsvs -> tuple(meta, assembly, tsvs, []) }
+         DAS_TOOL(ch_das_in, [])
+         ch_final_bins = DAS_TOOL.out.bins
+@@ -96,6 +114,6 @@
+     }
+ 
+     emit:
+-    mag_bins = ch_final_bins  // tuple(meta, [bin fasta, ...]); may be empty
++    mag_bins = ch_final_bins  // tuple(meta, bin fasta/list); samples with no bins are absent
+     taxonomy = ch_taxonomy    // tuple(meta, [gtdbtk summary tsv, ...]); may be empty
+ }
+--- a/conf/nfcore_mag.config
++++ b/conf/nfcore_mag.config
+@@ -68,8 +68,15 @@
+         ]
+     }
+     withName: 'DAS_TOOL' {
++        ext.args = '--write_bins'
+         publishDir = [
+             [path: "${params.outdir}/07_host_prediction/mag/das_tool", mode: params.publish_dir_mode]
++        ]
++    }
++    withName: 'SCAFFOLDS2BIN_SEMIBIN' {
++        ext.prefix = { "${meta.id}.semibin" }
++        publishDir = [
++            [path: "${params.outdir}/07_host_prediction/mag/das_tool/contig2bin", mode: params.publish_dir_mode]
+         ]
+     }
+     withName: 'CHECKM2' {
+--- /dev/null
++++ b/tests/run_mag_routing.py
+@@ -0,0 +1,163 @@
++#!/usr/bin/env python3
++"""Actual MAG_HOST/host linking with controlled CLI observers, native R/converter.
++
++Assertions cover IDs, DNA, metadata, multiplicity and consumer staging. They do
++not certify classifiers, GTDB file selection, quality models or binning accuracy.
++"""
++import argparse
++import csv
++import gzip
++import hashlib
++import itertools
++import json
++import os
++from pathlib import Path
++import random
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def fasta(path):
++    with (gzip.open(path, 'rt') if path.suffix == '.gz' else path.open()) as stream:
++        records = {}
++        for line in stream:
++            if line.startswith('>'):
++                cid = line[1:].split()[0]
++                assert cid not in records
++                records[cid] = ''
++            else:
++                records[cid] += line.strip()
++    return records
++
++
++def run(base, das_prefix, bgzip_prefix, cases, mag_host=None):
++    fixtures = base / 'fixtures'
++    fixtures.mkdir()
++    records = []
++    sequences = {}
++    rng = random.Random(886)
++    for sid, group in [('S1', 'G1'), ('S.2', 'G2')]:
++        template = ''.join(rng.choices('ACGT', k=400))
++        seqs = {sid + '_' + letter: template * copies for letter, copies in [('A', 3), ('B', 4), ('C', 5)]}
++        sequences[sid] = seqs
++        assembly = fixtures / (sid + '.contigs.fna')
++        assembly.write_text(''.join('>' + k + '\n' + v + '\n' for k, v in seqs.items()))
++        bam = fixtures / (sid + '.bam')
++        bam.write_text(json.dumps({'id': sid, 'explicitly_fake_BAM': True}))
++        records.append({'id': sid, 'group': group, 'fasta': str(assembly), 'bam': str(bam)})
++    (fixtures / 'checkm2.dmnd').write_text('INTERFACE_OBSERVER_NOT_A_DATABASE\n')
++    (fixtures / 'gtdb/metadata').mkdir(parents=True)
++    (fixtures / 'gtdb/metadata/metadata.txt').write_text('VERSION_DATA=INTERFACE_OBSERVER\n')
++    observer_bin = base / 'observer-bin'
++    observer_bin.mkdir()
++    tools = ['samtools', 'jgi_summarize_bam_contig_depths', 'metabat2', 'cut_up_fasta.py', 'concoct_coverage_table.py', 'concoct', 'merge_cutup_clustering.py', 'extract_fasta_bins.py', 'SemiBin2', 'DAS_Tool', 'checkm2', 'gtdbtk', 'python']
++    for tool in tools:
++        path = observer_bin / tool
++        shutil.copyfile(ROOT / 'tests/mag_interface_observer.py', path)
++        path.chmod(0o755)
++    shutil.copyfile(das_prefix / 'bin/Fasta_to_Contig2Bin.sh', observer_bin / 'Fasta_to_Contig2Bin.sh')
++    (observer_bin / 'Fasta_to_Contig2Bin.sh').chmod(0o755)
++    selections = [('disabled', [], {}), ('metabat2', [' metabat2 '], {}), ('concoct', ['concoct'], {}), ('semibin', ['semibin'], {}), ('single-das', ['semibin', 'das_tool'], {})]
++    for combination in itertools.combinations(['metabat2', 'concoct', 'semibin'], 2):
++        selections.append(('-'.join(combination), list(combination) + ['das_tool'], {}))
++    selections += [('all', ['metabat2', 'concoct', 'semibin', 'das_tool'], {}),
++                   ('duplicate-selector', ['metabat2', 'metabat2'], {}),
++                   ('empty-metabat', ['metabat2'], {'MAG_EMPTY_METABAT': 'S1'}),
++                   ('empty-component', ['metabat2', 'semibin', 'das_tool'], {'MAG_EMPTY_METABAT': 'S1'}),
++                   ('tool-failure', ['semibin'], {'MAG_FAIL_SEMIBIN': '1'})]
++    workflow = ROOT / 'tests/nextflow/mag_selection.nf'
++    if mag_host:
++        workflow = base / 'original-module-probe.nf'
++        workflow.write_text((ROOT / 'tests/nextflow/mag_selection.nf').read_text()
++                            .replace("'../../subworkflows/mag_host'", repr(str(mag_host.with_suffix(''))))
++                            .replace("'../../subworkflows/host_linking'", repr(str(ROOT / 'subworkflows/host_linking'))))
++    runs = []
++    for name, binners, extra_env in selections:
++        if cases and name not in cases:
++            continue
++        p = base / name
++        p.mkdir()
++        config = p / 'config'
++        config.write_text("includeConfig '" + str(ROOT / 'conf/nfcore_mag.config') + "'\n"
++                          "params.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=1\n"
++                          "process.memory='512 MB'\nprocess.maxForks=2\nconda.enabled=false\n"
++                          "docker.enabled=false\nsingularity.enabled=false\n"
++                          "process { withName: 'SEMIBIN|CHECKM2|GTDBTK' { cpus=1; memory='512 MB' } }\n")
++        selected = {s.strip() for s in binners}
++        params = {'records': records, 'outdir': str(p / 'out'), 'mag_tools': binners + (['checkm2', 'gtdbtk'] if binners else []), 'checkm2_db': str(fixtures / 'checkm2.dmnd'), 'gtdbtk_db': str(fixtures / 'gtdb'), 'host_plasmid_linking': True, 'host_linking_methods': ['sequence'], 'host_linking_optional_methods': [], 'link_min_similarity': 0}
++        (p / 'params.json').write_text(json.dumps(params))
++        command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(workflow), '-params-file', str(p / 'params.json'), '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
++        env = os.environ.copy()
++        env.update(extra_env)
++        env['PATH'] = str(observer_bin) + ':' + str(ROOT / 'bin') + ':' + str(bgzip_prefix / 'bin') + ':' + env['PATH']
++        # Avoid a dependency prefix's Rscript: linking is the installed native R.
++        rscript = observer_bin / 'Rscript'
++        rscript.write_text('#!/bin/sh\nexec /usr/bin/Rscript "$@"\n')
++        rscript.chmod(0o755)
++        result = subprocess.run(command, env=env, capture_output=True, text=True)
++        (p / 'stdout.log').write_text(result.stdout)
++        (p / 'stderr.log').write_text(result.stderr)
++        tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []
++        checks = {}
++        if name == 'tool-failure':
++            checks = {'fails': result.returncode != 0, 'diagnostic': 'CONTROLLED_SEMIBIN_FAILURE' in result.stdout + result.stderr, 'no_fake_final_bins': 'FINAL_BINS=' not in result.stdout}
++        else:
++            checks = {'success': result.returncode == 0, 'all_completed': bool(tasks) and all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks)}
++            if checks['success']:
++                for sid, seqs in sequences.items():
++                    available = selected - ({'metabat2'} if sid in extra_env.get('MAG_EMPTY_METABAT', '').split(',') else set())
++                    expected_bins = {}
++                    if 'das_tool' in selected and available & {'metabat2', 'concoct', 'semibin'}:
++                        letters = set()
++                        for binner, values in [('metabat2', 'AB'), ('concoct', 'BC'), ('semibin', 'C')]:
++                            if binner in available:
++                                letters.update(values)
++                        expected_bins = {'controlled.fa': {sid + '_' + v: seqs[sid + '_' + v] for v in letters}}
++                    elif 'metabat2' in available:
++                        expected_bins = {sid + '.' + str(i) + '.fa.gz': {sid + '_' + v: seqs[sid + '_' + v]} for i, v in enumerate('AB', 1)}
++                    elif 'concoct' in available:
++                        expected_bins = {sid + '_' + str(i) + '.fa.gz': {sid + '_' + v: seqs[sid + '_' + v]} for i, v in enumerate('BC', 1)}
++                    elif 'semibin' in available:
++                        expected_bins = {'SemiBin_0.fa.gz': {sid + '_C': seqs[sid + '_C']}}
++                    checks[sid + '_one_meta_row'] = result.stdout.count('FINAL_BINS=' + sid + ':' + ('G1' if sid == 'S1' else 'G2') + ':') == bool(expected_bins)
++                    hashes = {n: {k: hashlib.sha256(v.encode()).hexdigest() for k, v in members.items()} for n, members in expected_bins.items()}
++                    for consumer in ['checkm2', 'gtdbtk']:
++                        captures = [q for q in (p / 'work').rglob('observer-' + consumer + '-staged.json') if json.loads(q.read_text()) == hashes]
++                        checks[sid + '_' + consumer + '_all_IDs_DNA_names'] = len(captures) == bool(expected_bins)
++                    link_dirs = [q.parent for q in (p / 'work').rglob(sid + '.sequence_links.tsv') if not q.is_symlink()]
++                    checks[sid + '_one_link_task'] = len(link_dirs) == 1
++                    if link_dirs:
++                        staged = {q.name: fasta(q) for q in (link_dirs[0] / 'mag_bins').glob('*')} if (link_dirs[0] / 'mag_bins').exists() else {}
++                        checks[sid + '_native_link_staged_DNA'] = staged == expected_bins
++                        rows = list(csv.DictReader((link_dirs[0] / (sid + '.sequence_links.tsv')).open(), delimiter='\t'))
++                        expected_hosts = {n.removesuffix('.gz').removesuffix('.fa') for n in expected_bins}
++                        checks[sid + '_native_link_rows'] = len(rows) == 3 * len(expected_hosts) and {r['host_id'] for r in rows} == expected_hosts and all(r['sample_id'] == sid and r['plasmid_id'] in seqs for r in rows)
++                    if 'das_tool' in selected:
++                        inputs = [json.loads(q.read_text()) for q in (p / 'work').rglob('observer-DAS-inputs.json') if json.loads(q.read_text())['sample'] == sid]
++                        checks[sid + '_all_available_binners'] = len(inputs) == bool(expected_bins) and (not inputs or set(inputs[0]['tables']) == {sid + '.' + b + '.tsv' for b in available & {'metabat2', 'concoct', 'semibin'}})
++                consumer_count = sum('CHECKM2' in t['name'] or 'GTDBTK' in t['name'] for t in tasks)
++                expected_count = 0 if not binners else (2 if name == 'empty-metabat' else 4)
++                checks['no_dropped_or_duplicate_consumer_tasks'] = consumer_count == expected_count
++        runs.append({'case': name, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
++        print(name, checks, flush=True)
++        source_names = ['main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'conf/nfcore_mag.config', 'tests/nextflow/mag_selection.nf', 'tests/mag_interface_observer.py', 'tests/run_mag_routing.py']
++        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in source_names}, 'limitations': ['explicit synthetic binner/DAS/CheckM/GTDB observers, fake BAM/db inputs; no tool inference or scientific accuracy claim', 'actual original workflow + gzip/converter helper + native R host linking; per-sample bin identity/DNA/metadata/multiplicity checks', 'GTDB observer verifies staging only, not its known uncorrected default extension issue TA-031; no image/nf-test framework/full platform']}
++        if mag_host:
++            receipt['source_sha256']['subworkflows/mag_host.nf'] = hashlib.sha256(mag_host.read_bytes()).hexdigest()
++            receipt['module_override'] = str(mag_host)
++        (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    return receipt['pass']
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True, type=Path)
++    parser.add_argument('--das-prefix', required=True, type=Path)
++    parser.add_argument('--bgzip-prefix', required=True, type=Path)
++    parser.add_argument('--cases', default='')
++    parser.add_argument('--mag-host', type=Path, help='Optional frozen original module, with include paths resolved')
++    args = parser.parse_args()
++    args.work_dir.mkdir(parents=True, exist_ok=True)
++    raise SystemExit(0 if run(args.work_dir.resolve(), args.das_prefix.resolve(), args.bgzip_prefix.resolve(), args.cases.split(',') if args.cases else [], args.mag_host.resolve() if args.mag_host else None) else 1)
+--- /dev/null
++++ b/tests/mag_interface_observer.py
+@@ -0,0 +1,149 @@
++#!/usr/bin/env python3
++"""Explicit synthetic CLI observers for MAG routing; never biological evidence.
++
++The real production Nextflow processes run unchanged. This observer only
++checks staged identities and supplies controlled predictions/consumer records.
++GTDB-Tk records staged files here; its real extension filter is NOT exercised.
++"""
++import gzip
++import hashlib
++import json
++import os
++from pathlib import Path
++import sys
++import time
++
++tool = Path(sys.argv[0]).name
++args = sys.argv[1:]
++
++
++def arg(flag):
++    return args[args.index(flag) + 1]
++
++
++def read_fasta(path):
++    path = Path(path)
++    with (gzip.open(path, 'rt') if path.suffix == '.gz' else path.open()) as stream:
++        seqs = {}
++        for line in stream:
++            if line.startswith('>'):
++                cid = line[1:].split()[0]
++                assert cid not in seqs
++                seqs[cid] = ''
++            else:
++                seqs[cid] += line.strip()
++    assert seqs and all(seqs.values())
++    return seqs
++
++
++def write_fasta(path, seqs):
++    path = Path(path)
++    path.parent.mkdir(parents=True, exist_ok=True)
++    with (gzip.open(path, 'wt') if path.suffix == '.gz' else path.open('w')) as stream:
++        stream.write(''.join('>' + k + '\n' + v + '\n' for k, v in seqs.items()))
++
++
++def record(kind, bins):
++    payload = {Path(p).name: {k: hashlib.sha256(v.encode()).hexdigest() for k, v in read_fasta(p).items()} for p in bins}
++    Path('observer-' + kind + '.json').write_text(json.dumps(payload, sort_keys=True))
++
++
++if '--version' in args:
++    print({'samtools': 'samtools 1.24', 'concoct': 'concoct 1.1.0', 'DAS_Tool': 'DAS Tool 1.1.7', 'gtdbtk': 'GTDB-Tk v2.7.2'}.get(tool, 'INTERFACE_OBSERVER'))
++    raise SystemExit()
++if tool == 'metabat2' and '--help' in args:
++    print('INTERFACE_OBSERVER\nversion:2.17')
++    raise SystemExit()
++if tool == 'samtools':
++    assert args[0] == 'index'
++    payload = json.loads(Path(args[-1]).read_text())
++    Path(args[-1] + '.bai').write_text(json.dumps(payload))
++elif tool == 'jgi_summarize_bam_contig_depths':
++    bam = Path(args[-1])
++    payload = json.loads(bam.read_text())
++    assert json.loads(Path(str(bam) + '.bai').read_text()) == payload
++    Path(arg('--outputDepth')).write_text(json.dumps(payload))
++elif tool == 'metabat2':
++    seqs = read_fasta(arg('-i'))
++    sid = next(iter(seqs)).rsplit('_', 1)[0]
++    assert json.loads(Path(arg('-a')).read_text())['id'] == sid
++    time.sleep(0.4 if sid == 'S1' else 0)
++    prefix = arg('-o')
++    Path(prefix).write_text('INTERFACE_OBSERVER membership\n')
++    # A successful optional no-bin case, distinct from a tool failure.
++    if sid not in os.environ.get('MAG_EMPTY_METABAT', '').split(','):
++        for i, letter in enumerate(['A', 'B'], 1):
++            write_fasta(prefix + '.' + str(i) + '.fa', {sid + '_' + letter: seqs[sid + '_' + letter]})
++elif tool == 'cut_up_fasta.py':
++    seqs = read_fasta(args[0])
++    Path(arg('-b')).write_text(json.dumps(seqs))
++    print(''.join('>' + k + '\n' + v + '\n' for k, v in seqs.items()), end='')
++elif tool == 'concoct_coverage_table.py':
++    seqs = json.loads(Path(args[0]).read_text())
++    sid = next(iter(seqs)).rsplit('_', 1)[0]
++    assert json.loads(Path(args[1]).read_text())['id'] == sid
++    assert Path(args[1] + '.bai').exists()
++    print(sid)
++elif tool == 'concoct':
++    seqs = read_fasta(arg('--composition_file'))
++    sid = next(iter(seqs)).rsplit('_', 1)[0]
++    assert Path(arg('--coverage_file')).read_text().strip() == sid
++    prefix = arg('-b')
++    for suffix in ['_args.txt', '_log.txt', '_original_data_gt1000.csv', '_PCA_components_data_gt1000.csv', '_PCA_transformed_data_gt1000.csv']:
++        Path(prefix + suffix).write_text('INTERFACE_OBSERVER\n')
++    Path(prefix + '_clustering_gt1000.csv').write_text('contig_id,cluster_id\n' + sid + '_B,1\n' + sid + '_C,2\n')
++elif tool == 'merge_cutup_clustering.py':
++    print(Path(args[-1]).read_text(), end='')
++elif tool == 'extract_fasta_bins.py':
++    seqs = read_fasta(args[0])
++    for row in Path(args[1]).read_text().splitlines()[1:]:
++        cid, cluster = row.split(',')
++        write_fasta(Path(arg('--output_path')) / (cluster + '.fa'), {cid: seqs[cid]})
++elif tool == 'SemiBin2':
++    seqs = read_fasta(arg('--input-fasta'))
++    sid = next(iter(seqs)).rsplit('_', 1)[0]
++    assert json.loads(Path(arg('--input-bam')).read_text())['id'] == sid
++    if os.environ.get('MAG_FAIL_SEMIBIN'):
++        raise SystemExit('CONTROLLED_SEMIBIN_FAILURE')
++    out = Path(arg('--output'))
++    out.mkdir()
++    (out / 'contig_bins.tsv').write_text('INTERFACE_OBSERVER\n')
++    (out / 'data.csv').write_text('INTERFACE_OBSERVER\n')
++    write_fasta(out / 'output_bins/SemiBin_0.fa.gz', {sid + '_C': seqs[sid + '_C']})
++elif tool == 'DAS_Tool':
++    seqs = read_fasta(arg('-c'))
++    sid = next(iter(seqs)).rsplit('_', 1)[0]
++    names = set()
++    members = set()
++    for table in arg('-i').split(','):
++        names.add(Path(table).name)
++        for row in Path(table).read_text().splitlines():
++            cid, bid = row.split('\t')
++            assert cid in seqs and cid.startswith(sid + '_')
++            members.add(cid)
++    Path('observer-DAS-inputs.json').write_text(json.dumps({'sample': sid, 'tables': sorted(names), 'members': sorted(members)}))
++    prefix = arg('-o')
++    Path(prefix + '_DASTool.log').write_text('INTERFACE_OBSERVER_ONLY\n')
++    if '--write_bins' in args:
++        write_fasta(prefix + '_DASTool_bins/controlled.fa', {k: seqs[k] for k in sorted(members)})
++elif tool == 'checkm2':
++    start = args.index('--input') + 1
++    bins = args[start:args.index('--output-directory')]
++    record('checkm2-staged', bins)
++    out = Path(arg('--output-directory'))
++    out.mkdir()
++    (out / 'quality_report.tsv').write_text('Name\tCompleteness\tContamination\n')
++elif tool == 'gtdbtk':
++    bins = sorted(Path(arg('--genome_dir')).iterdir())
++    record('gtdbtk-staged', bins)
++    out = Path(arg('--out_dir'))
++    (out / 'classify').mkdir(parents=True)
++    (out / 'classify/observer.bac120.summary.tsv').write_text('user_genome\tclassification\n')
++    for name in ['gtdbtk.log', 'gtdbtk.warnings.log']:
++        (out / name).write_text('INTERFACE_OBSERVER_ONLY\n')
++elif tool == 'python':
++    # Only the SemiBin CUDA version eval; no real torch/model execution.
++    assert args == ['-c', "import torch; print(torch.version.cuda or 'no CUDA available')"]
++    print('INTERFACE_OBSERVER_NO_CUDA')
++else:
++    raise SystemExit('Unsupported MAG observer: ' + tool)
+--- /dev/null
++++ b/tests/nextflow/mag_selection.nf
+@@ -0,0 +1,18 @@
++nextflow.enable.dsl=2
++
++include { MAG_HOST } from '../../subworkflows/mag_host'
++include { HOST_LINKING } from '../../subworkflows/host_linking'
++
++workflow {
++    assemblies = Channel.fromList(params.records).map { row ->
++        tuple([id: row.id, group: row.group], file(row.fasta, checkIfExists: true))
++    }
++    // Deliberately reverse arrival order to expose positional pairing.
++    bams = Channel.fromList(params.records.reverse()).map { row ->
++        tuple([id: row.id, group: row.group], file(row.bam, checkIfExists: true))
++    }
++    MAG_HOST(assemblies, bams, Channel.empty())
++    HOST_LINKING(assemblies, assemblies, Channel.empty(), Channel.empty(),
++                 Channel.empty(), MAG_HOST.out.mag_bins, Channel.empty(), false)
++    MAG_HOST.out.mag_bins.view { meta, bins -> "FINAL_BINS=${meta.id}:${meta.group}:${bins}" }
++}
+--- /dev/null
++++ b/tests/run_mag_selection_validation.py
+@@ -0,0 +1,64 @@
++#!/usr/bin/env python3
++"""Replay registered main rejections and the explicit MAG dependency matrix.
++
++Runs actual main and MAG_HOST; no copied implementation/validator logic.
++Replays do not add independent cases to the audit registry.
++"""
++import argparse
++import csv
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++NEW_CASES = [
++    ('mag-metabat-concoct-no-das', ['metabat2', 'concoct'], 'Multiple MAG binners require explicitly selecting das_tool'),
++    ('mag-metabat-semibin-no-das', ['metabat2', 'semibin'], 'Multiple MAG binners require explicitly selecting das_tool'),
++    ('mag-concoct-semibin-no-das', ['concoct', 'semibin'], 'Multiple MAG binners require explicitly selecting das_tool'),
++    ('mag-all-no-das', ['metabat2', 'concoct', 'semibin'], 'Multiple MAG binners require explicitly selecting das_tool'),
++    ('mag-das-no-binner', ['das_tool'], '--mag_tools requires at least one binner'),
++    ('mag-checkm-no-binner', ['checkm2'], '--mag_tools requires at least one binner'),
++    ('mag-gtdb-no-binner', ['gtdbtk'], '--mag_tools requires at least one binner'),
++    ('mag-quality-no-binner', ['checkm2', 'gtdbtk', 'das_tool'], '--mag_tools requires at least one binner')
++]
++
++
++def run(base, replay):
++    cases = []
++    if replay:
++        for row in csv.DictReader((ROOT / 'docs/tool-audit/p0-main-cases.tsv').open(), delimiter='\t'):
++            if row['case'] not in {r[0] for r in NEW_CASES}:
++                params = json.loads((ROOT / row['artifacts'] / 'params.json').read_text())
++                cases.append((row['case'], params, row['stderr_diagnostic']))
++    cases += [(case, {'mag_tools': selection}, diagnostic) for case, selection, diagnostic in NEW_CASES]
++    runs = []
++    for scope, values in [('main', cases), ('direct-MAG_HOST', [(case, {'mag_tools': selection, 'records': []}, diagnostic) for case, selection, diagnostic in NEW_CASES])]:
++        for name, params, diagnostic in values:
++            p = base / scope / name
++            p.mkdir(parents=True)
++            params['outdir'] = str(p / 'out')
++            (p / 'params.json').write_text(json.dumps(params))
++            script = ROOT / ('main.nf' if scope == 'main' else 'tests/nextflow/mag_selection.nf')
++            command = [str(ROOT / 'results/tool-audit/runtime/bin/nextflow'), '-C', str(ROOT / 'results/tool-audit/20261020-main-p0/combined.config'), 'run', str(script), '-params-file', str(p / 'params.json'), '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
++            result = subprocess.run(command, capture_output=True, text=True)
++            (p / 'stdout.log').write_text(result.stdout)
++            (p / 'stderr.log').write_text(result.stderr)
++            tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []
++            commands = list((p / 'work').rglob('.command.sh'))
++            checks = {'rejected': result.returncode != 0, 'precise_diagnostic': diagnostic in result.stdout + result.stderr, 'zero_tasks': not tasks, 'zero_command_files': not commands}
++            runs.append({'scope': scope, 'case': name, 'stderr_diagnostic': diagnostic, 'command': command, 'exit': result.returncode, 'artifacts': str(p.relative_to(ROOT)), 'checks': checks})
++            print(scope, name, checks, flush=True)
++            receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'main_sha256': hashlib.sha256((ROOT / 'main.nf').read_bytes()).hexdigest(), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in ['main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'tests/run_mag_selection_validation.py']}, 'limitations': ['actual rejection paths with zero analysis tasks; not successful main end-to-end or nf-test framework certification', 'new unique main MAG scenarios=8; direct include checks and replays are not new main cases']}
++            (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    return receipt['pass']
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True, type=Path)
++    parser.add_argument('--replay-main-registry', action='store_true')
++    args = parser.parse_args()
++    args.work_dir.mkdir(parents=True, exist_ok=True)
++    raise SystemExit(0 if run(args.work_dir.resolve(), args.replay_main_registry) else 1)
+--- /dev/null
++++ b/tests/run_dastool_export.py
+@@ -0,0 +1,112 @@
++#!/usr/bin/env python3
++"""Real DAS Tool 1.1.7 export, using its fixed official gut sample/oracle.
++
++Requires the four versioned contig2bin tables, full assembly, and Run1
++membership/summary from cmks/DAS_Tool tag 1.1.7; never replaces the oracle.
++"""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++from prepare_dastool_sample import verify
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def fasta(path):
++    seqs = {}
++    for line in path.read_text().splitlines():
++        if line.startswith('>'):
++            key = line[1:].split()[0]
++            assert key not in seqs
++            seqs[key] = ''
++        else:
++            seqs[key] += line
++    return seqs
++
++
++def run(base, fixture, prefix, old_config=None, selected_cases=None):
++    verify(fixture)
++    assembly = fixture / 'sample.human.gut_contigs.fa'
++    assert hashlib.sha1(b'blob ' + str(assembly.stat().st_size).encode() + b'\0' + assembly.read_bytes()).hexdigest() == 'de08c9dbe68cd5978b06e0db88a242d45538cfb7'
++    predictions = [fixture / ('sample.human.gut_' + s + '_contigs2bin.tsv') for s in ['concoct', 'maxbin2', 'metabat', 'tetraESOM']]
++    original = fasta(assembly)
++    expected = {}
++    for cid, bid in csv.reader((fixture / 'DASToolRun1_DASTool_contig2bin.tsv').open(), delimiter='\t'):
++        expected.setdefault(bid, {})[cid] = original[cid]
++    assert len(expected) == 15
++    runs = []
++    cases = [('after', ROOT / 'conf/nfcore_mag.config', '', predictions)]
++    if old_config:
++        cases.insert(0, ('before', old_config, '', predictions))
++    # A genuine low-completeness bin, with an explicit stricter test threshold.
++    negative = base / 'one-low-score-bin.tsv'
++    negative.write_text(''.join(line + '\n' for line in predictions[2].read_text().splitlines() if line.split('\t')[1] == 'metabat.25'))
++    assert negative.stat().st_size
++    cases.append(('no-accepted-bins', ROOT / 'conf/nfcore_mag.config', ' --score_threshold 0.9', [negative]))
++    for name, production_config, extra, tables in cases:
++        if selected_cases and name not in selected_cases:
++            continue
++        p = base / name
++        p.mkdir()
++        config = p / 'config'
++        # Positive runs consume the actual production args unchanged. The
++        # reference bin IDs are unique, so labels only affect bin_set names.
++        config.write_text("includeConfig '" + str(production_config) + "'\n"
++                          "params.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=1\n"
++                          "process.memory='3 GB'\nprocess.maxForks=1\nconda.enabled=false\n"
++                          "docker.enabled=false\nsingularity.enabled=false\n")
++        if extra:
++            with config.open('a') as stream:
++                stream.write("process { withName: 'DAS_TOOL' { ext.args='--write_bins" + extra + "' } }\n")
++        params = {'assembly': str(assembly), 'predictions': list(map(str, tables)), 'outdir': str(p / 'out')}
++        (p / 'params.json').write_text(json.dumps(params))
++        command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(ROOT / 'tests/nextflow/dastool_export.nf'), '-params-file', str(p / 'params.json'), '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
++        env = os.environ.copy()
++        env['PATH'] = str(prefix / 'bin') + ':' + env['PATH']
++        result = subprocess.run(command, env=env, capture_output=True, text=True)
++        (p / 'stdout.log').write_text(result.stdout)
++        (p / 'stderr.log').write_text(result.stderr)
++        tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []
++        out = p / 'out/07_host_prediction/mag/das_tool'
++        bins = list(out.glob('*_DASTool_bins/*.fa'))
++        if name == 'no-accepted-bins':
++            # Fixed upstream cherry_pick explicitly uses write.log(type='stop')
++            # here. Preserve that failure; never turn it into empty success.
++            logs = list((p / 'work').rglob('DASToolRun1_DASTool.log'))
++            checks = {'upstream_rejection_preserved': result.returncode != 0,
++                      'one_failed_task': len(tasks) == 1 and tasks[0]['status'] == 'FAILED',
++                      'native_no_bins_diagnostic': len(logs) == 1 and 'No bins with bin-score >0.9 found' in logs[0].read_text(),
++                      'no_exported_bins': not bins,
++                      'no_partial_published_files': not [q for q in out.rglob('*') if q.is_file()]}
++        else:
++            checks = {'success': result.returncode == 0, 'one_completed': len(tasks) == 1 and tasks[0]['status'] == 'COMPLETED', 'export_setting': bool(bins) == (name == 'after')}
++        if name != 'no-accepted-bins' and checks['success']:
++            actual = dict(csv.reader((out / 'DASToolRun1_DASTool_contig2bin.tsv').open(), delimiter='\t'))
++            oracle = {cid: bid for bid, members in expected.items() for cid in members}
++            checks['independent_membership'] = actual == oracle
++            summary = list(csv.DictReader((out / 'DASToolRun1_DASTool_summary.tsv').open(), delimiter='\t'))
++            checks['independent_bin_count_and_sizes'] = len(summary) == 15 and all(int(row['size']) == sum(map(len, expected[row['bin']].values())) and int(row['contigs']) == len(expected[row['bin']]) for row in summary)
++            if name == 'after':
++                checks['all_exported_IDs_and_DNA'] = {q.stem: fasta(q) for q in bins} == expected
++        runs.append({'case': name, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
++        print(name, checks, flush=True)
++        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in ['conf/nfcore_mag.config', 'modules/nf-core/dastool/dastool/main.nf', 'tests/run_dastool_export.py', 'tests/nextflow/dastool_export.nf']}, 'limitations': ['actual native DAS1.1.7 full official sample; fixed independent Run1 membership oracle', 'positive uses unchanged production args/default score0.5; negative uses one genuine bin with stricter test-only threshold0.9', 'not binner/CheckM2/GTDB model, image, nf-test framework or full platform certification']}
++        (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    return receipt['pass']
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True, type=Path)
++    parser.add_argument('--fixture-dir', required=True, type=Path)
++    parser.add_argument('--prefix', required=True, type=Path)
++    parser.add_argument('--old-config', type=Path)
++    parser.add_argument('--cases', default='')
++    args = parser.parse_args()
++    args.work_dir.mkdir(parents=True, exist_ok=True)
++    raise SystemExit(0 if run(args.work_dir.resolve(), args.fixture_dir.resolve(), args.prefix.resolve(), args.old_config.resolve() if args.old_config else None, args.cases.split(',') if args.cases else []) else 1)
+--- /dev/null
++++ b/tests/nextflow/dastool_export.nf
+@@ -0,0 +1,11 @@
++nextflow.enable.dsl=2
++
++include { DASTOOL_DASTOOL as DAS_TOOL } from '../../modules/nf-core/dastool/dastool/main'
++
++workflow {
++    inputs = Channel.of(tuple([id: 'DASToolRun1'],
++        file(params.assembly, checkIfExists: true),
++        params.predictions.collect { file(it, checkIfExists: true) }, []))
++    DAS_TOOL(inputs, [])
++    DAS_TOOL.out.bins.view { meta, bins -> "EXPORTED_BINS=${meta.id}:${bins}" }
++}
+--- /dev/null
++++ b/tests/prepare_dastool_sample.py
+@@ -0,0 +1,30 @@
++#!/usr/bin/env python3
++"""Verify a local copy of the locked DAS Tool official sample; no downloads.
++
++Acquire files from the URLs in dastool-sample.lock.json into one directory,
++then run this checker before run_dastool_export.py. It refuses replacements
++and validates the independent upstream expected products as well as inputs.
++"""
++import argparse
++import hashlib
++import json
++from pathlib import Path
++
++
++def verify(directory):
++    lock = json.loads(Path(__file__).with_name('dastool-sample.lock.json').read_text())
++    for record in lock['files']:
++        path = directory / record['name']
++        data = path.read_bytes()
++        if len(data) != record['size'] or hashlib.sha256(data).hexdigest() != record['sha256']:
++            raise ValueError('Locked sample checksum mismatch: ' + str(path))
++        if hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() != record['git_blob']:
++            raise ValueError('Upstream Git blob mismatch: ' + str(path))
++    return len(lock['files'])
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('directory', type=Path)
++    args = parser.parse_args()
++    print('Verified', verify(args.directory), 'fixed official sample files')
+--- /dev/null
++++ b/tests/dastool-sample.lock.json
+@@ -0,0 +1,55 @@
++{
++  "repository": "cmks/DAS_Tool",
++  "ref": "1.1.7",
++  "files": [
++    {
++      "name": "sample.human.gut_contigs.fa",
++      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_data/sample.human.gut_contigs.fa",
++      "git_blob": "de08c9dbe68cd5978b06e0db88a242d45538cfb7",
++      "sha256": "956f7fd41cf7350be2c54f4c456c2a47418f76a1ef0c1746e6ccea3ecfb206ea",
++      "size": 33454419
++    },
++    {
++      "name": "sample.human.gut_metabat_contigs2bin.tsv",
++      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_data/sample.human.gut_metabat_contigs2bin.tsv",
++      "git_blob": "a84126f987320cb1a06e8e4bd1e578423223148e",
++      "sha256": "ecf36f14ddbd40f58c58f05487395f6ed0bd41d29fe074d4ef2e8f424e171f4b",
++      "size": 11353
++    },
++    {
++      "name": "sample.human.gut_concoct_contigs2bin.tsv",
++      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_data/sample.human.gut_concoct_contigs2bin.tsv",
++      "git_blob": "174b5a71603f5761c7195f6212d694d596153a4f",
++      "sha256": "7a2bacde65fb9f329e7d8d486fab74217cd918ca82d7034481816a78268392a3",
++      "size": 38826
++    },
++    {
++      "name": "sample.human.gut_maxbin2_contigs2bin.tsv",
++      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_data/sample.human.gut_maxbin2_contigs2bin.tsv",
++      "git_blob": "09b19a4ea02ed3645e22e4b19e9f09dbacd030a8",
++      "sha256": "1d5d11c466904a66156235b9b31ba662d114353c9275f6b125b3ab0df1a9590d",
++      "size": 24702
++    },
++    {
++      "name": "sample.human.gut_tetraESOM_contigs2bin.tsv",
++      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_data/sample.human.gut_tetraESOM_contigs2bin.tsv",
++      "git_blob": "1b911240f635e043b214bc5f3ebc499d69d859b7",
++      "sha256": "25323a529baa6db1ab51fe19377e2cbdf9e8d37a824131a46a3be7f7d7669645",
++      "size": 5194
++    },
++    {
++      "name": "DASToolRun1_DASTool_summary.tsv",
++      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_output/DASToolRun1_DASTool_summary.tsv",
++      "git_blob": "0e98a7e20170f662c77a64d665d26b914ca256cd",
++      "sha256": "a77d008b100a718094611335aa76efff644e9e826811885f73091cce0699a8dd",
++      "size": 1159
++    },
++    {
++      "name": "DASToolRun1_DASTool_contig2bin.tsv",
++      "url": "https://raw.githubusercontent.com/cmks/DAS_Tool/1.1.7/sample_output/DASToolRun1_DASTool_contig2bin.tsv",
++      "git_blob": "d0736831c16ceea82b9058407d51eb9abe5067cb",
++      "sha256": "c3fc091c96a10cd02e78520ecc72eed1af3c89cd2c11baf49816f0163c81fb5e",
++      "size": 55171
++    }
++  ]
++}
+--- a/README.md
++++ b/README.md
+@@ -285,9 +285,12 @@
+ - 共丰度关联输出 Spearman/Pearson、Jaccard、p 值和对所有测试对作 BH 校正的
+   q 值；脚本 `max-qvalue` 默认 1.0，流程未传显著性筛选阈值。即使额外按 q 值
+   筛选，也不消除组成性、混杂或特征不可比问题，仍应按探索性解释。
+-- MAG 最终通道当前默认接 MetaBAT2，启用 DAS Tool 时以其输出替换；CONCOCT
+-  单开未进入最终通道，SemiBin 输出也未接入最终通道或 DAS Tool 输入。
+-  CheckM2 和 GTDB-Tk 都读取最终通道，不能把“启用任一 binner”理解为完整 MAG 链。
++- MAG 单独选择 MetaBAT2、CONCOCT 或 SemiBin 时，其 bins 直接进入最终通道。
++  同时选择多个分箱器必须在 `--mag_tools` 中显式加入 `das_tool`，否则入口报错；
++  选择 DAS Tool 时，汇总全部已选分箱器的可用结果并导出 FASTA。
++  CheckM2、GTDB-Tk 与序列宿主关联接收同一套最终 bins；质量/分类工具及 DAS Tool
++  不能在没有分箱器时单独启用。CONCOCT 压缩输入、SemiBin 合法无 bins、GTDB-Tk
++  文件扩展名等独立问题仍在审查中，尚不能把接线修复视为完整 MAG 链认证。
+ - 差异丰度"内部效应量法"为 Welch t 检验 + Hedges' g + BH 校正，默认按
+   `--min-prevalence 0.1` 过滤低流行度 contig；它不是 MaAsLin2 或 ANCOM-BC 的
+   实现，也未建模配对 / 批次。DESeq2 当前为 `~ group`。
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -284,3 +284,36 @@
+ ```
+ 
+ 原生runner要求PATH中有可用Nextflow；以上是独立原生模块/子工作流回归，不表示nf-test框架/JUnit或镜像已运行。数据库scope测试分开生产默认参数和固定上游的low_quality/include_loose/include_nudge/clean/debug参数，后者保留NDM-1 Perfect100断言；不要把两种方法的输出差异当作数据库回归失败。VIM-77属于精确参考sanity，随机DNA是人工阴性，不能推导临床AMR性能。当前真实执行证据与限制见 `docs/tool-audit/contracts/rgi-database.md`。
++# MAG 结果路由和 DAS Tool 导出（独立原生验证）
++
++`tests/run_mag_selection_validation.py --work-dir <新目录> --replay-main-registry`
++执行原 main 拒绝用例及 MAG 依赖矩阵；多分箱器未选 DAS Tool、无分箱器却选择
++汇总/质量/分类的配置必须在分析任务启动前失败。重放不增加独立场景分母。
++
++将 `results/tool-audit/runtime/bin` 加入 PATH 后，运行：
++
++```bash
++python3 tests/run_mag_routing.py --work-dir <新目录> \
++  --das-prefix <DAS_Tool1.1.7前缀> --bgzip-prefix <含bgzip的前缀>
++```
++
++这是原 MAG_HOST、真实 gzip/上游 FASTA 转表辅助程序、真实 R 宿主关联的接线验证。
++分箱器、DAS 汇总和质量/分类 CLI 使用明确 observer，BAM/数据库是假输入。
++断言检查样本/分组、数量、ID、DNA、全部汇总输入、消费者实际暂存和原 R 输出。
++GTDB observer 仅观察暂存，不能证明其真实扩展名筛选或分类；不计完整 P3。
++
++真实 DAS Tool 数据和独立预期结果锁定在 `tests/dastool-sample.lock.json`，按其中
++URL 获取7个官方1.1.7文件至同一目录，然后执行：
++
++```bash
++python3 tests/prepare_dastool_sample.py <样本目录>
++python3 tests/run_dastool_export.py --work-dir <新目录> \
++  --fixture-dir <样本目录> --prefix <DAS_Tool1.1.7前缀>
++```
++
++真实节点使用完整官方 gut assembly 和4组预测，以固定上游 Run1 成员表与汇总表
++检查15个 bin 的数量、成员、长度和逐条 DNA；不是重新生成期望值。
++阳性使用生产参数和默认 score0.5；无接受 bins 控制使用真实低分 bin 与明确的
++测试阈值0.9，不改变生产默认。上游在此情形主动停止，测试必须确认失败传播、
++正确诊断和没有部分发布文件。可选 `--old-config` 用于保留前态无 FASTA 反例。
++这些入口不等于 nf-test 框架/镜像认证，也不验证分箱器、CheckM2、GTDB 模型或科学准确率。

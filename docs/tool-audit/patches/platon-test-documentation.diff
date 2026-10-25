@@ -1,0 +1,29 @@
+diff --git a/tests/nf-test/COVERAGE.md b/tests/nf-test/COVERAGE.md
+--- a/tests/nf-test/COVERAGE.md
++++ b/tests/nf-test/COVERAGE.md
+@@ -133,3 +133,5 @@
+ 
+ GTDB-Tk (~110GB)、eggNOG (~40GB)、MetaPhlAn (~4GB)、RGI/CARD、HOTSPOT、COPLA
+ refgraph。这些是环境/数据阻塞，不是测试通过。
++
++2026-10-24 Platon有界增量：当前原生产模块、固定1.7/完整v1.5.0数据库在nf-test0.9.5 native overlay中两个plain/gzip P3用例通过，代码/数据库/命令/断言见 results/tool-audit/20261024-platon-native/receipt.json。另8单元、2原生传输方法、完整库无检出与错误/缓存/Conda控制单列；同一pUTI89重放不算独立生物学重复。旧w3单例缺源码hash，不替代本次证据；未扩大到镜像或完整平台。
+diff --git a/tests/nf-test/REAL-NODES-RESULTS.md b/tests/nf-test/REAL-NODES-RESULTS.md
+--- a/tests/nf-test/REAL-NODES-RESULTS.md
++++ b/tests/nf-test/REAL-NODES-RESULTS.md
+@@ -35,7 +35,7 @@
+ | SAMTOOLS_INDEX | 真实 bam | 通过 | w2-samtools-index.xml |
+ | HIFIASM_META | gallus pacbio | 通过（执行契约；fixture 过稀疏无 contig） | w2-hifiasm.xml |
+ | DORADO_BASECALL | HG002 pod5 | 通过（10 条真实 reads basecall） | w2-dorado.xml |
+-| PLATON | pUTI89 + 官方 db | 通过（真实分类输出） | w3-platon.xml |
++| PLATON | pUTI89 + 官方 db | 历史w3单例缺源码hash；当前固定1.7/完整库的原生plain/gzip两个P3通过 | w3-platon.xml（历史）；results/tool-audit/20261024-platon-native/receipt.json（当前有界） |
+ | METABAT2 + JGISUMMARIZE | binning fixture（真实 contigs+BAM） | 通过 | w3-mag-blast.xml |
+ | BLAST_BLASTN | pUTI89 自建小库 | 通过（真实自比对命中） | w3-blastn.xml |
+ 
+@@ -94,3 +94,7 @@
+ - vendored 套件（W1）的快照差异逐类记录于 w1-vendored-results.md；未更新任何
+   上游快照，未修改 vendored 测试。
+ - 所有 JUnit/log/trace 在 results/nf-test/；测试、锁文件、本文档入 Git，数据不入。
++
++## 2026-10-24 Platon当前原生增量
++
++固定提交3cce2dd2完整79blob/安装7Python文件、完整31文件官方库和85包；默认accuracy+meta保持，四处零命中汇总日志在内存修正。当前nf-test0.9.5原P3两个用例以native overlay通过；静态backend-podman标签不证明镜像执行。完整库原CLI与修复包装的阳性/无检出TSV、FASTA字节及JSON语义相同；子工具失败、future异常、同size/mtime资源缓存和长度未评估状态另有原/新真实对照。阴性软件fixture不是独立性能真值，不将重复pUTI89执行算多份生物学证据。详见 docs/tool-audit/contracts/platon-native.md 及本批receipt，其他历史行不被本批认证。

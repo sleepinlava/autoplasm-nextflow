@@ -1,0 +1,1559 @@
+diff --git a/bin/semibin_output_state.py b/bin/semibin_output_state.py
+--- /dev/null
++++ b/bin/semibin_output_state.py
+@@ -0,0 +1,55 @@
++#!/usr/bin/env python3
++"""Record the final, post-filter SemiBin 2.4.1 bin state without inventing bins."""
++import argparse
++import csv
++import json
++from pathlib import Path
++
++
++FIELDS = ['filename', 'nbps', 'nr_contigs', 'N50', 'L50']
++
++
++def record_state(output):
++    output = Path(output)
++    directory = output/'output_bins'
++    if not directory.is_dir():
++        raise ValueError('Missing SemiBin output_bins directory')
++    bins = sorted(directory.iterdir())
++    if any(not p.is_file() or not p.name.endswith('.fa.gz') or p.stat().st_size == 0 for p in bins):
++        raise ValueError('Expected nonempty SemiBin default-compression .fa.gz bin files')
++    # contig_bins.tsv describes labels before final size filtering/reclustering;
++    # it is not a roster of the FASTAs actually retained in output_bins.
++    summary = output/'recluster_bins_info.tsv'
++    with summary.open(newline='') as stream:
++        reader = csv.DictReader(stream, delimiter='\t')
++        if reader.fieldnames != FIELDS:
++            raise ValueError('Unexpected SemiBin final bin summary header')
++        rows = list(reader)
++    paths = {}
++    for row in rows:
++        if set(row) != set(FIELDS) or any(row[k] is None for k in FIELDS):
++            raise ValueError('Malformed SemiBin final bin summary row')
++        path = Path(row['filename']).resolve()
++        if path in paths:
++            raise ValueError('Duplicate SemiBin final bin summary entry')
++        metrics = {k: int(row[k]) for k in FIELDS[1:]}
++        if any(v <= 0 for v in metrics.values()):
++            raise ValueError('Invalid SemiBin final bin summary metrics')
++        paths[path] = metrics
++    if set(paths) != {p.resolve() for p in bins}:
++        raise ValueError('SemiBin final summary and output FASTA sets differ')
++    state = {'schema': 1, 'state': 'bins_ready' if bins else 'no_bins',
++             'bin_count': len(bins),
++             'bins': [{'filename': p.name, **paths[p.resolve()]} for p in bins],
++             'scope': 'final output_bins after filtering and reclustering; not quality-controlled MAGs'}
++    destination = output/'binning_status.json'
++    if destination.exists():
++        raise ValueError('SemiBin binning status already exists')
++    destination.write_text(json.dumps(state, indent=2)+'\n')
++    return state
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', required=True)
++    record_state(parser.parse_args().output)
+diff --git a/modules/nf-core/semibin/singleeasybin/main.nf b/modules/nf-core/semibin/singleeasybin/main.nf
+--- a/modules/nf-core/semibin/singleeasybin/main.nf
++++ b/modules/nf-core/semibin/singleeasybin/main.nf
+@@ -19,7 +19,8 @@
+     tuple val(meta), path("${prefix}/*.csv"), emit: csv
+     tuple val(meta), path("${prefix}/*.h5"), emit: model, optional: true
+     tuple val(meta), path("${prefix}/*.tsv"), emit: tsv
+-    tuple val(meta), path("${prefix}/output_bins/*.fa.gz"), emit: output_fasta
++    tuple val(meta), path("${prefix}/output_bins/*.fa.gz"), emit: output_fasta, optional: true
++    tuple val(meta), path("${prefix}/binning_status.json"), emit: state
+     tuple val("${task.process}"), val('SemiBin'), eval("SemiBin2 --version"), emit: versions_semibin, topic: versions
+     tuple val("${task.process}"), val('cuda'), eval('python -c "import torch; print(torch.version.cuda or \'no CUDA available\')"'), emit: versions_cuda, topic: versions
+ 
+@@ -31,6 +32,7 @@
+     def args2 = task.ext.args2 ?: ""
+     prefix = task.ext.prefix ?: "${meta.id}"
+     def engine = task.accelerator ? 'gpu' : 'cpu'
++    def state_adapter = file("${moduleDir}/../../../../bin/semibin_output_state.py").text
+     """
+ 
+     SemiBin2 \\
+@@ -42,6 +44,10 @@
+         -t ${task.cpus} \\
+         --engine ${engine} \\
+         ${args2}
++
++    python3 - --output "${prefix}" <<'SEMIBIN_STATE_PY'
++${state_adapter}
++SEMIBIN_STATE_PY
+     """
+ 
+     stub:
+@@ -51,7 +57,6 @@
+     touch ${prefix}/{contig_bins,recluster_bins_info}.tsv
+     touch ${prefix}/{data,data_split}.csv
+     mkdir ${prefix}/output_bins
+-    touch ${prefix}/output_bins/SemiBin_{0,1,2,3}.fa
+-    gzip  ${prefix}/output_bins/SemiBin*
++    echo '{"schema":1,"state":"stub_not_validated","bin_count":null,"bins":[]}' > ${prefix}/binning_status.json
+     """
+ }
+diff --git a/modules/nf-core/semibin/singleeasybin/meta.yml b/modules/nf-core/semibin/singleeasybin/meta.yml
+--- a/modules/nf-core/semibin/singleeasybin/meta.yml
++++ b/modules/nf-core/semibin/singleeasybin/meta.yml
+@@ -73,8 +73,17 @@
+             e.g. [ id:'test' ]
+       - ${prefix}/output_bins/*.fa.gz:
+           type: file
+-          description: precluster fasta files
+-          pattern: "*.fa"
++          description: Optional final bin FASTAs after filtering and reclustering; absent for a valid no-bin result
++          pattern: "*.fa.gz"
++          ontologies: []
++  state:
++    - - meta:
++          type: map
++          description: Sample information
++      - ${prefix}/binning_status.json:
++          type: file
++          description: Explicit final bins_ready/no_bins status; stub_not_validated for stubs
++          pattern: "binning_status.json"
+           ontologies: []
+   versions_semibin:
+     - - ${task.process}:
+diff --git a/modules/nf-core/semibin/singleeasybin/tests/main.nf.test b/modules/nf-core/semibin/singleeasybin/tests/main.nf.test
+--- a/modules/nf-core/semibin/singleeasybin/tests/main.nf.test
++++ b/modules/nf-core/semibin/singleeasybin/tests/main.nf.test
+@@ -34,15 +34,30 @@
+         }
+         then {
+             assert process.success
+-            def bins = process.out.output_fasta.get(0).get(1).collect { path(it).fasta }
++            assert process.out.model.size() == 1
++            def modelValue = process.out.model.get(0).get(1)
++            def modelFiles = modelValue instanceof List ? modelValue : [modelValue]
++            assert modelFiles.size() == 1 && path(modelFiles[0]).name.endsWith('.pt')
++            assert path(modelFiles[0]).size() > 0
++            def stateValue = process.out.state.get(0).get(1)
++            def stateFiles = stateValue instanceof List ? stateValue : [stateValue]
++            assert stateFiles.size() == 1
++            def state = new groovy.json.JsonSlurper().parseText(path(stateFiles[0]).text)
++            assert state.state == 'bins_ready'
++            def binValue = process.out.output_fasta.get(0).get(1)
++            def binFiles = binValue instanceof List ? binValue : [binValue]
++            assert state.bin_count == binFiles.size()
++            def bins = binFiles.collect { path(it).fasta }
+             def featurised = path(process.out.csv.get(0).get(1).find { it.endsWith('/data.csv') })
+                 .readLines().drop(1).collect { it.split(',')[0] }
+             assertAll(
+                 // every contig SemiBin featurised lands in exactly one bin. Which bin varies between machines
+                 { assert featurised && bins.collectMany { it.keySet().toList() }.sort() == featurised.sort() },
+-                { assert snapshot(
+-                    sanitizeOutput(process.out, unstableKeys: ["csv", "tsv"], ignoreKeys: ["output_fasta"])
+-                ).match() }
++                { assert process.out.csv.get(0).get(1).collect { file(it).name }.toSet() == ['data.csv', 'data_split.csv', 's1.sorted.bam_0_data_cov.csv', 's2.sorted.bam_1_data_cov.csv', 's3.sorted.bam_2_data_cov.csv'].toSet() },
++                { assert process.out.tsv.get(0).get(1).collect { file(it).name }.toSet() == ['contig_bins.tsv', 'recluster_bins_info.tsv'].toSet() },
++                { assert process.out.versions_semibin.size() == 1 && process.out.versions_semibin.get(0).get(2) == '2.4.1' },
++                { assert process.out.versions_cuda.size() == 1 && process.out.versions_cuda.get(0).get(2) == 'no CUDA available' }
++
+             )
+         }
+     }
+@@ -70,9 +85,15 @@
+         }
+         then {
+             assert process.success
+-            assertAll(
+-                { assert snapshot(process.out).match() }
+-            )
++            assert process.out.output_fasta.size() == 0
++            assert process.out.model.size() == 0
++            def stateValue = process.out.state.get(0).get(1)
++            def stateFiles = stateValue instanceof List ? stateValue : [stateValue]
++            assert stateFiles.size() == 1
++            def state = new groovy.json.JsonSlurper().parseText(path(stateFiles[0]).text)
++            assert state.state == 'stub_not_validated'
++            assert state.bin_count == null
++
+         }
+     }
+ 
+diff --git a/modules/nf-core/semibin/singleeasybin/tests/main.gpu.nf.test b/modules/nf-core/semibin/singleeasybin/tests/main.gpu.nf.test
+--- a/modules/nf-core/semibin/singleeasybin/tests/main.gpu.nf.test
++++ b/modules/nf-core/semibin/singleeasybin/tests/main.gpu.nf.test
+@@ -27,15 +27,30 @@
+         }
+         then {
+             assert process.success
+-            def bins = process.out.output_fasta.get(0).get(1).collect { path(it).fasta }
++            assert process.out.model.size() == 1
++            def modelValue = process.out.model.get(0).get(1)
++            def modelFiles = modelValue instanceof List ? modelValue : [modelValue]
++            assert modelFiles.size() == 1 && path(modelFiles[0]).name.endsWith('.pt')
++            assert path(modelFiles[0]).size() > 0
++            def stateValue = process.out.state.get(0).get(1)
++            def stateFiles = stateValue instanceof List ? stateValue : [stateValue]
++            assert stateFiles.size() == 1
++            def state = new groovy.json.JsonSlurper().parseText(path(stateFiles[0]).text)
++            assert state.state == 'bins_ready'
++            def binValue = process.out.output_fasta.get(0).get(1)
++            def binFiles = binValue instanceof List ? binValue : [binValue]
++            assert state.bin_count == binFiles.size()
++            def bins = binFiles.collect { path(it).fasta }
+             def featurised = path(process.out.csv.get(0).get(1).find { it.endsWith('/data.csv') })
+                 .readLines().drop(1).collect { it.split(',')[0] }
+             assertAll(
+                 // every contig SemiBin featurised lands in exactly one bin. Which bin varies between machines
+                 { assert featurised && bins.collectMany { it.keySet().toList() }.sort() == featurised.sort() },
+-                { assert snapshot(
+-                    sanitizeOutput(process.out, unstableKeys: ["csv", "tsv"], ignoreKeys: ["output_fasta"])
+-                ).match() }
++                { assert process.out.csv.get(0).get(1).collect { file(it).name }.toSet() == ['data.csv', 'data_split.csv', 's1.sorted.bam_0_data_cov.csv'].toSet() },
++                { assert process.out.tsv.get(0).get(1).collect { file(it).name }.toSet() == ['contig_bins.tsv', 'recluster_bins_info.tsv'].toSet() },
++                { assert process.out.versions_semibin.size() == 1 && process.out.versions_semibin.get(0).get(2) == '2.4.1' },
++                { assert process.out.versions_cuda.size() == 1 && process.out.versions_cuda.get(0).get(2).toString() ==~ /[0-9]+(?:\.[0-9]+)+/ }
++
+             )
+         }
+     }
+diff --git a/tests/mag_interface_observer.py b/tests/mag_interface_observer.py
+--- a/tests/mag_interface_observer.py
++++ b/tests/mag_interface_observer.py
+@@ -111,9 +111,19 @@
+         raise SystemExit('CONTROLLED_SEMIBIN_FAILURE')
+     out = Path(arg('--output'))
+     out.mkdir()
+-    (out / 'contig_bins.tsv').write_text('INTERFACE_OBSERVER\n')
++    (out / 'contig_bins.tsv').write_text('contig\tbin\n' + sid + '_C\t0\n')
+     (out / 'data.csv').write_text('INTERFACE_OBSERVER\n')
+-    write_fasta(out / 'output_bins/SemiBin_0.fa.gz', {sid + '_C': seqs[sid + '_C']})
++    (out / 'output_bins').mkdir()
++    header = 'filename\tnbps\tnr_contigs\tN50\tL50\n'
++    empty_samples = os.environ.get('MAG_EMPTY_SEMIBIN', '').split(',')
++    if sid in empty_samples:
++        (out / 'contig_bins.tsv').write_text('contig\tbin\n' + sid + '_C\t-1\n')
++        (out / 'recluster_bins_info.tsv').write_text(header)
++    else:
++        bin_path = out / 'output_bins/SemiBin_0.fa.gz'
++        write_fasta(bin_path, {sid + '_C': seqs[sid + '_C']})
++        length = len(seqs[sid + '_C'])
++        (out / 'recluster_bins_info.tsv').write_text(header + str(bin_path) + f'\t{length}\t1\t{length}\t1\n')
+ elif tool == 'DAS_Tool':
+     seqs = read_fasta(arg('-c'))
+     sid = next(iter(seqs)).rsplit('_', 1)[0]
+diff --git a/tests/run_mag_routing.py b/tests/run_mag_routing.py
+--- a/tests/run_mag_routing.py
++++ b/tests/run_mag_routing.py
+@@ -71,6 +71,10 @@
+                    ('duplicate-selector', ['metabat2', 'metabat2'], {}),
+                    ('empty-metabat', ['metabat2'], {'MAG_EMPTY_METABAT': 'S1'}),
+                    ('empty-concoct', ['concoct'], {'MAG_EMPTY_CONCOCT': 'S1'}),
++                   ('empty-semibin', ['semibin'], {'MAG_EMPTY_SEMIBIN': 'S1'}),
++                   ('all-empty-semibin', ['semibin'], {'MAG_EMPTY_SEMIBIN': 'S1,S.2'}),
++                   ('empty-semibin-component', ['metabat2', 'semibin', 'das_tool'], {'MAG_EMPTY_SEMIBIN': 'S1'}),
++                   ('all-empty-semibin-das', ['semibin', 'das_tool'], {'MAG_EMPTY_SEMIBIN': 'S1,S.2'}),
+                    ('empty-component', ['metabat2', 'semibin', 'das_tool'], {'MAG_EMPTY_METABAT': 'S1'}),
+                    ('tool-failure', ['semibin'], {'MAG_FAIL_SEMIBIN': '1'})]
+     workflow = ROOT / 'tests/nextflow/mag_selection.nf'
+@@ -113,10 +117,13 @@
+         else:
+             checks = {'success': result.returncode == 0, 'all_completed': bool(tasks) and all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks)}
+             if checks['success']:
++                expected_consumer_count = 0
+                 for sid, seqs in sequences.items():
+                     available = selected - ({'metabat2'} if sid in extra_env.get('MAG_EMPTY_METABAT', '').split(',') else set())
+                     if sid in extra_env.get('MAG_EMPTY_CONCOCT', '').split(','):
+                         available -= {'concoct'}
++                    if sid in extra_env.get('MAG_EMPTY_SEMIBIN', '').split(','):
++                        available -= {'semibin'}
+                     expected_bins = {}
+                     if 'das_tool' in selected and available & {'metabat2', 'concoct', 'semibin'}:
+                         letters = set()
+@@ -130,6 +137,15 @@
+                         expected_bins = {sid + '_' + str(i) + '.fa.gz': {sid + '_' + v: seqs[sid + '_' + v]} for i, v in enumerate('BC', 1)}
+                     elif 'semibin' in available:
+                         expected_bins = {'SemiBin_0.fa.gz': {sid + '_C': seqs[sid + '_C']}}
++                    expected_consumer_count += 2 if expected_bins else 0
++                    if 'semibin' in selected:
++                        states = [q for q in (p / 'work').rglob('binning_status.json')
++                                  if q.parent.name == sid and not q.is_symlink()]
++                        checks[sid + '_semibin_state_once'] = len(states) == 1
++                        if states:
++                            state = json.loads(states[0].read_text())
++                            has_bins = 'semibin' in available
++                            checks[sid + '_semibin_explicit_state'] = state['state'] == ('bins_ready' if has_bins else 'no_bins') and state['bin_count'] == int(has_bins)
+                     checks[sid + '_one_meta_row'] = result.stdout.count('FINAL_BINS=' + sid + ':' + ('G1' if sid == 'S1' else 'G2') + ':') == bool(expected_bins)
+                     hashes = {n: {k: hashlib.sha256(v.encode()).hexdigest() for k, v in members.items()} for n, members in expected_bins.items()}
+                     for consumer in ['checkm2', 'gtdbtk']:
+@@ -151,11 +167,10 @@
+                         inputs = [json.loads(q.read_text()) for q in (p / 'work').rglob('observer-DAS-inputs.json') if json.loads(q.read_text())['sample'] == sid]
+                         checks[sid + '_all_available_binners'] = len(inputs) == bool(expected_bins) and (not inputs or set(inputs[0]['tables']) == {sid + '.' + b + '.tsv' for b in available & {'metabat2', 'concoct', 'semibin'}})
+                 consumer_count = sum('CHECKM2' in t['name'] or 'GTDBTK' in t['name'] for t in tasks)
+-                expected_count = 0 if not binners else (2 if name in ['empty-metabat', 'empty-concoct'] else 4)
+-                checks['no_dropped_or_duplicate_consumer_tasks'] = consumer_count == expected_count
++                checks['no_dropped_or_duplicate_consumer_tasks'] = consumer_count == expected_consumer_count
+         runs.append({'case': name, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
+         print(name, checks, flush=True)
+-        source_names = ['main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'conf/nfcore_mag.config', 'modules/nf-core/gtdbtk/classifywf/main.nf', 'bin/normalize_gtdb_bins.py', 'tests/nextflow/mag_selection.nf', 'tests/mag_interface_observer.py', 'tests/run_mag_routing.py']
++        source_names = ['main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'conf/nfcore_mag.config', 'modules/nf-core/gtdbtk/classifywf/main.nf', 'bin/normalize_gtdb_bins.py', 'modules/nf-core/semibin/singleeasybin/main.nf', 'bin/semibin_output_state.py', 'tests/nextflow/mag_selection.nf', 'tests/mag_interface_observer.py', 'tests/run_mag_routing.py']
+         receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in source_names}, 'limitations': ['explicit synthetic binner/DAS/CheckM/GTDB observers, fake BAM/db inputs; no tool inference or scientific accuracy claim', 'actual original workflow + gzip/converter helper + native R host linking; per-sample bin identity/DNA/metadata/multiplicity checks', 'GTDB observer verifies private normalized staging and unchanged final-bin identities, not the actual classifier; separate real2.7.2 parser/selection tests, no image/nf-test framework/full platform']}
+         if mag_host:
+             receipt['source_sha256']['subworkflows/mag_host.nf'] = hashlib.sha256(mag_host.read_bytes()).hexdigest()
+diff --git a/tests/test_semibin_output_state.py b/tests/test_semibin_output_state.py
+--- /dev/null
++++ b/tests/test_semibin_output_state.py
+@@ -0,0 +1,57 @@
++import gzip
++import importlib.util
++import json
++from pathlib import Path
++import tempfile
++import unittest
++
++ROOT=Path(__file__).resolve().parents[1]
++spec=importlib.util.spec_from_file_location('semibin_state',ROOT/'bin/semibin_output_state.py')
++adapter=importlib.util.module_from_spec(spec);spec.loader.exec_module(adapter)
++
++
++class SemiBinState(unittest.TestCase):
++    def setUp(self):
++        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
++        self.root=Path(self.tmp.name);self.bins=self.root/'output_bins';self.bins.mkdir()
++        self.summary=self.root/'recluster_bins_info.tsv'
++        self.header='filename\tnbps\tnr_contigs\tN50\tL50\n'
++        self.summary.write_text(self.header)
++
++    def test_valid_zero_bins_is_explicit_and_does_not_create_fasta(self):
++        # The pre-filter label table may have positives; only final output
++        # FASTAs and the post-reclustering table determine the retained state.
++        (self.root/'contig_bins.tsv').write_text('contig\tbin\nfiltered\t0\n')
++        value=adapter.record_state(self.root)
++        self.assertEqual((value['state'],value['bin_count'],value['bins']),('no_bins',0,[]))
++        self.assertEqual(list(self.bins.iterdir()),[])
++        self.assertEqual(json.loads((self.root/'binning_status.json').read_text()),value)
++
++    def test_positive_final_bin_uses_postfilter_summary(self):
++        fasta=self.bins/'SemiBin_3.fa.gz';fasta.write_bytes(gzip.compress(b'>a\nACGTTGCA\n'))
++        self.summary.write_text(self.header+str(fasta)+'\t8\t1\t8\t1\n')
++        value=adapter.record_state(self.root)
++        self.assertEqual(value['state'],'bins_ready');self.assertEqual(value['bin_count'],1)
++        self.assertEqual(value['bins'],[{'filename':'SemiBin_3.fa.gz','nbps':8,'nr_contigs':1,'N50':8,'L50':1}])
++
++    def test_missing_corrupt_or_stale_output_cannot_be_reported_as_empty(self):
++        fasta=self.bins/'SemiBin_0.fa.gz'
++        for payload in [b'',gzip.compress(b'>a\nACGT\n')]:
++            fasta.write_bytes(payload)
++            with self.assertRaises(ValueError):adapter.record_state(self.root)
++            self.assertFalse((self.root/'binning_status.json').exists())
++        fasta.unlink();self.summary.write_text(self.header+str(fasta)+'\t4\t1\t4\t1\n')
++        with self.assertRaisesRegex(ValueError,'sets differ'):adapter.record_state(self.root)
++        self.assertFalse((self.root/'binning_status.json').exists())
++
++    def test_wrong_header_compression_and_duplicate_summary_fail(self):
++        self.summary.write_text('filename\tcount\n')
++        with self.assertRaisesRegex(ValueError,'header'):adapter.record_state(self.root)
++        self.summary.write_text(self.header);wrong=self.bins/'bin.fa';wrong.write_text('>a\nACGT\n')
++        with self.assertRaisesRegex(ValueError,'compression'):adapter.record_state(self.root)
++        wrong.unlink();fasta=self.bins/'bin.fa.gz';fasta.write_bytes(gzip.compress(b'>a\nACGT\n'))
++        row=str(fasta)+'\t4\t1\t4\t1\n';self.summary.write_text(self.header+row+row)
++        with self.assertRaisesRegex(ValueError,'Duplicate'):adapter.record_state(self.root)
++
++
++if __name__=='__main__':unittest.main()
+diff --git a/tests/run_semibin_states.py b/tests/run_semibin_states.py
+--- /dev/null
++++ b/tests/run_semibin_states.py
+@@ -0,0 +1,115 @@
++#!/usr/bin/env python3
++"""Native fixed2.4.1 default self training, output states and checkpoint emits.
++
++The no-bin boundary uses an explicit minimum size greater than the complete
++official input. It is not a model sensitivity/specificity benchmark. Stub and
++native failures are kept separate from successful inference.
++"""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++from Bio import SeqIO
++import gzip
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def dna(path):
++    opener=gzip.open if str(path).endswith('.gz') else open
++    with opener(path,'rt') as stream:return {s.id:str(s.seq) for s in SeqIO.parse(stream,'fasta')}
++
++
++def run(base,prefix,fixture,before):
++    base.mkdir(parents=True)
++    source=dna(fixture/'input.fasta');assert len(source)==40 and sum(map(len,source.values()))==800000
++    env={**os.environ,'PATH':str(prefix/'bin')+':'+os.environ['PATH'],'OMP_NUM_THREADS':'2','OPENBLAS_NUM_THREADS':'2','MKL_NUM_THREADS':'2'}
++    runs=[]
++    def execute(name,extra='',original=False,stub=False,resume=False):
++        folder=base/name;folder.mkdir(exist_ok=resume)
++        config=folder/'nextflow.config'
++        if not resume:
++            config.write_text("process { executor='local'; cpus=2; memory='2 GB'; errorStrategy='terminate'; maxRetries=0; publishDir=[path:"+repr(str(folder/'out'))+",mode:'copy']; withName:'SEMIBIN' { ext.args2="+repr('--random-seed 0 '+extra)+" } }\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n")
++            (folder/'params.json').write_text(json.dumps({'fasta':str(fixture/'input.fasta'),'bam':str(fixture/'input.sorted.bam'),'original':original}))
++        workflow=ROOT/'tests/nextflow/semibin_states.nf'
++        if original:
++            workflow=folder/'original.nf'
++            workflow.write_text((ROOT/'tests/nextflow/semibin_states.nf').read_text().replace("'../../modules/nf-core/semibin/singleeasybin/main'",repr(str(before.with_suffix('')))))
++        suffix='-resume' if resume else '';trace=folder/('trace'+suffix+'.tsv')
++        name_key='semibin_'+hashlib.sha256(str(folder).encode()).hexdigest()[:12]
++        cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(workflow),'-params-file',str(folder/'params.json'),'-work-dir',str(folder/'work'),'-with-trace',str(trace),'-ansi-log','false']
++        cmd+=['-resume',name_key] if resume else ['-name',name_key]
++        if stub:cmd+=['-stub-run']
++        result=subprocess.run(cmd,env=env,capture_output=True,text=True)
++        (folder/('stdout'+suffix+'.log')).write_text(result.stdout);(folder/('stderr'+suffix+'.log')).write_text(result.stderr)
++        tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else []
++        record={'scenario':name+suffix,'command':cmd,'exit_code':result.returncode,'trace':tasks}
++        runs.append(record);(base/'runs-progress.json').write_text(json.dumps(runs,indent=2)+'\n')
++        assert len(tasks)==1,record
++        if name=='native-failure':
++            checks={'native_failure_propagates':result.returncode!=0 and tasks[0]['status']=='FAILED',
++                    'native_parser_diagnostic':'unrecognized arguments' in result.stdout+result.stderr,
++                    'no_fake_state':not (folder/'out/sample/binning_status.json').exists()}
++            record['checks']=checks;assert all(checks.values()),record;return
++        assert result.returncode==0 and tasks[0]['status']==('CACHED' if resume else 'COMPLETED'),record
++        output=folder/'out/sample';bins=list((output/'output_bins').glob('*.fa.gz'))
++        checks={'sample_bin_emission':('BIN_EMIT=sample' in result.stdout)==bool(bins)}
++        if original:
++            # The old .h5 glob omits the real .pt checkpoint from its channel.
++            actual=list((folder/'work').rglob('sample/model.pt'))
++            checks.update(real_checkpoint_exists=len(actual)==1,old_checkpoint_emit_missing='MODEL_EMIT=' not in result.stdout and not (output/'model.pt').exists())
++        else:
++            state=json.loads((output/'binning_status.json').read_text())
++            if stub:
++                checks.update(stub_explicit=state['state']=='stub_not_validated' and state['bin_count'] is None,
++                              no_manufactured_bins=not bins,no_manufactured_checkpoint=not (output/'model.pt').exists())
++            else:
++                empty=name=='no-bins'
++                checks.update(state_matches=state['state']==('no_bins' if empty else 'bins_ready') and state['bin_count']==len(bins),
++                              correct_empty_boundary=(not bins) if empty else bool(bins),
++                              checkpoint_emitted=(output/'model.pt').is_file() and 'MODEL_EMIT=sample' in result.stdout)
++                if not empty:
++                    seen=set();metrics={v['filename']:v for v in state['bins']}
++                    for path in bins:
++                        contents=dna(path);assert contents and not (seen&contents.keys())
++                        assert all(k in source and value==source[k] for k,value in contents.items())
++                        seen.update(contents);entry=metrics[path.name]
++                        lengths=sorted(map(len,contents.values()),reverse=True);total=sum(lengths);cumulative=0
++                        for rank,length in enumerate(lengths,1):
++                            cumulative+=length
++                            if cumulative>=total/2:break
++                        assert (entry['nbps'],entry['nr_contigs'],entry['N50'],entry['L50'])==(total,len(contents),length,rank)
++                    checks['independent_bin_DNA_membership_metrics']=True
++                # Use the fixed native program's safe model loader; verify the
++                # newly exposed checkpoint is readable and finite, not just named .pt.
++                code='import sys,torch; from SemiBin.semi_supervised_model import model_load; m=model_load(sys.argv[1],torch.device("cpu")); assert all(torch.isfinite(x).all() for x in m.parameters()); print(type(m).__name__)'
++                loaded=subprocess.run([str(prefix/'bin/python'),'-c',code,str(output/'model.pt')],env=env,capture_output=True,text=True)
++                (folder/('checkpoint-load'+suffix+'.log')).write_text(loaded.stdout+loaded.stderr)
++                checks['checkpoint_native_loads_finite']=loaded.returncode==0
++        record['checks']=checks
++        assert all(checks.values()),record
++        print(name+suffix,checks,flush=True)
++    execute('original-positive',original=True)
++    execute('positive')
++    execute('positive',resume=True)
++    execute('no-bins','--minfasta-kbs 1000')
++    execute('stub',stub=True)
++    execute('native-failure','--not-a-real-option')
++    files=['bin/semibin_output_state.py','modules/nf-core/semibin/singleeasybin/main.nf','tests/test_semibin_output_state.py','tests/run_semibin_states.py','tests/nextflow/semibin_states.nf']
++    payload={'pass':True,'runs':runs,'source_sha256':{f:hashlib.sha256((ROOT/f).read_bytes()).hexdigest() for f in files},
++             'fixture_sha256':{f:hashlib.sha256((fixture/f).read_bytes()).hexdigest() for f in ['input.fasta','input.sorted.bam']},
++             'limitations':['Native CPU only; exact official fixture identity and DNA/metrics verified, not biological clustering accuracy/MAG quality.',
++                            'No-bin uses declared size-filter boundary greater than total input; default self-supervised 15epochs retained; random seed0 fixed.',
++                            'Original legitimate-zero failure is a separate retained original module run; original missing model emit and current .pt model load are checked here.',
++                            'Stub performs no inference; model/status assertions replace outdated empty-model/positive-stub snapshots. Vendored nf-test/GPU/images/full platforms not certified.']}
++    (base/'run.json').write_text(json.dumps(payload,indent=2)+'\n')
++    print('native SemiBin states passed',len(runs),'selected trace entries')
++
++
++if __name__=='__main__':
++    parser=argparse.ArgumentParser(description=__doc__)
++    for key in ['output','prefix','fixture','before']:parser.add_argument('--'+key,type=Path,required=True)
++    args=parser.parse_args();run(args.output.resolve(),args.prefix.resolve(),args.fixture.resolve(),args.before.resolve())
+diff --git a/tests/nextflow/semibin_states.nf b/tests/nextflow/semibin_states.nf
+--- /dev/null
++++ b/tests/nextflow/semibin_states.nf
+@@ -0,0 +1,12 @@
++nextflow.enable.dsl=2
++
++include { SEMIBIN_SINGLEEASYBIN as SEMIBIN } from '../../modules/nf-core/semibin/singleeasybin/main'
++
++workflow {
++    SEMIBIN(Channel.value(tuple([id:'sample'],file(params.fasta,checkIfExists:true),file(params.bam,checkIfExists:true))))
++    SEMIBIN.out.output_fasta.view { meta, bins -> 'BIN_EMIT='+meta.id }
++    SEMIBIN.out.model.view { meta, model -> 'MODEL_EMIT='+meta.id }
++    if (!params.original) {
++        SEMIBIN.out.state.view { meta, state -> 'STATE_EMIT='+meta.id }
++    }
++}
+diff --git a/tests/semibin-state-native.lock.json b/tests/semibin-state-native.lock.json
+--- /dev/null
++++ b/tests/semibin-state-native.lock.json
+@@ -0,0 +1,1058 @@
++{
++  "schema": 1,
++  "tool": "SemiBin2",
++  "version": "2.4.1",
++  "commit": "932d98b13761c3f64a928e1b74e41649d3c8bf14",
++  "source_archive_sha256": "22119df03e7dce75f0c7fb441e842659c2822d14d079bd5c391006b319375e41",
++  "all_source_blobs": 169,
++  "fixture": {
++    "scope": "complete original single_sample_data FASTA/BAM,40contigs800000bp, not biological bin truth",
++    "files": {
++      "input.fasta": {
++        "git_blob": "38e2e507ca34a9732e3718e33442ec48cdb4e1c2",
++        "sha256": "0d151b557e3e930d160668e30b7a4f90f68bb942a6ada160879687e72d191479",
++        "bytes": 813640
++      },
++      "input.sorted.bam": {
++        "git_blob": "463697af73acf7fa5b5097e04f2db8ad1d9ce98e",
++        "sha256": "3495e14c34b63a674e64e49f296ba4910e9fdb8e84a029b42f61b87e5a392cf6",
++        "bytes": 200915
++      }
++    }
++  },
++  "native_packages": [
++    {
++      "name": "_openmp_mutex",
++      "version": "4.5",
++      "build": "8_kmp_llvm",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-8_kmp_llvm.conda",
++      "sha256": "b8de006376660eb12c7fc40803c97e1480bf4bc1253f0d59694b12f81b52fe14",
++      "md5": "b4d1b93dd1dab4eea23395fd5e5b357d"
++    },
++    {
++      "name": "_python_abi3_support",
++      "version": "1.0",
++      "build": "hd8ed1ab_3",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda",
++      "sha256": "2a7204314663eeda5dec482a956f0e2eaf289bd5b9953eaaaad0e81aa64638f2",
++      "md5": "3845f3d75991bae0fb90884662f4327c"
++    },
++    {
++      "name": "arpack",
++      "version": "3.9.1",
++      "build": "nompi_hf03ea27_102",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/arpack-3.9.1-nompi_hf03ea27_102.conda",
++      "sha256": "6d71343420292132be0192ddd962b308f7b8a0a0630d1db83fb9d65e8167c6ce",
++      "md5": "e09af397232ef1070e0b6cbf4c64aacb"
++    },
++    {
++      "name": "backports.zstd",
++      "version": "1.8.0",
++      "build": "py312hf114f2f_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/backports.zstd-1.8.0-py312hf114f2f_1.conda",
++      "sha256": "f3d597ccd76e058a040520432c699dc338d46968621a083418f0e985c110d060",
++      "md5": "74bdbdc14677bccd670c2f07168985d7"
++    },
++    {
++      "name": "bedtools",
++      "version": "2.31.1",
++      "build": "h13024bc_3",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/bedtools-2.31.1-h13024bc_3.tar.bz2",
++      "sha256": "d8b7aef31be37da761a87e1263ea00d62b67134b546f018067786aa6d3dccfac",
++      "md5": "99c4e90e82db906439e00beafb343d16"
++    },
++    {
++      "name": "brotli-python",
++      "version": "1.2.1",
++      "build": "py312he9c40d5_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/brotli-python-1.2.1-py312he9c40d5_0.conda",
++      "sha256": "eaefe3a5d0dc0e586b38ea943c406b768cd4fa5886c424f88039526fc31ab62e",
++      "md5": "c813f38fa69f34c13f2c01cdc8f65ece"
++    },
++    {
++      "name": "bzip2",
++      "version": "1.0.8",
++      "build": "hda65f42_10",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_10.conda",
++      "sha256": "1a0d382c515ebf55f8ee1f38c8b81bc95af5c2acc42ad53b66bc5df932032f96",
++      "md5": "e675fabcf81499adc7edf58124fb1e01"
++    },
++    {
++      "name": "c-ares",
++      "version": "1.34.9",
++      "build": "hebe6cf0_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/c-ares-1.34.9-hebe6cf0_0.conda",
++      "sha256": "bd95dd25b80b5c4faf5349542377bf89b2794e23d0f7aa7f1c431e4f3b633f3c",
++      "md5": "78b505af04bf7a87ca957ef0cb5946f5"
++    },
++    {
++      "name": "ca-certificates",
++      "version": "2026.10.19",
++      "build": "hbd8a1cb_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.10.19-hbd8a1cb_0.conda",
++      "sha256": "9404ee878c6bd5b260655ab651366db43fac6be8d465fcc0acd0f7a50be91acb",
++      "md5": "a1d1bf676059d2863f000d5e2777743f"
++    },
++    {
++      "name": "certifi",
++      "version": "2026.10.19",
++      "build": "pyhd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/certifi-2026.10.19-pyhd8ed1ab_0.conda",
++      "sha256": "ee3bca803cac13760131b6147e2fe60c97e769978e7542d678842b65e285d239",
++      "md5": "94480ec10238da5dd5659ae0b933634b"
++    },
++    {
++      "name": "charset-normalizer",
++      "version": "3.5.2",
++      "build": "h1114479_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/charset-normalizer-3.5.2-h1114479_0.conda",
++      "sha256": "e4f04b45d68716fcc47c808aeacbf165f6f295fb91bd20b91aa38942b8d2cdc6",
++      "md5": "78d5c6112c9320a1a797935cecfec7c2"
++    },
++    {
++      "name": "cloudpickle",
++      "version": "3.1.2",
++      "build": "pyhcf101f3_1",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/cloudpickle-3.1.2-pyhcf101f3_1.conda",
++      "sha256": "4c287c2721d8a34c94928be8fe0e9a85754e90189dd4384a31b1806856b50a67",
++      "md5": "61b8078a0905b12529abc622406cb62c"
++    },
++    {
++      "name": "coloredlogs",
++      "version": "15.0.1",
++      "build": "pyhd8ed1ab_4",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/coloredlogs-15.0.1-pyhd8ed1ab_4.conda",
++      "sha256": "8021c76eeadbdd5784b881b165242db9449783e12ce26d6234060026fd6a8680",
++      "md5": "b866ff7007b934d564961066c8195983"
++    },
++    {
++      "name": "cpython",
++      "version": "3.12.15",
++      "build": "py312hd8ed1ab_2",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/cpython-3.12.15-py312hd8ed1ab_2.conda",
++      "sha256": "69444bf2d39b7385194cf3481ed1910f39a5d0c86c8f6ca3884e761f6e6dedee",
++      "md5": "34ff082ed834c6a62f4b11f877820c1d"
++    },
++    {
++      "name": "exceptiongroup",
++      "version": "1.3.1",
++      "build": "pyhd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda",
++      "sha256": "ee6cf346d017d954255bbcbdb424cddea4d14e4ed7e9813e429db1d795d01144",
++      "md5": "8e662bd460bda79b1ea39194e3c4c9ab"
++    },
++    {
++      "name": "filelock",
++      "version": "4.2.4",
++      "build": "pyhd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/filelock-4.2.4-pyhd8ed1ab_0.conda",
++      "sha256": "47200ebb93b65cb56fe57cb2932d8c80df5e7b7f1e74bedda13a54f305d7ad28",
++      "md5": "03e85ad6d6c66102781d3684fbdbcd6e"
++    },
++    {
++      "name": "fmt",
++      "version": "12.1.0",
++      "build": "h76c4fd7_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/fmt-12.1.0-h76c4fd7_1.conda",
++      "sha256": "25d14a197601fdd616f2e501431b52887e69b31e7defbc1679381d718357ceb7",
++      "md5": "a70bb6d42ad121aef456e0007e92bed6"
++    },
++    {
++      "name": "fsspec",
++      "version": "2026.9.0",
++      "build": "pyhd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/fsspec-2026.9.0-pyhd8ed1ab_0.conda",
++      "sha256": "7d17272012e7479ba58f8a72b522d3e88e6837a04a111a278ff417aa82364255",
++      "md5": "42de5cd170647599a84f468a42fabb89"
++    },
++    {
++      "name": "glpk",
++      "version": "5.0",
++      "build": "h445213a_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/glpk-5.0-h445213a_0.tar.bz2",
++      "sha256": "0e19c61198ae9e188c43064414a40101f5df09970d4a2c483c0c46a6b1538966",
++      "md5": "efc4b0c33bdf47312ad5a8a0587fa653"
++    },
++    {
++      "name": "gmp",
++      "version": "6.3.0",
++      "build": "hfd2156b_3",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/gmp-6.3.0-hfd2156b_3.conda",
++      "sha256": "f36c336efc874f346a53a9011f67e997f9faac505562cc18c13b6d399cfe61c7",
++      "md5": "576e32739f323438bf69ab006c21be7b"
++    },
++    {
++      "name": "gmpy2",
++      "version": "2.3.2",
++      "build": "py312h04c1168_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/gmpy2-2.3.2-py312h04c1168_0.conda",
++      "sha256": "6658cdf58143e27c3e861245e6eb7770bc7395092e88f47430710478b7f9102f",
++      "md5": "8fb83797f9c8c8924bf43fe80fd84719"
++    },
++    {
++      "name": "gsl",
++      "version": "2.7",
++      "build": "he838d99_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/gsl-2.7-he838d99_0.tar.bz2",
++      "sha256": "132a918b676dd1f533d7c6f95e567abf7081a6ea3251c3280de35ef600e0da87",
++      "md5": "fec079ba39c9cca093bf4c00001825de"
++    },
++    {
++      "name": "h2",
++      "version": "4.4.1",
++      "build": "pyhcf101f3_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/h2-4.4.1-pyhcf101f3_0.conda",
++      "sha256": "307dd6ec90140c3cf4171071b0e5e870abec314f4565c1edd5bc433e942cdcc0",
++      "md5": "e652ac7756069c456d0da2a922cd7df5"
++    },
++    {
++      "name": "hmmer",
++      "version": "3.4",
++      "build": "h7d74f8d_5",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/hmmer-3.4-h7d74f8d_5.conda",
++      "sha256": "b0ea2115beb20bbd3fe63dd8e41bfc29eab42a0c3982f91f0e018840567f37b6",
++      "md5": "7e252dc47eda3426c7a2a87122b1a3fa"
++    },
++    {
++      "name": "hpack",
++      "version": "4.2.0",
++      "build": "pyhd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/hpack-4.2.0-pyhd8ed1ab_0.conda",
++      "sha256": "fdcea5d7cb314485d3907192ef024c704311548c5b0cbeb390cd1951051e29d2",
++      "md5": "b395909221b9bd1df066e5930e18855b"
++    },
++    {
++      "name": "htslib",
++      "version": "1.24",
++      "build": "ha79157c_0",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/htslib-1.24-ha79157c_0.conda",
++      "sha256": "97e0f0b8700f56b1ade3034f81070ede705fce3ef9a1b5f15e79e3eb9997ac17",
++      "md5": "232775112c6fea38e9e7c25d2a58d7d2"
++    },
++    {
++      "name": "humanfriendly",
++      "version": "10.0",
++      "build": "pyh707e725_8",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/humanfriendly-10.0-pyh707e725_8.conda",
++      "sha256": "fa2071da7fab758c669e78227e6094f6b3608228740808a6de5d6bce83d9e52d",
++      "md5": "7fe569c10905402ed47024fc481bb371"
++    },
++    {
++      "name": "hyperframe",
++      "version": "6.1.0",
++      "build": "pyhd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/hyperframe-6.1.0-pyhd8ed1ab_0.conda",
++      "sha256": "77af6f5fe8b62ca07d09ac60127a30d9069fdc3c68d6b256754d0ffb1f7779f8",
++      "md5": "8e6923fc12f1fe8f8c4e5c9f343256ac"
++    },
++    {
++      "name": "idna",
++      "version": "3.20",
++      "build": "pyh5ded981_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/idna-3.20-pyh5ded981_0.conda",
++      "sha256": "e044b1ec829e2e24f971fa3f3408eb26f1db836e521a58f08b0fd9a03fee47be",
++      "md5": "ee73be987f9de9ea5c2fdaeefa7b6491"
++    },
++    {
++      "name": "igraph",
++      "version": "1.0.1",
++      "build": "hfe3e89f_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/igraph-1.0.1-hfe3e89f_0.conda",
++      "sha256": "5d4619b4730184185bf93f77df00d740480805e059d3a03f11d8ebb03e5e5e6d",
++      "md5": "b4a5bf8c98b19a4666597d30addbd675"
++    },
++    {
++      "name": "jinja2",
++      "version": "3.1.6",
++      "build": "pyhcf101f3_1",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/jinja2-3.1.6-pyhcf101f3_1.conda",
++      "sha256": "fc9ca7348a4f25fed2079f2153ecdcf5f9cf2a0bc36c4172420ca09e1849df7b",
++      "md5": "04558c96691bed63104678757beb4f8d"
++    },
++    {
++      "name": "joblib",
++      "version": "1.6.0",
++      "build": "pyhcf101f3_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/joblib-1.6.0-pyhcf101f3_0.conda",
++      "sha256": "96b76ace583404ce4fbc234baa6cdb3de485887913104d4ac51994f9b6656696",
++      "md5": "4ebc70ef1af2e21cdc8edb1bfa1ec28d"
++    },
++    {
++      "name": "keyutils",
++      "version": "1.6.3",
++      "build": "h7cc23a3_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/keyutils-1.6.3-h7cc23a3_1.conda",
++      "sha256": "dd053c96dcb0dcfd59422aefea9d2fe937a190167f34fba7893ec1e10a7e8963",
++      "md5": "ba55d1b89fd7775e67de8291029b4059"
++    },
++    {
++      "name": "krb5",
++      "version": "1.22.2",
++      "build": "hbc21106_2",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/krb5-1.22.2-hbc21106_2.conda",
++      "sha256": "2a5c38c85e63df84c4e69ee71439841ce570d259ae3060627bb9a49a938d66f4",
++      "md5": "53318d715316929a574f83591308b1f8"
++    },
++    {
++      "name": "ld_impl_linux-64",
++      "version": "2.46.1",
++      "build": "default_hbd61a6d_103",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.46.1-default_hbd61a6d_103.conda",
++      "sha256": "901649b1edbe841fd4ee7e2d491a05184ed540eb01cdae506872f344babc1d28",
++      "md5": "2362c70e7e79827c32db35547d9c179b"
++    },
++    {
++      "name": "libabseil",
++      "version": "20260526.0",
++      "build": "cxx17_h0dc7533_3",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libabseil-20260526.0-cxx17_h0dc7533_3.conda",
++      "sha256": "24708450d80f4d542fc357c941909446e0b6caffb8baca478a0da1f74820e688",
++      "md5": "d224f3a53f55029366c73161f15461fb"
++    },
++    {
++      "name": "libblas",
++      "version": "3.11.0",
++      "build": "11_h5875eb1_mkl",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libblas-3.11.0-11_h5875eb1_mkl.conda",
++      "sha256": "3b9862430914d13ae264398340117f80b85720de308f6a80ad463588abe10358",
++      "md5": "8db4ae3941966215baa885eb004aded5"
++    },
++    {
++      "name": "libcblas",
++      "version": "3.11.0",
++      "build": "11_hfef963f_mkl",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libcblas-3.11.0-11_hfef963f_mkl.conda",
++      "sha256": "6ebc9042e96050ddb4d57b666415677164561b8229905c52e6f84defbc884b0f",
++      "md5": "5100a1707606a71eebcb00ace3b23339"
++    },
++    {
++      "name": "libcurl",
++      "version": "8.21.0",
++      "build": "hcf29cc6_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libcurl-8.21.0-hcf29cc6_1.conda",
++      "sha256": "7d243f45a48f62cb8e3b871dd336137fe0fb90094a191756fb553508837f6338",
++      "md5": "2c1e55d695b11525c760b486ac0be517"
++    },
++    {
++      "name": "libdeflate",
++      "version": "1.26",
++      "build": "h351257e_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libdeflate-1.26-h351257e_0.conda",
++      "sha256": "f437f68abb1fa1dededd082a0c2800bec40495e01cf9ec46f4e693e34d60b644",
++      "md5": "d0c17fc12939a990f0865b7a14b49cfe"
++    },
++    {
++      "name": "libedit",
++      "version": "3.1.20260512",
++      "build": "pl5321h373387f_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libedit-3.1.20260512-pl5321h373387f_0.conda",
++      "sha256": "45301f14f4eb66da57cfaf2d265f3eeee73f8b07e99614ee3afc5b26eea91126",
++      "md5": "27dbd7e2984b8fe48e069379636ccfdd"
++    },
++    {
++      "name": "libev",
++      "version": "4.33",
++      "build": "h280c20c_3",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libev-4.33-h280c20c_3.conda",
++      "sha256": "e4418f68d01a6307c4431b585c71b584f40189877364e542ee87deb777f5e85b",
++      "md5": "7bc31538d6e3fb349e897353969237ec"
++    },
++    {
++      "name": "libexpat",
++      "version": "2.8.5",
++      "build": "hd2095e1_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libexpat-2.8.5-hd2095e1_0.conda",
++      "sha256": "6de73033a7c5f712c9c5a54124e4581e025691029835e5bceaf10a333a7e7bc0",
++      "md5": "72cfd2b95b0540247220b42f58a148d7"
++    },
++    {
++      "name": "libffi",
++      "version": "3.7.0",
++      "build": "h81df57d_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libffi-3.7.0-h81df57d_1.conda",
++      "sha256": "c8c7583ef063bc3c430f1d48298e5ad24f796a35c22ed5b14183325825a61106",
++      "md5": "6525a0b06aa4fd390795f0740636a9dd"
++    },
++    {
++      "name": "libgcc",
++      "version": "16.2.0",
++      "build": "ha9f2e26_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda",
++      "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea",
++      "md5": "735629b400b70eeab21a2ba8f5b1c2ce"
++    },
++    {
++      "name": "libgcc-ng",
++      "version": "16.2.0",
++      "build": "h69a702a_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-16.2.0-h69a702a_7.conda",
++      "sha256": "03b54d7008de080a17cc2174b0e4acd6d06e1c981b2eb19846f46d8f59966034",
++      "md5": "2005515ac9340f816fb2ac7e83afe553"
++    },
++    {
++      "name": "libgfortran",
++      "version": "16.2.0",
++      "build": "h69a702a_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libgfortran-16.2.0-h69a702a_7.conda",
++      "sha256": "9682ae4dd11487e10b904b3cb3ab6379cad25233d45fdfdf90d54349df244494",
++      "md5": "3a8d285f5f22138ef826ad54cf267e73"
++    },
++    {
++      "name": "libgfortran-ng",
++      "version": "16.2.0",
++      "build": "h69a702a_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libgfortran-ng-16.2.0-h69a702a_7.conda",
++      "sha256": "d5c80029e15b2e4c404a9a7189b607be566c7ea6142d43291c81648958ffe1f0",
++      "md5": "a31f744c0c83d31dacf9c01b2e3c12a2"
++    },
++    {
++      "name": "libgfortran5",
++      "version": "16.2.0",
++      "build": "h6b99dfc_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libgfortran5-16.2.0-h6b99dfc_7.conda",
++      "sha256": "04dbab12c925b92977bb835dd2f5eda413607afa79f95a554e5a04b07a380322",
++      "md5": "7719ed7be38ad8c492c4bd5cc2bce0c4"
++    },
++    {
++      "name": "libhwloc",
++      "version": "2.15.0",
++      "build": "default_hd7c4d0c_1001",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libhwloc-2.15.0-default_hd7c4d0c_1001.conda",
++      "sha256": "a140f8b94caad6ea27e9deba66a74ae2566976591db8a867677c652add6ee5a0",
++      "md5": "66c755b3bd9ec82308fa6ec7674f473f"
++    },
++    {
++      "name": "libiconv",
++      "version": "1.18",
++      "build": "h0cb94f2_3",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libiconv-1.18-h0cb94f2_3.conda",
++      "sha256": "f943117edb9cd4d9c61cc972eee5a34291dc55ea7a6e9e38da104995841cbcb6",
++      "md5": "f92233bf33e24a25668bb2119e2c51f9"
++    },
++    {
++      "name": "liblapack",
++      "version": "3.11.0",
++      "build": "11_h5e43f62_mkl",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/liblapack-3.11.0-11_h5e43f62_mkl.conda",
++      "sha256": "7b80fc195419463533262b9d327c75559dd820251902e3fa41cce02a3b23bb5b",
++      "md5": "7dee7c97a08b93f9d11f04d974e65724"
++    },
++    {
++      "name": "liblzma",
++      "version": "5.8.3",
++      "build": "hb03c661_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/liblzma-5.8.3-hb03c661_1.conda",
++      "sha256": "9787df8c22a59c9a70d3e5a10db9ad663485e75e9ccc3f09bd092cb7b95e0dab",
++      "md5": "1390b7c5ac0b1d8e447bc5efa6d3c8c2"
++    },
++    {
++      "name": "libnghttp2",
++      "version": "1.68.1",
++      "build": "h74cf4be_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libnghttp2-1.68.1-h74cf4be_1.conda",
++      "sha256": "11a2f54a6f391e25738bce0023e6ef499600147bbcf21c1fa69d2e251b03cc6a",
++      "md5": "75d211f04ac87506f1f43420712a69fe"
++    },
++    {
++      "name": "libnsl",
++      "version": "2.0.1",
++      "build": "hb9d3cd8_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libnsl-2.0.1-hb9d3cd8_1.conda",
++      "sha256": "927fe72b054277cde6cb82597d0fcf6baf127dcbce2e0a9d8925a68f1265eef5",
++      "md5": "d864d34357c3b65a4b731f78c0801dc4"
++    },
++    {
++      "name": "libprotobuf",
++      "version": "7.35.1",
++      "build": "h622638d_3",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libprotobuf-7.35.1-h622638d_3.conda",
++      "sha256": "37c51fbc936a6bb8bf5f67c8f056edacaaa41e8603738bc8a4dee186292bb114",
++      "md5": "fd307b61cceb36fdca38e1718bdb2893"
++    },
++    {
++      "name": "libpython",
++      "version": "3.12.15",
++      "build": "ha57cdbe_2_cpython",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libpython-3.12.15-ha57cdbe_2_cpython.conda",
++      "sha256": "37017ac4a784c50f1fc73c7b0eb090c7f29f4541c9014c4b4e10daa275488fdd",
++      "md5": "fe256863f652549334a81a8e49fdf097"
++    },
++    {
++      "name": "libsqlite",
++      "version": "3.54.1",
++      "build": "h0737f62_100",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libsqlite-3.54.1-h0737f62_100.conda",
++      "sha256": "107ba2f9134b45a6fdaf8d2485f432e3a643fdfaf711a325d0c9139b580b3523",
++      "md5": "5fdfd335c3d653e41c1eea1353d827d0"
++    },
++    {
++      "name": "libssh2",
++      "version": "1.11.1",
++      "build": "h6154650_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libssh2-1.11.1-h6154650_1.conda",
++      "sha256": "7e463000fa1cba3f3a6597b776f6ab301d425a96e3bc20d0d9d76a3b9f237aa3",
++      "md5": "5c526561e1d2a2e071941174eae84557"
++    },
++    {
++      "name": "libstdcxx",
++      "version": "16.2.0",
++      "build": "h934c35e_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda",
++      "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745",
++      "md5": "9b6707e0caca917fa6ea9ee473f37a5d"
++    },
++    {
++      "name": "libstdcxx-ng",
++      "version": "16.2.0",
++      "build": "hdf11a46_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-16.2.0-hdf11a46_7.conda",
++      "sha256": "337f481db36cc357884f05f404ccd1b3a7e0fc1ee48ec5c884e4281d213bc863",
++      "md5": "25a23bde5e26d548374f3e02b4669670"
++    },
++    {
++      "name": "libtorch",
++      "version": "2.14.1",
++      "build": "cpu_mkl_hc3c961d_100",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libtorch-2.14.1-cpu_mkl_hc3c961d_100.conda",
++      "sha256": "771a151465e667c6165eace7d61f1eee94c1bb9cbeceaeca55bf14450ef511aa",
++      "md5": "0d4407c5f1fcbf718363cd1b0579d25d"
++    },
++    {
++      "name": "libuuid",
++      "version": "2.42.4",
++      "build": "hcfc3c73_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.42.4-hcfc3c73_0.conda",
++      "sha256": "f34b8d1de9a2bf62476d8608057d9b8a918d97444236dc53a47128f2fae79041",
++      "md5": "54a948337e66706380ff24d6b5fde63f"
++    },
++    {
++      "name": "libuv",
++      "version": "1.52.1",
++      "build": "h280c20c_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libuv-1.52.1-h280c20c_1.conda",
++      "sha256": "67761d0206f84140047a367eaf9befe03a7e157a29ee25aee0047b40801cc6b6",
++      "md5": "01c4ed87826af55996768af6dbc936b4"
++    },
++    {
++      "name": "libxcrypt",
++      "version": "4.4.38",
++      "build": "h280c20c_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libxcrypt-4.4.38-h280c20c_0.conda",
++      "sha256": "f7e9292dd219a6435bbb1223da9586c3e70d66d169c5a92f08db3f2127df04e9",
++      "md5": "f7a7ff5a6ab331e037abd34f379a631d"
++    },
++    {
++      "name": "libxml2-16",
++      "version": "2.15.4",
++      "build": "hbdfff7e_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libxml2-16-2.15.4-hbdfff7e_1.conda",
++      "sha256": "642d5d650a5f877a13ca60b720ae88643a145a30fb7a1065fd96c370595a5e2c",
++      "md5": "36e109ff64ea3bc459fdf0bfad9dd21b"
++    },
++    {
++      "name": "libxml2",
++      "version": "2.15.4",
++      "build": "ha7a5771_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libxml2-2.15.4-ha7a5771_1.conda",
++      "sha256": "ef0f51a53d5f5d8a0aa8a71115a36b1bb3cd3ac95d65ced2cbfec7f1f08229b0",
++      "md5": "7c2fba53903a27aeb56a410a9510774b"
++    },
++    {
++      "name": "libxml2-devel",
++      "version": "2.15.4",
++      "build": "ha7a5771_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libxml2-devel-2.15.4-ha7a5771_1.conda",
++      "sha256": "a2413106e706e402b6e3e1b615c0f5cefacc90152b97c51143527990863818c8",
++      "md5": "6601205c3258bbc18ae180e6e059251a"
++    },
++    {
++      "name": "libzlib",
++      "version": "1.3.2",
++      "build": "h25fd6f3_3",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda",
++      "sha256": "eb8a0db0aa570124f7d2a93d7c7f596e3390df5e047818d873baad32985fc736",
++      "md5": "0de0122d9570a8ab637c6b73db268389"
++    },
++    {
++      "name": "llvm-openmp",
++      "version": "23.1.4",
++      "build": "h7148c6a_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/llvm-openmp-23.1.4-h7148c6a_0.conda",
++      "sha256": "7de1204abbcf20aa8cb62c8a1385177ded2b7ca536b79c409866e46f30b0242f",
++      "md5": "ad441557f951f09d7e4c79731a6a34dc"
++    },
++    {
++      "name": "markupsafe",
++      "version": "3.0.4",
++      "build": "py312h8b7ec3f_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/markupsafe-3.0.4-py312h8b7ec3f_1.conda",
++      "sha256": "a032b34f0c8e63ddb28714ec42f02f51cd6007d64b15a8269873574abe322931",
++      "md5": "ee4135fc1ce77066d2be65475bcfbbff"
++    },
++    {
++      "name": "mkl",
++      "version": "2026.1.0",
++      "build": "hd2095e1_246",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/mkl-2026.1.0-hd2095e1_246.conda",
++      "sha256": "1bb2a3273ac300af0c05fc1d0924e02f03c428482fe36569dca4a3e0393259c3",
++      "md5": "8e622aab0da0111a2a2380df2143f25d"
++    },
++    {
++      "name": "mpc",
++      "version": "1.4.0",
++      "build": "ha2cb11d_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/mpc-1.4.0-ha2cb11d_1.conda",
++      "sha256": "3d56733fe0f44159787ad086d5e7bdab8b69e6a5a9b6b873a8beb3519f3d8d07",
++      "md5": "f0f6c8691a9ed4099d1f287a444e251a"
++    },
++    {
++      "name": "mpfr",
++      "version": "4.2.2",
++      "build": "ha2cb11d_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/mpfr-4.2.2-ha2cb11d_1.conda",
++      "sha256": "0be79ef2ee536e0c5d3ddb4a52bbae9f26d08560623299f33db2f4c4a17c525a",
++      "md5": "7dcc10f6c0bc3596d5519a710a84dfd4"
++    },
++    {
++      "name": "mpi",
++      "version": "1.0",
++      "build": "openmpi",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/mpi-1.0-openmpi.tar.bz2",
++      "sha256": "54cf44ee2c122bce206f834a825af06e3b14fc4fd58c968ae9329715cc281d1e",
++      "md5": "1dcc49e16749ff79ba2194fa5d4ca5e7"
++    },
++    {
++      "name": "mpmath",
++      "version": "1.4.1",
++      "build": "pyhd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/mpmath-1.4.1-pyhd8ed1ab_0.conda",
++      "sha256": "5bbf2f8179ec43d34d67ca8e4989d216c1bdb4b749fe6cb40e86ebf88c1b5300",
++      "md5": "2e81b32b805f406d23ba61938a184081"
++    },
++    {
++      "name": "narwhals",
++      "version": "2.27.1",
++      "build": "pyh5ded981_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/narwhals-2.27.1-pyh5ded981_0.conda",
++      "sha256": "a30afe9e3c83e5730b3517c38637f5ca2d09e0c6140f241b23b3ca070c7490c9",
++      "md5": "772d508bf50139e7ff43f5a88746aef3"
++    },
++    {
++      "name": "ncurses",
++      "version": "6.6",
++      "build": "hdb14827_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda",
++      "sha256": "5d46557214ed184381dafe835b7c94a474a1c3b307a08a250b1ea4779b44ffb3",
++      "md5": "ee6c0cd80a60961a1f48aa3e0b91f986"
++    },
++    {
++      "name": "networkx",
++      "version": "3.7",
++      "build": "pyhc364b38_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/networkx-3.7-pyhc364b38_0.conda",
++      "sha256": "9458e13767779d5db48c035ba27a1af843fde5187d34c17b60076e18835e8637",
++      "md5": "ddc679d85e7c9c3738efd303b6580c69"
++    },
++    {
++      "name": "numexpr",
++      "version": "2.14.2",
++      "build": "mkl_py312h67929eb_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/numexpr-2.14.2-mkl_py312h67929eb_1.conda",
++      "sha256": "3b5c987c770dd70662d692d5bfee6fde25932bc23f88e4b16e1b3ad4975cb860",
++      "md5": "9aee61e2cbb32caf05242158cdd288ce"
++    },
++    {
++      "name": "numpy",
++      "version": "2.5.4",
++      "build": "py312he827f4e_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/numpy-2.5.4-py312he827f4e_0.conda",
++      "sha256": "8d562d8fcc44a93c65793a361f39a75712bb3cf2aa1d1a09bcc8ef072e54a1c3",
++      "md5": "759b701f4b548ff6d06794d99788e6bb"
++    },
++    {
++      "name": "onednn",
++      "version": "3.13.4",
++      "build": "omp_h64ed1e9_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/onednn-3.13.4-omp_h64ed1e9_1.conda",
++      "sha256": "01efe287895d387def5f707c79e177b9b14de804c37008809c2eb76b8b1b7dd2",
++      "md5": "2c1cdac1e0da39760349ee2a35a20aef"
++    },
++    {
++      "name": "openmpi",
++      "version": "4.1.6",
++      "build": "hc5af2df_101",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/openmpi-4.1.6-hc5af2df_101.conda",
++      "sha256": "f0769dd891e1735be4606ec8643951e5cbca199f774e58c7d933f70a70134ce4",
++      "md5": "f9a2ad0088ee38f396350515fa37d243"
++    },
++    {
++      "name": "openssl",
++      "version": "3.6.5",
++      "build": "h781a0a9_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.5-h781a0a9_0.conda",
++      "sha256": "9c1533f1cf784f0e250919c0c9762d0b0e6bc727a79290ffb7cea1ceca1d038c",
++      "md5": "5a51a2ea653f120240b1a9bf76e0aae9"
++    },
++    {
++      "name": "optree",
++      "version": "0.20.0",
++      "build": "py312ha5105d2_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/optree-0.20.0-py312ha5105d2_1.conda",
++      "sha256": "69ff772fb28cab37570502cdead621fc1454fa90bb97e9aff83617395912033d",
++      "md5": "2cd722ba7312f819d13ec8a4c2cd9185"
++    },
++    {
++      "name": "packaging",
++      "version": "26.3",
++      "build": "pyhc364b38_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/packaging-26.3-pyhc364b38_0.conda",
++      "sha256": "c432626b16768b8dab228bfb706f7060c2d462a21c516d240f68f2f902b5a044",
++      "md5": "936687ed80f295a1f5dbcf8bd34c252c"
++    },
++    {
++      "name": "pandas",
++      "version": "3.1.0",
++      "build": "np2py312h91ec553_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/pandas-3.1.0-np2py312h91ec553_0.conda",
++      "sha256": "81dd8237c0aadccf1889d9563fe6404ca1604f763a44fe0fafdcd4d3c4053460",
++      "md5": "a225703e102dab9d5929d13de2334ccb"
++    },
++    {
++      "name": "pathspec",
++      "version": "1.1.1",
++      "build": "pyhd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/pathspec-1.1.1-pyhd8ed1ab_0.conda",
++      "sha256": "6eaee417d33f298db79bc7185ab1208604c0e6cf51dade34cd513c6f9db9c6f3",
++      "md5": "11adc78451c998c0fd162584abfa3559"
++    },
++    {
++      "name": "pip",
++      "version": "26.2.2",
++      "build": "pyh8b19718_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/pip-26.2.2-pyh8b19718_0.conda",
++      "sha256": "83babe5e3c4021b061275164a7c28bd62d183cc77b4c2260ae80f19fcb0a98dd",
++      "md5": "ec04c2ab74b2ca2d524fc10f558427c6"
++    },
++    {
++      "name": "prodigal",
++      "version": "2.6.3",
++      "build": "h577a1d6_11",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/prodigal-2.6.3-h577a1d6_11.tar.bz2",
++      "sha256": "1211d9f01128f141154cb4616aa5b15890afc26699767886f6655cabfd67ec06",
++      "md5": "7b083f573760cbd88a206e05f73f5e9d"
++    },
++    {
++      "name": "pybind11",
++      "version": "3.0.4",
++      "build": "pyh293190f_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/pybind11-3.0.4-pyh293190f_0.conda",
++      "sha256": "f213f735f0c2b9bfcc1358c8bdeb0dfcf3614bf2c47aad68227dabea99b0e0d7",
++      "md5": "2e57132f130bffcb5a8b17092b2871bc"
++    },
++    {
++      "name": "pybind11-abi",
++      "version": "11",
++      "build": "hc364b38_1",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/pybind11-abi-11-hc364b38_1.conda",
++      "sha256": "9e7fe12f727acd2787fb5816b2049cef4604b7a00ad3e408c5e709c298ce8bf1",
++      "md5": "f0599959a2447c1e544e216bddf393fa"
++    },
++    {
++      "name": "pybind11-global",
++      "version": "3.0.4",
++      "build": "pyh648e204_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/pybind11-global-3.0.4-pyh648e204_0.conda",
++      "sha256": "25e887672e68188a5fa899efdc116acb01d689989493342aac05781ec1f09b81",
++      "md5": "e594cb485091100204e0b77cb5709896"
++    },
++    {
++      "name": "pysocks",
++      "version": "1.7.1",
++      "build": "pyha55dd90_7",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/pysocks-1.7.1-pyha55dd90_7.conda",
++      "sha256": "ba3b032fa52709ce0d9fd388f63d330a026754587a2f461117cac9ab73d8d0d8",
++      "md5": "461219d1a5bd61342293efa2c0c90eac"
++    },
++    {
++      "name": "python",
++      "version": "3.12.15",
++      "build": "h5f976f7_2_cpython",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/python-3.12.15-h5f976f7_2_cpython.conda",
++      "sha256": "f8a38c33f627c68e35d02cc5a11eff25eadb853791ac40bf9cc569315d25bc54",
++      "md5": "13cef25ee4055b1fec19d35d20aadda2"
++    },
++    {
++      "name": "python-dateutil",
++      "version": "3.0.0",
++      "build": "pyh5ded981_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/python-dateutil-3.0.0-pyh5ded981_0.conda",
++      "sha256": "8ad3e3fd71fa3881081a38d660cd9cc7bd18fd4eb99cee96225903e5e2eb9ae9",
++      "md5": "d75c60076c9f2cfa4a459e9f17cecd93"
++    },
++    {
++      "name": "python-gil",
++      "version": "3.12.15",
++      "build": "hd8ed1ab_2",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/python-gil-3.12.15-hd8ed1ab_2.conda",
++      "sha256": "5369e1ec176100bb10ba6ec38cab261347ea470d95788e52e6008d1a7605165d",
++      "md5": "deec3cfe011e962fe2eb872f2eae716c"
++    },
++    {
++      "name": "python-igraph",
++      "version": "1.0.0",
++      "build": "py312h1289d80_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/python-igraph-1.0.0-py312h1289d80_0.conda",
++      "sha256": "5c639d4587c59b72a54ce3a87544cb2bc5b60688acb0b9f32e83007f67972b5e",
++      "md5": "29b32941e0811caa3a318685deb29246"
++    },
++    {
++      "name": "python-tzdata",
++      "version": "2026.5",
++      "build": "pyh5ded981_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/python-tzdata-2026.5-pyh5ded981_0.conda",
++      "sha256": "b66b783be882069a9f6c00bc44ee561fc3dfba21fe4bab6de31599caf3c63154",
++      "md5": "4a0ae2a06b469e6f8ca95d0655e31c86"
++    },
++    {
++      "name": "python_abi",
++      "version": "3.12",
++      "build": "9_cp312",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/python_abi-3.12-9_cp312.conda",
++      "sha256": "ee9c2922e07afc85fc82d5fa82c9ac2c79da3be3283a5e17bf2f2ae38dbd02fb",
++      "md5": "4c32076993e6270825441d059ab5c18b"
++    },
++    {
++      "name": "pytorch",
++      "version": "2.14.1",
++      "build": "cpu_mkl_py312_hd8394b6_100",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/pytorch-2.14.1-cpu_mkl_py312_hd8394b6_100.conda",
++      "sha256": "a3f2baf62c92e94dd3aae62ad7e73535e9e04534bc262ca8642e6548a47a7bcd",
++      "md5": "28ca5d5b50d139f7cec49bed02c57461"
++    },
++    {
++      "name": "pyyaml",
++      "version": "6.0.3",
++      "build": "py312h8a5da7c_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/pyyaml-6.0.3-py312h8a5da7c_1.conda",
++      "sha256": "cb142bfd92f6e55749365ddc244294fa7b64db6d08c45b018ff1c658907bfcbf",
++      "md5": "15878599a87992e44c059731771591cb"
++    },
++    {
++      "name": "readline",
++      "version": "8.3",
++      "build": "hd6e31c0_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-hd6e31c0_1.conda",
++      "sha256": "01b3fe073a66e321970d09e04b388708f8cbdca5cdfbfcb7c9eeb470ad10383d",
++      "md5": "69c01c781e7c8190bbdaf79e3848c5ca"
++    },
++    {
++      "name": "requests",
++      "version": "2.34.2",
++      "build": "pyhcf101f3_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/requests-2.34.2-pyhcf101f3_0.conda",
++      "sha256": "1715246b19c9f85ee022933b4845f2fc14ac9184981b7b7d9b728bec8e9588da",
++      "md5": "4a85203c1d80c1059086ae860836ffb9"
++    },
++    {
++      "name": "safetensors",
++      "version": "0.8.0",
++      "build": "py312hc767a74_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/safetensors-0.8.0-py312hc767a74_1.conda",
++      "sha256": "bdbc525fc9d5133a619d9cdc2d2a0b5979c5cbc4311663619cd3e1229aa33ac7",
++      "md5": "9fdd8752cc48ce71f20c3812c8efd36a"
++    },
++    {
++      "name": "samtools",
++      "version": "1.24",
++      "build": "h9dcdb79_1",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/samtools-1.24-h9dcdb79_1.conda",
++      "sha256": "18fd604932d0fc197dcfdd54d67e7c54770a2d8eca819e03074556ed9cd3422e",
++      "md5": "9cbf5a1cbce4f7d997a4e3e2a27343f1"
++    },
++    {
++      "name": "scikit-build-core",
++      "version": "1.1.1",
++      "build": "pyhcb39dcd_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/scikit-build-core-1.1.1-pyhcb39dcd_0.conda",
++      "sha256": "bb3edbe12bdaf6f3283d6567ae180225afb89e85d80f75cc77f5e44dc09d9b8c",
++      "md5": "43b4de2a8d4a9c164697d6a44ebfb94c"
++    },
++    {
++      "name": "scikit-learn",
++      "version": "1.9.1",
++      "build": "np2py312h91ec553_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/scikit-learn-1.9.1-np2py312h91ec553_1.conda",
++      "sha256": "90861e7f903ad48a25a8f5d0d4a74b010b517c47026ca32fe385e833542a1055",
++      "md5": "2117db7d37a14155ecb8d8454de6baad"
++    },
++    {
++      "name": "scipy",
++      "version": "1.18.1",
++      "build": "py312h106c528_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/scipy-1.18.1-py312h106c528_1.conda",
++      "sha256": "d080762a708a0c885814995470d6fb186cec366acb080913584127e94ed031d5",
++      "md5": "73cc9629383ee4e1f2166b314527b324"
++    },
++    {
++      "name": "semibin",
++      "version": "2.4.1",
++      "build": "pyhdfd78af_0",
++      "url": "https://conda.anaconda.org/bioconda/noarch/semibin-2.4.1-pyhdfd78af_0.conda",
++      "sha256": "e6d95475806bd06ab05a129595e61b032c72e68446c378564ffe0373d39dd222",
++      "md5": "f97f533747381d5e6430e1c2b4223d66"
++    },
++    {
++      "name": "setuptools",
++      "version": "84.2.1",
++      "build": "pyhe730653_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/setuptools-84.2.1-pyhe730653_0.conda",
++      "sha256": "17add609d1a31c874e39a03935072be59bcafb06d42383eceabea746d12e6025",
++      "md5": "d41f95b8f1553165b2cc2f37162dac9c"
++    },
++    {
++      "name": "six",
++      "version": "1.17.0",
++      "build": "pyhe01879c_1",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/six-1.17.0-pyhe01879c_1.conda",
++      "sha256": "458227f759d5e3fcec5d9b7acce54e10c9e1f4f4b7ec978f3bfd54ce4ee9853d",
++      "md5": "3339e3b65d58accf4ca4fb8748ab16b3"
++    },
++    {
++      "name": "sleef",
++      "version": "3.9.0",
++      "build": "ha0421bc_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/sleef-3.9.0-ha0421bc_0.conda",
++      "sha256": "57afc2ab5bdb24cf979964018dddbc5dfaee130b415e6863765e45aed2175ee4",
++      "md5": "e8a0b4f5e82ecacffaa5e805020473cb"
++    },
++    {
++      "name": "sympy",
++      "version": "1.14.0",
++      "build": "pyh2585a3b_106",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/sympy-1.14.0-pyh2585a3b_106.conda",
++      "sha256": "1c8057e6875eba958aa8b3c1a072dc9a75d013f209c26fd8125a5ebd3abbec0c",
++      "md5": "32d866e43b25275f61566b9391ccb7b5"
++    },
++    {
++      "name": "tbb",
++      "version": "2023.1.0",
++      "build": "haa8c3ee_2",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/tbb-2023.1.0-haa8c3ee_2.conda",
++      "sha256": "5e47c01ea6c2bea041b78b4e45b3135b80bfc015533ec44e4c2d2326a755f8ba",
++      "md5": "f805909f478c179e230baf7bd5878e26"
++    },
++    {
++      "name": "texttable",
++      "version": "1.7.2",
++      "build": "pyhd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/texttable-1.7.2-pyhd8ed1ab_0.conda",
++      "sha256": "ed91a0c8f9d2eb450c0815614dd670338776492f60421d445f2a277c016942a6",
++      "md5": "5a031171760cc401ccd93a216db48108"
++    },
++    {
++      "name": "threadpoolctl",
++      "version": "3.7.0",
++      "build": "pyhc455866_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/threadpoolctl-3.7.0-pyhc455866_0.conda",
++      "sha256": "a32d17fe979e59fe1295875b5d4f0431a76dfbbfcee5b01e657a8aa3c4a1b5d1",
++      "md5": "8c05910e780502e362d658f00f5ec10f"
++    },
++    {
++      "name": "tk",
++      "version": "8.6.13",
++      "build": "noxft_h1df4ec4_4",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h1df4ec4_4.conda",
++      "sha256": "a1a241d172c1ccab067ba245206dd048bc3c2d1b84504b53c9468e99adfc16a1",
++      "md5": "676a2f9b1c4fcf57b70aa5c65f6c60d0"
++    },
++    {
++      "name": "tomli",
++      "version": "2.5.0",
++      "build": "pyh5ded981_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/tomli-2.5.0-pyh5ded981_0.conda",
++      "sha256": "93b6f517fb7adff00b62be02b798d384a1b34d0e368fdb576fb248bcb3bb9ec7",
++      "md5": "36d6a162326c52d6339c8b606f43932d"
++    },
++    {
++      "name": "tqdm",
++      "version": "4.70.1",
++      "build": "pyhfa0c392_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/tqdm-4.70.1-pyhfa0c392_0.conda",
++      "sha256": "7c40c84de3de3624c2a753496122dbb880903c796d183e9d4be6c15c310c4bab",
++      "md5": "ffc91f29264eeb8d3ba96fdc897316c3"
++    },
++    {
++      "name": "typing-extensions",
++      "version": "4.16.0",
++      "build": "h69aa097_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/typing-extensions-4.16.0-h69aa097_0.conda",
++      "sha256": "b141933ece3518f6d7b75dfb59451e2f26b405a44c18e2518a83e9a02e09315c",
++      "md5": "c680b5747e8c4c8f23dca0bb7042a8fc"
++    },
++    {
++      "name": "typing_extensions",
++      "version": "4.16.0",
++      "build": "pyhcf101f3_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda",
++      "sha256": "2d888f90af0686044882c74193ec80a90ec1943145d94a7b1b048958acda1848",
++      "md5": "c70ad746c22219b9700931707482992c"
++    },
++    {
++      "name": "tzdata",
++      "version": "2026c",
++      "build": "h151e31d_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda",
++      "sha256": "b928c30ddcb0e3f544c6eade8352737e6e610e263276b90232db6a578ef899d8",
++      "md5": "fcb489df604d100968b737f2cb6076c6"
++    },
++    {
++      "name": "urllib3",
++      "version": "2.8.0",
++      "build": "pyhd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/urllib3-2.8.0-pyhd8ed1ab_0.conda",
++      "sha256": "c5511c190ab55168ca412f3c54592fbf677ae6250784cb72b227a7cf3f538f7d",
++      "md5": "407a3d3778570bae8e8fcf554e803e43"
++    },
++    {
++      "name": "wheel",
++      "version": "0.48.0",
++      "build": "pyhd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/wheel-0.48.0-pyhd8ed1ab_0.conda",
++      "sha256": "ba64b29b6d418024cb565081a1799262cb2780d2534ff4c14f76aa858c4286cd",
++      "md5": "9a2124517bfd5d792e0f7b86eefdfeb8"
++    },
++    {
++      "name": "yaml",
++      "version": "0.2.5",
++      "build": "hebe6cf0_3",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/yaml-0.2.5-hebe6cf0_3.conda",
++      "sha256": "d164dfa75ecd538f6fd68765defcc06aa875bc697b9b215362d79a2a73125dd0",
++      "md5": "e741576fb8f89821ac7c1c537322a33d"
++    },
++    {
++      "name": "zlib",
++      "version": "1.3.2",
++      "build": "h25fd6f3_3",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/zlib-1.3.2-h25fd6f3_3.conda",
++      "sha256": "16080a1c7724f7d25727cdc23c7658e0cec2db52448c1dc0c33467ee2c6e1c62",
++      "md5": "6acb86426229f96f93e5468d1df3a5e8"
++    },
++    {
++      "name": "zstd",
++      "version": "1.5.7",
++      "build": "hb78ec9c_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_7.conda",
++      "sha256": "47d682b9f6d6ec9eb1a6e6c3e75ea6273e899e78fb7fc59f81d39745009fbc60",
++      "md5": "aa459086047c0e5e27023ab19f8cb86a"
++    }
++  ],
++  "installed_source_and_model_blobs": 32,
++  "testing": [
++    "default CPU self-supervised15epochs; seed0 fixed",
++    "no-bin parameter boundary minfasta1000KB > input800KB",
++    "native installed source and all bundled models32blobs identical"
++  ],
++  "limitations": [
++    "No GPU/image/nf-test/full platform/biological binning accuracy certification."
++  ]
++}

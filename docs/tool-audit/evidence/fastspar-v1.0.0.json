@@ -1,0 +1,12 @@
+{
+  "repository": "scwatts/fastspar",
+  "ref": "v1.0.0",
+  "path": "README.md",
+  "blob_sha": "0c0d19a72adb19ec1ccadba094766074e21359b1",
+  "url": "https://github.com/scwatts/fastspar/blob/v1.0.0/README.md",
+  "retrieval": "GitHub connector github_fetch_file",
+  "findings": [
+    "Usage requires absolute OTU counts in BIOM TSV without metadata",
+    "Correlation inference and bootstrap p-value estimation are separate commands"
+  ]
+}

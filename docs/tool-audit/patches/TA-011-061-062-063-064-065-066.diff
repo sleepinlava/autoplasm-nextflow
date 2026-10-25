@@ -1,0 +1,1207 @@
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -158,8 +158,9 @@
+   不再继续空输入组装。hybrid 不自动切换为仅短读段组装。
+   旧宿主去除运行可能丢失未匹配宿主的长读段，需从该步骤在新目录重跑。
+ - 跨样本门控：`--min_diversity_samples 3`、`--min_group_replicates 3`、
+-  `--network_min_samples 20`。这些是运行 / 脚本门槛，不是功效保证；DESeq2
+-  脚本目前另有写死的每组 ≥3 条件，不读取 `min_group_replicates`。
++  `--network_min_samples 20`。这些是运行 / 脚本门槛，不是功效保证。
++  两种差异分析均读取 `min_group_replicates`，要求正整数，默认仍为 3；
++  网络最小样本数要求至少为 2 的整数，显式零值会报错。
+ - 宿主-质粒关联默认关闭：`--host_plasmid_linking true` 开启，
+   `--host_linking_methods 'co_abundance,sequence,long_read'`、
+   `--host_linking_optional_methods hotspot`（或 `crispr`，尚未实现）。
+@@ -344,3 +345,5 @@
+   处理（按列名候选匹配）。
+ 
+ 跨样本统计现在先核对完整样本清单、逐样本定量状态和完整特征矩阵。缺失测量、重复样本/特征或不一致的质粒子集会失败；真实零值与全局空目录保留预期样本。多样性按每个样本计算，单特征和全零输入有有限数值及状态说明。网络在流行率过滤后再次去除全零样本，只有至少4个特征且满足 `network_min_samples` 的矩阵进入 FastSpar，并发布筛选状态。分析脚本及辅助库作为任务输入参与缓存判断。DESeq2固定部署模型及TETRA真实宿主阈值仍有独立验收项，见 `docs/tool-audit/status.md`。
++
++DESeq2 为全分组联合拟合后逐对比较，保留默认 ratio 大小因子、原计数过滤与 BH 校正。`11_diversity/deseq2_status.tsv` 记录全体输入样本、进入设计/拟合的样本、实际模型版本及未拟合原因。全零、过滤后零文库或无法计算 ratio 大小因子时不会伪造统计值、补计数或静默删除样本。独立 R 脚本仍支持显式 `--sf-type poscounts`；工作流默认不会自动切换估计方法。普通整数矩阵避免固定部署 1.42 的 table 类型兼容失败。四个统计节点分别暂存丰度和样本表，输入与结果同名也不会改写上游文件。分组标签通过标准 TSV 引号转义保留。
+diff --git a/bin/deseq2_plasmid.R b/bin/deseq2_plasmid.R
+--- a/bin/deseq2_plasmid.R
++++ b/bin/deseq2_plasmid.R
+@@ -1,178 +1,167 @@
+ #!/usr/bin/env Rscript
+-# DESeq2 differential plasmid abundance between groups.
+-#
+-# Aligned with the nf-core/modules deseq2_differential template and the
+-# DESeq2 vignette: ONE DESeq() fit on the full design (~ group) over all
+-# shared samples (vignette FAQ: run samples from all groups together, then
+-# use the contrast argument), vignette prefiltering
+-# (rowSums(counts(dds) >= 10) >= smallest group size; the script early-exits
+-# with an empty output when the smallest group has < 3 samples or when no
+-# row survives), explicit independentFiltering = TRUE + Benjamini-Hochberg
+-# in results(), and --sf-type to choose the size-factor estimator
+-# ("poscounts" is the documented remedy for mostly-zero tables).
+-#
+-# lfcShrink is standard practice but intentionally SKIPPED here: ashr is
+-# not installed, and apeglm supports coef = only (no contrast vectors).
+-#
+-# Output schema: plasmid_id, group_a, group_b, log2_fold_change, p_value,
+-# q_value, method, warnings (NA values are written as empty cells).
++# One DESeq2 fit on the full ~group design, followed by pairwise contrasts.
++# Keep the existing >=10 count prefilter, ratio size factors, independent
++# filtering and BH correction. Model-ineligible inputs have explicit status;
++# missing counts never become zero or coverage-derived pseudo-counts.
+ 
+-# Load the shared identity contract alongside the executable, including PATH invocation.
+ script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1L])
+ source(file.path(dirname(normalizePath(script_file)), "statistics_input_contract.R"))
+ 
+-args <- commandArgs(trailingOnly = TRUE)
++parse_arguments <- function(args) {
++  allowed <- c("--abundance", "--metadata", "--output", "--out-status",
++               "--sf-type", "--min-replicates")
++  opts <- list()
++  i <- 1L
++  while (i <= length(args)) {
++    flag <- args[i]
++    if (!flag %in% allowed) stop(paste("Unknown argument", flag), call.=FALSE)
++    if (!is.null(opts[[flag]])) stop(paste("Duplicate argument", flag), call.=FALSE)
++    if (i == length(args) || startsWith(args[i + 1L], "--"))
++      stop(paste("Missing value for", flag), call.=FALSE)
++    opts[[flag]] <- args[i + 1L]
++    i <- i + 2L
++  }
++  for (flag in c("--abundance", "--metadata", "--output"))
++    if (is.null(opts[[flag]])) stop(paste("Missing", flag), call.=FALSE)
++  opts
++}
++opts <- parse_arguments(commandArgs(trailingOnly=TRUE))
++abundance_path <- opts[["--abundance"]]
++metadata_path <- opts[["--metadata"]]
++output_path <- opts[["--output"]]
++status_path <- opts[["--out-status"]]
++sf_type <- if (is.null(opts[["--sf-type"]])) "ratio" else opts[["--sf-type"]]
++if (!sf_type %in% c("ratio", "poscounts"))
++  stop("Invalid --sf-type (choose from 'ratio', 'poscounts')", call.=FALSE)
++min_replicates <- if (is.null(opts[["--min-replicates"]])) 3 else
++  suppressWarnings(as.numeric(opts[["--min-replicates"]]))
++if (!is.finite(min_replicates) || min_replicates < 1 ||
++    min_replicates != floor(min_replicates) || min_replicates > .Machine$integer.max)
++  stop("--min-replicates must be a positive integer within R integer range", call.=FALSE)
+ 
+-arg_value <- function(flag, default = NULL) {
+-  index <- match(flag, args)
+-  if (is.na(index)) {
+-    if (!is.null(default)) return(default)
+-    stop(paste("Missing", flag))
+-  }
+-  if (index == length(args)) stop(paste("Missing value for", flag))
+-  args[[index + 1]]
+-}
+-
+-abundance_path <- arg_value("--abundance")
+-metadata_path <- arg_value("--metadata")
+-output_path <- arg_value("--output")
+-sf_type <- arg_value("--sf-type", "ratio")
+-if (!(sf_type %in% c("ratio", "poscounts"))) {
+-  stop(sprintf("Invalid --sf-type '%s' (choose from 'ratio', 'poscounts')", sf_type))
+-}
+-
+-output_columns <- c(
+-  "plasmid_id", "group_a", "group_b", "log2_fold_change",
+-  "p_value", "q_value", "method", "warnings"
+-)
+-empty_output <- function() {
+-  dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
+-  write.table(
+-    setNames(data.frame(matrix(ncol = length(output_columns), nrow = 0)), output_columns),
+-    output_path,
+-    sep = "\t",
+-    quote = FALSE,
+-    row.names = FALSE
+-  )
+-}
+-
+-abundance <- read.delim(abundance_path, check.names = FALSE, stringsAsFactors = FALSE,
+-                       colClasses = c(sample_id = "character", plasmid_id = "character"),
+-                       na.strings = NULL)
+-metadata <- read.delim(metadata_path, check.names = FALSE, stringsAsFactors = FALSE,
+-                      colClasses = c(sample_id = "character", group = "character"),
+-                      na.strings = NULL)
+-if (!all(c("sample_id", "plasmid_id") %in% names(abundance)) ||
+-    !all(c("sample_id", "group") %in% names(metadata))) {
+-  stop("Required columns are missing from abundance or metadata input")
+-}
+-# Keep non-identifier missing-value handling unchanged.
++abundance <- read.delim(abundance_path, check.names=FALSE, stringsAsFactors=FALSE,
++                       colClasses=c(sample_id="character", plasmid_id="character"),
++                       na.strings=NULL)
++metadata <- read.delim(metadata_path, check.names=FALSE, stringsAsFactors=FALSE,
++                      colClasses=c(sample_id="character", group="character"),
++                      na.strings=NULL)
++missing_abundance <- setdiff(c("sample_id", "plasmid_id", "raw_count"), names(abundance))
++if (length(missing_abundance))
++  stop(paste0(abundance_path, ": missing required columns: ", paste(missing_abundance, collapse=", ")),
++       call.=FALSE)
++missing_metadata <- setdiff(c("sample_id", "group"), names(metadata))
++if (length(missing_metadata))
++  stop(paste0(metadata_path, ": missing required columns: ", paste(missing_metadata, collapse=", ")),
++       call.=FALSE)
+ metadata$group[!is.na(metadata$group) & metadata$group == "NA"] <- NA
+-if ("raw_count" %in% names(abundance)) {
+-  abundance$raw_count[!is.na(abundance$raw_count) & abundance$raw_count == "NA"] <- NA
+-}
+-
+-value_column <- "raw_count"
+-if (!value_column %in% names(abundance)) {
+-  stop(paste(abundance_path, ": missing selected numeric column", value_column))
+-}
+-abundance$value <- suppressWarnings(as.numeric(abundance[[value_column]]))
++abundance$value <- suppressWarnings(as.numeric(abundance$raw_count))
+ bad <- which(!is.finite(abundance$value) | abundance$value < 0 |
+              abundance$value != floor(abundance$value) | abundance$value > .Machine$integer.max)
+ if (length(bad)) {
+   i <- bad[1L]
+-  stop(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=%s value='%s'; expected finite nonnegative integer raw count within DESeq2 range; coverage is not a count",
++  stop(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=raw_count value='%s'; expected finite nonnegative integer raw count within DESeq2 range; coverage is not a count",
+                abundance_path, i + 1L, abundance$sample_id[i], abundance$plasmid_id[i],
+-               value_column, abundance[[value_column]][i]))
++               abundance$raw_count[i]), call.=FALSE)
+ }
++identity <- statistics_input_contract(abundance, metadata, "plasmid_id", abundance_path)
++# Build an ordinary integer matrix. Subsetting xtabs drops its xtabs class,
++# leaving table: as.matrix(table) still retains table in R4.3 and the fixed
++# DESeq2/SummarizedExperiment stack loses its dimensions during S4 conversion.
++input_counts <- matrix(0L, nrow=length(identity$features), ncol=length(identity$samples),
++                       dimnames=list(identity$features, identity$samples))
++if (nrow(abundance))
++  input_counts[cbind(match(abundance$plasmid_id, identity$features),
++                     match(abundance$sample_id, identity$samples))] <- as.integer(abundance$value)
++original_metadata <- metadata
++metadata <- metadata[!is.na(metadata$group) & nzchar(metadata$group), c("sample_id", "group")]
++model_samples <- colnames(input_counts)[colnames(input_counts) %in% metadata$sample_id]
++metadata <- metadata[match(model_samples, metadata$sample_id), , drop=FALSE]
++metadata$group <- factor(metadata$group)
++model_counts <- input_counts[, model_samples, drop=FALSE]
++model_fitted <- FALSE
++model_version <- "not_loaded"
+ 
+-statistics_input_contract(abundance, metadata, "plasmid_id", abundance_path)
+-if (nrow(abundance) == 0) {
+-  empty_output()
+-  quit(status = 0)
++output_columns <- c("plasmid_id", "group_a", "group_b", "log2_fold_change",
++                    "p_value", "q_value", "method", "warnings")
++write_results <- function(frame) {
++  dir.create(dirname(output_path), recursive=TRUE, showWarnings=FALSE)
++  text_fields <- frame[vapply(frame, is.character, logical(1))]
++  quote_fields <- any(vapply(text_fields, function(values) any(grepl('[[:cntrl:]"]', values)), logical(1)))
++  write.table(frame, output_path, sep="\t", quote=quote_fields, qmethod="double", row.names=FALSE, na="")
+ }
+-counts <- xtabs(value ~ plasmid_id + sample_id, data = abundance)
+-metadata <- metadata[!is.na(metadata$group) & nzchar(metadata$group), c("sample_id", "group")]
+-shared <- intersect(colnames(counts), metadata$sample_id)
+-if (length(shared) == 0 || nrow(counts) == 0) {
+-  empty_output()
+-  quit(status = 0)
++write_status <- function(state, reason, failed_contrasts=0L) {
++  if (!is.null(status_path)) {
++    ids <- original_metadata$sample_id
++    library_used <- colSums(model_counts)[match(ids, colnames(model_counts))]
++    status <- data.frame(
++      analysis_status=state, reason=reason, sample_id=ids,
++      group=ifelse(is.na(original_metadata$group), "", original_metadata$group),
++      in_design=ids %in% model_samples, used_in_fit=model_fitted & ids %in% model_samples,
++      input_library_size=unname(colSums(input_counts)[ids]), model_library_size=unname(library_used),
++      features_input=nrow(input_counts), features_used=nrow(model_counts),
++      min_replicates=min_replicates, sf_type=sf_type, model_fitted=model_fitted,
++      deseq2_version=model_version, failed_contrasts=failed_contrasts,
++      stringsAsFactors=FALSE, check.names=FALSE)
++    dir.create(dirname(status_path), recursive=TRUE, showWarnings=FALSE)
++    write.table(status, status_path, sep="\t", quote=TRUE, qmethod="double", row.names=FALSE, na="")
++  }
++  message(sprintf("DESeq2 status: %s (%s); %d design samples, %d input/%d used features",
++                  state, reason, length(model_samples), nrow(input_counts), nrow(model_counts)))
+ }
+-counts <- counts[, shared, drop = FALSE]
+-metadata <- metadata[match(shared, metadata$sample_id), , drop = FALSE]
+-metadata$group <- factor(metadata$group)
+-if (nlevels(metadata$group) < 2) {
+-  empty_output()
+-  quit(status = 0)
++no_model <- function(state, reason) {
++  write_results(setNames(data.frame(matrix(ncol=length(output_columns), nrow=0)), output_columns))
++  write_status(state, reason)
++  quit(status=0)
+ }
+-
++if (!nrow(input_counts)) no_model("not_run", "zero_features")
++if (nlevels(metadata$group) < 2) no_model("not_run", "insufficient_groups")
+ smallest_group_size <- min(table(metadata$group))
+-if (smallest_group_size < 3) {
+-  # Template guard: not enough replication for a stable per-group fit.
+-  empty_output()
+-  quit(status = 0)
+-}
++if (smallest_group_size < min_replicates) no_model("not_run", "insufficient_replication")
++if (ncol(model_counts) <= nlevels(metadata$group))
++  no_model("not_estimable", "insufficient_residual_degrees_of_freedom")
++all_zero <- !any(model_counts > 0)
++# The same vignette prefilter as before, applied before constructing DESeqDataSet
++# so legitimate all-zero inputs do not hit its deliberate all-zero error.
++keep <- rowSums(model_counts >= 10) >= smallest_group_size
++model_counts <- model_counts[keep, , drop=FALSE]
++if (!nrow(model_counts))
++  no_model("not_run", if (all_zero) "all_zero_counts" else "no_features_after_count_filter")
++# Never drop these samples or impute a size factor: either estimator is undefined
++# for a zero library after filtering. Keep the full cohort visible in status.
++if (any(colSums(model_counts) == 0)) no_model("not_estimable", "zero_count_samples")
++if (sf_type == "ratio" && !any(rowSums(model_counts == 0) == 0))
++  no_model("not_estimable", "no_positive_geometric_means")
+ 
+ suppressPackageStartupMessages(library(DESeq2))
++model_version <- as.character(packageVersion("DESeq2"))
+ dds <- DESeqDataSetFromMatrix(
+-  countData = counts,
+-  colData = data.frame(group = metadata$group, row.names = metadata$sample_id),
+-  design = ~ group
+-)
+-# Vignette prefilter: keep features with at least 10 counts (the
+-# size-factor estimator's resolution floor) in at least smallestGroupSize
+-# samples.
+-keep <- rowSums(counts(dds) >= 10) >= smallest_group_size
+-if (!any(keep)) {
+-  empty_output()
+-  quit(status = 0)
+-}
+-dds <- dds[keep, ]
+-dds <- DESeq(dds, quiet = TRUE, sfType = sf_type)
+-
+-cov_warn <- ""
++  countData=model_counts,
++  colData=data.frame(group=metadata$group, row.names=metadata$sample_id), design=~group)
++dds <- DESeq(dds, quiet=TRUE, sfType=sf_type)
++model_fitted <- TRUE
+ groups <- levels(metadata$group)
+ all_results <- list()
+-comparison_index <- 1
+-for (left_index in seq_len(length(groups) - 1)) {
+-  for (right_index in seq.int(left_index + 1, length(groups))) {
++failed_contrasts <- 0L
++for (left_index in seq_len(length(groups) - 1L)) {
++  for (right_index in seq.int(left_index + 1L, length(groups))) {
+     group_a <- groups[[left_index]]
+     group_b <- groups[[right_index]]
+     frame <- tryCatch({
+-      result <- results(dds, contrast = c("group", group_a, group_b),
+-                        independentFiltering = TRUE, pAdjustMethod = "BH")
+-      data.frame(
+-        plasmid_id = rownames(result),
+-        group_a = group_a,
+-        group_b = group_b,
+-        log2_fold_change = result$log2FoldChange,
+-        p_value = result$pvalue,
+-        q_value = result$padj,
+-        method = "DESeq2",
+-        warnings = cov_warn,
+-        stringsAsFactors = FALSE
+-      )
+-    }, error = function(e) {
+-      # Edge guard: a failed pairwise contrast (e.g. all-zero counts in the
+-      # compared groups) yields NA values plus a warning, never a crash.
+-      data.frame(
+-        plasmid_id = rownames(dds),
+-        group_a = group_a,
+-        group_b = group_b,
+-        log2_fold_change = NA_real_,
+-        p_value = NA_real_,
+-        q_value = NA_real_,
+-        method = "DESeq2",
+-        warnings = trimws(paste(cov_warn, paste0("contrast failed: ", conditionMessage(e)))),
+-        stringsAsFactors = FALSE
+-      )
++      result <- results(dds, contrast=c("group", group_a, group_b),
++                        independentFiltering=TRUE, pAdjustMethod="BH")
++      data.frame(plasmid_id=rownames(result), group_a=group_a, group_b=group_b,
++                 log2_fold_change=result$log2FoldChange, p_value=result$pvalue,
++                 q_value=result$padj, method="DESeq2", warnings="", stringsAsFactors=FALSE)
++    }, error=function(e) {
++      failed_contrasts <<- failed_contrasts + 1L
++      data.frame(plasmid_id=rownames(dds), group_a=group_a, group_b=group_b,
++                 log2_fold_change=NA_real_, p_value=NA_real_, q_value=NA_real_,
++                 method="DESeq2", warnings=paste0("contrast failed: ", conditionMessage(e)),
++                 stringsAsFactors=FALSE)
+     })
+-    all_results[[comparison_index]] <- frame
+-    comparison_index <- comparison_index + 1
++    all_results[[length(all_results) + 1L]] <- frame
+   }
+ }
+-
+-combined <- do.call(rbind, all_results)
+-dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
+-write.table(combined, output_path, sep = "\t", quote = FALSE, row.names = FALSE,
+-            na = "")
++write_results(do.call(rbind, all_results))
++write_status(if (failed_contrasts) "completed_with_contrast_failures" else "completed",
++             if (failed_contrasts) "contrast_failure" else "model_fitted", failed_contrasts)
+diff --git a/bin/differential_abundance.R b/bin/differential_abundance.R
+--- a/bin/differential_abundance.R
++++ b/bin/differential_abundance.R
+@@ -119,7 +119,10 @@
+   out = list(required = TRUE)
+ )
+ opts <- parse_args(commandArgs(trailingOnly = TRUE), spec)
+-min_rep <- as.integer(opts[["min-replicates"]])
++min_rep <- suppressWarnings(as.numeric(opts[["min-replicates"]]))
++if (!is.finite(min_rep) || min_rep < 1 || min_rep != floor(min_rep) ||
++    min_rep > .Machine$integer.max)
++  die("--min-replicates must be a positive integer within R integer range")
+ min_prev <- suppressWarnings(as.numeric(opts[["min-prevalence"]]))
+ if (is.na(min_prev) || min_prev < 0 || min_prev > 1) {
+   die(paste0("argument --min-prevalence: invalid value: '", opts[["min-prevalence"]],
+@@ -140,8 +143,8 @@
+ }
+ ab[, coverage := cov]
+ 
+-meta <- fread(opts$metadata, colClasses = c(sample_id = "character", group = "character"),
+-              na.strings = NULL)
++meta <- read.delim(opts$metadata, colClasses = c(sample_id = "character", group = "character"),
++                   check.names = FALSE, stringsAsFactors = FALSE, na.strings = NULL)
+ statistics_input_contract(ab, meta, "contig_id", opts$abundance)
+ by_sample <- split(ab, ab$sample_id)
+ if ("group" %in% names(meta)) meta$group[!is.na(meta$group) & meta$group == "NA"] <- NA
+@@ -149,7 +152,7 @@
+ if (nrow(meta) > 0) {
+   sid <- as.character(meta$sample_id)
+   grp <- as.character(meta$group)
+-  ok <- nzchar(sid) & nzchar(grp)
++  ok <- !is.na(sid) & nzchar(sid) & !is.na(grp) & nzchar(grp)
+   for (i in which(ok)) grp_samples[[grp[i]]] <- c(grp_samples[[grp[i]]], sid[i])
+ }
+ eligible <- grp_samples[vapply(grp_samples, function(s)
+@@ -215,6 +218,6 @@
+ }
+ setcolorder(out, c("contig_id", "group1", "group2", "log2fc", "pvalue",
+                    "padj", "effect_size", "method"))
+-fwrite(out, opts$out, sep = "\t", quote = FALSE, na = "")
++fwrite(out, opts$out, sep = "\t", quote = "auto", na = "")
+ cat(sprintf("differential abundance: %d test(s), %d eligible group(s)\n",
+             nrow(out), length(eligible)))
+diff --git a/bin/diversity.R b/bin/diversity.R
+--- a/bin/diversity.R
++++ b/bin/diversity.R
+@@ -116,8 +116,8 @@
+ }
+ ab[, coverage := cov]
+ 
+-meta <- fread(opts$metadata, colClasses = c(sample_id = "character", group = "character"),
+-              na.strings = NULL)
++meta <- read.delim(opts$metadata, colClasses = c(sample_id = "character", group = "character"),
++                   check.names = FALSE, stringsAsFactors = FALSE, na.strings = NULL)
+ # Preserve the existing missing-group policy without decoding identifier tokens.
+ if ("group" %in% names(meta)) meta$group[!is.na(meta$group) & meta$group == "NA"] <- NA
+ identity <- statistics_input_contract(ab, meta, "contig_id", opts$abundance)
+@@ -165,7 +165,7 @@
+ )))
+ metrics[is.na(group), group := ""]
+ 
+-fwrite(metrics, opts[["out-metrics"]], sep = "\t", quote = FALSE, na = "")
++fwrite(metrics, opts[["out-metrics"]], sep = "\t", quote = "auto", na = "")
+ 
+ beta_mat <- site_mat
+ if (beta_norm == "tss") {
+diff --git a/modules/cross_sample/deseq2.nf b/modules/cross_sample/deseq2.nf
+--- a/modules/cross_sample/deseq2.nf
++++ b/modules/cross_sample/deseq2.nf
+@@ -11,21 +11,25 @@
+     publishDir "${params.outdir}/11_diversity", mode: params.publish_dir_mode
+ 
+     input:
+-    path abundance_table
+-    path sample_metadata
++    path(abundance_table, stageAs: 'abundance/*')
++    path(sample_metadata, stageAs: 'cohort/*')
+ 
+     path code_assets, stageAs: 'source_assets/*'
+ 
+     output:
+     path "differential_plasmids.tsv", emit: results
++    path "deseq2_status.tsv", emit: status
+ 
+     script:
++    def minimum_replicates = params.min_group_replicates == null ? 3 : params.min_group_replicates
++    def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+     """
+     mkdir -p analysis_code
+     cp -L source_assets/* analysis_code/
+     Rscript analysis_code/deseq2_plasmid.R \\
+         --abundance ${abundance_table} \\
+         --metadata ${sample_metadata} \\
+-        --output differential_plasmids.tsv
++        --min-replicates ${quote.call(minimum_replicates)} \\
++        --output differential_plasmids.tsv --out-status deseq2_status.tsv
+     """
+ }
+diff --git a/modules/cross_sample/differential.nf b/modules/cross_sample/differential.nf
+--- a/modules/cross_sample/differential.nf
++++ b/modules/cross_sample/differential.nf
+@@ -13,8 +13,8 @@
+     publishDir "${params.outdir}/11_diversity", mode: params.publish_dir_mode
+ 
+     input:
+-    path abundance_table
+-    path sample_metadata
++    path(abundance_table, stageAs: 'abundance/*')
++    path(sample_metadata, stageAs: 'cohort/*')
+ 
+     path code_assets, stageAs: 'source_assets/*'
+ 
+@@ -22,12 +22,14 @@
+     path "differential_abundance.tsv", emit: results
+ 
+     script:
++    def minimum_replicates = params.min_group_replicates == null ? 3 : params.min_group_replicates
++    def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+     """
+     mkdir -p analysis_code
+     cp -L source_assets/* analysis_code/
+     Rscript analysis_code/differential_abundance.R --abundance ${abundance_table} \\
+         --metadata ${sample_metadata} \\
+-        --min-replicates ${params.min_group_replicates} \\
++        --min-replicates ${quote.call(minimum_replicates)} \\
+         --out differential_abundance.tsv
+     """
+ }
+diff --git a/modules/cross_sample/diversity.nf b/modules/cross_sample/diversity.nf
+--- a/modules/cross_sample/diversity.nf
++++ b/modules/cross_sample/diversity.nf
+@@ -13,8 +13,8 @@
+     publishDir "${params.outdir}/11_diversity", mode: params.publish_dir_mode
+ 
+     input:
+-    path abundance_table
+-    path sample_metadata
++    path(abundance_table, stageAs: 'abundance/*')
++    path(sample_metadata, stageAs: 'cohort/*')
+ 
+     path code_assets, stageAs: 'source_assets/*'
+ 
+diff --git a/modules/cross_sample/network_prepare.nf b/modules/cross_sample/network_prepare.nf
+--- a/modules/cross_sample/network_prepare.nf
++++ b/modules/cross_sample/network_prepare.nf
+@@ -13,8 +13,8 @@
+     publishDir "${params.outdir}/12_network", mode: params.publish_dir_mode
+ 
+     input:
+-    path abundance_table
+-    path sample_metadata
++    path(abundance_table, stageAs: 'abundance/*')
++    path(sample_metadata, stageAs: 'cohort/*')
+ 
+     path code_assets, stageAs: 'source_assets/*'
+ 
+@@ -26,12 +26,12 @@
+     script:
+     def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+     def metadata_arg = sample_metadata ? "--metadata ${quote.call(sample_metadata)}" : ''
+-    def minimum_samples = params.network_min_samples ?: 20
++    def minimum_samples = params.network_min_samples == null ? 20 : params.network_min_samples
+     """
+     mkdir -p analysis_code
+     cp -L source_assets/* analysis_code/
+     Rscript analysis_code/network_prepare.R --abundance ${abundance_table} ${metadata_arg} \\
+-      --min-samples ${minimum_samples} --out fastspar_input.tsv \\
++      --min-samples ${quote.call(minimum_samples)} --out fastspar_input.tsv \\
+       --out-status network_status.json --eligible-out fastspar_eligible.tsv
+     """
+ }
+diff --git a/tests/deseq2_reference.R b/tests/deseq2_reference.R
+new file mode 100644
+--- /dev/null
++++ b/tests/deseq2_reference.R
+@@ -0,0 +1,23 @@
++# Independent official API oracle: read a wide count matrix directly, avoiding
++# the production long-table importer, cohort guard and status implementation.
++args <- commandArgs(TRUE)
++suppressPackageStartupMessages(library(DESeq2))
++stopifnot(as.character(packageVersion('DESeq2')) == '1.42.0')
++x <- read.delim(args[1],row.names=1,check.names=FALSE,na.strings=NULL)
++x <- as.matrix(x)
++storage.mode(x) <- 'integer'
++m <- read.delim(args[2],colClasses='character',check.names=FALSE,na.strings=NULL)
++m <- m[!is.na(m$group) & nzchar(m$group) & m$group != 'NA',,drop=FALSE]
++x <- x[,m$sample_id,drop=FALSE]
++m$group <- factor(m$group)
++keep <- rowSums(x >= 10) >= min(table(m$group))
++x <- x[keep,,drop=FALSE]
++dds <- DESeqDataSetFromMatrix(x,data.frame(group=m$group,row.names=m$sample_id),~group)
++dds <- DESeq(dds,quiet=TRUE,sfType=if(length(args)>3) args[4] else 'ratio')
++pairs <- combn(levels(m$group),2,simplify=FALSE)
++frames <- lapply(pairs,function(g) {
++ r <- results(dds,contrast=c('group',g),independentFiltering=TRUE,pAdjustMethod='BH')
++ data.frame(plasmid_id=rownames(r),group_a=g[1],group_b=g[2],
++            log2_fold_change=r$log2FoldChange,p_value=r$pvalue,q_value=r$padj)
++})
++write.table(do.call(rbind,frames),args[3],sep='\t',quote=TRUE,qmethod='double',row.names=FALSE,na='')
+diff --git a/tests/nextflow/deseq2_model.nf b/tests/nextflow/deseq2_model.nf
+new file mode 100644
+--- /dev/null
++++ b/tests/nextflow/deseq2_model.nf
+@@ -0,0 +1,7 @@
++nextflow.enable.dsl=2
++include { DESEQ2 } from '../../modules/cross_sample/deseq2'
++workflow {
++    DESEQ2(file(params.abundance, checkIfExists:true), file(params.metadata, checkIfExists:true),
++        [file("${params.code_dir}/deseq2_plasmid.R",checkIfExists:true),
++         file("${params.code_dir}/statistics_input_contract.R",checkIfExists:true)])
++}
+diff --git a/tests/nextflow/statistics_input_names.nf b/tests/nextflow/statistics_input_names.nf
+new file mode 100644
+--- /dev/null
++++ b/tests/nextflow/statistics_input_names.nf
+@@ -0,0 +1,17 @@
++nextflow.enable.dsl=2
++include { DESEQ2 } from '../../modules/cross_sample/deseq2'
++include { DIFFERENTIAL_ABUNDANCE } from '../../modules/cross_sample/differential'
++include { DIVERSITY } from '../../modules/cross_sample/diversity'
++include { NETWORK_PREPARE } from '../../modules/cross_sample/network_prepare'
++workflow {
++    def assets = [file("${params.code_dir}/${params.program}",checkIfExists:true),
++                  file("${params.code_dir}/statistics_input_contract.R",checkIfExists:true)]
++    if (params.test_tool == 'deseq')
++        DESEQ2(file(params.abundance,checkIfExists:true),file(params.metadata,checkIfExists:true),assets)
++    else if (params.test_tool == 'internal')
++        DIFFERENTIAL_ABUNDANCE(file(params.abundance,checkIfExists:true),file(params.metadata,checkIfExists:true),assets)
++    else if (params.test_tool == 'diversity')
++        DIVERSITY(file(params.abundance,checkIfExists:true),file(params.metadata,checkIfExists:true),assets)
++    else
++        NETWORK_PREPARE(file(params.abundance,checkIfExists:true),file(params.metadata,checkIfExists:true),assets)
++}
+diff --git a/tests/nf-test/README.md b/tests/nf-test/README.md
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -426,3 +426,5 @@
+ 所有比较保存在sequence_scores.tsv，method JSON明确tetra_markov256_v1与uncalibrated；0.7仍未校准。`bin/calibrate_sequence_threshold.py` 用具证据的显式标签和质粒/宿主组均隔离的calibration/holdout集合；7方法/3CLI控制只验证统计工具，人工0.8不得写回默认。完整数据约束、方法差异和待做真实宿主校准见 `docs/tool-audit/contracts/tetra-sequence-method.md`。TA-039仍ready/open；TA-040与新TA-058局部修复另记。
+ 
+ 2026-10-22统计边界补验：`tests/run_statistics_eligibility.py` 以原生R/FastSpar1.0.0和明确计数fixture检查非空正例、0/1特征、全零、过滤后新零列及缺失生产者；13场景37条trace（含3预期失败），不能当作nf-test框架或真实ENA科学效果通过。`tests/run_statistics_cache.py` 只改变独立临时项目中的脚本/辅助库，检查resume失效条件；旧module+新helper反例用于修复过程回归，不冒充基线已有helper。原生共享定量三模式现为58任务，六个平台/空结果场景793任务中外部工具仍为observer。FastSpar固定1.0.0实际要求至少4个特征，过滤后样本数必须再次达标；历史coverage-only ENA表需按统一参考重映射产生整数raw_count。P4断言已加强有限指标、完整样本与实际执行分支，但nf-test launcher及完整真实P4尚未运行，TT-003仍open。详见 `results/tool-audit/20261022-statistics-eligibility/receipt.json`；旧段落TA-013/014/038未决为历史scope，当前状态以台账为准。
++
++DESeq2 部署版本补验使用 `tests/run_deseq2_model.py --deseq-prefix <locked1.42-prefix> --python-prefix <3.12-prefix> --before-dir <frozen-before> --work-dir <new-dir>`，独立 `tests/deseq2_reference.R` 从宽矩阵调用官方 API，核对联合多组模型、逐对结果、受控强信号方向和数值；不复用生产导入/状态函数作为真值。新状态区分实际模型拟合和未拟合条件，合法全零不是“显著性为零”。`tests/run_statistics_input_names.py` 核对四节点输入源不变及同名输入/输出，旧 DESeq 输入改写对照明确使用允许的原生 1.52 栈，不冒充默认 1.42 镜像；只改写私有 fixture。`-resume` 案例使用独立项目会话，未变缓存与阈值改变重算分别检查。完整 nf-test/真实非空 ENA P4 与镜像尚未认证，TT-003 仍未关闭；主台账和最终 receipt 为准，早期环境准备/失败尝试不能当作模型通过。
+diff --git a/tests/nf-test/nodes-cross-sample-ena.nf.test b/tests/nf-test/nodes-cross-sample-ena.nf.test
+--- a/tests/nf-test/nodes-cross-sample-ena.nf.test
++++ b/tests/nf-test/nodes-cross-sample-ena.nf.test
+@@ -82,8 +82,35 @@
+             assert inputState.sample_ids.toSet() == samples.toSet()
+             // internal differential between the two real groups
+             assert path("${params.outdir}/11_diversity/differential_abundance.tsv").text.readLines().size() >= 1
+-            // DESeq2 on the merged plasmid table (may legitimately find nothing)
+-            assert path("${params.outdir}/11_diversity/differential_plasmids.tsv").exists()
++            // This ENA fixture has plain control/infected labels. Decode the
++            // quoted status fields; complex TSV labels have separate CSV-oracle tests.
++            def unquote = { value -> value.startsWith('"') && value.endsWith('"') ?
++                value.substring(1,value.length()-1).replace('""','"') : value }
++            def dsLines = path("${params.outdir}/11_diversity/deseq2_status.tsv").text.readLines()
++            def dsHeader = dsLines[0].split('\t',-1).collect(unquote)
++            def dsRows = dsLines.drop(1).collect { line ->
++                def fields = line.split('\t',-1).collect(unquote)
++                assert fields.size() == dsHeader.size()
++                dsHeader.withIndex().collectEntries { name,index -> [(name):fields[index]] }
++            }
++            assert dsRows.size() == samples.size()
++            assert dsRows.collect { it.sample_id }.toSet() == samples.toSet()
++            assert dsRows.every { it.min_replicates == '3' && it.failed_contrasts == '0' }
++            def dsResults = path("${params.outdir}/11_diversity/differential_plasmids.tsv").text.readLines()
++            if (dsRows.every { it.model_fitted == 'TRUE' }) {
++                assert dsRows.every { it.analysis_status == 'completed' && it.deseq2_version == '1.42.0' }
++                assert dsResults.size() > 1
++                def pIndex = dsResults[0].split('\t',-1).toList().indexOf('p_value')
++                assert pIndex >= 0
++                assert dsResults.drop(1).any { row ->
++                    def value = row.split('\t',-1)[pIndex]
++                    value && Double.isFinite(Double.parseDouble(value))
++                }
++            } else {
++                assert dsRows.every { it.model_fitted == 'FALSE' && it.used_in_fit == 'FALSE' }
++                assert dsRows.every { it.analysis_status in ['not_run','not_estimable'] && it.reason }
++                assert dsResults.size() == 1
++            }
+             // Nonempty source rows do not prove final network eligibility.
+             def networkState = new groovy.json.JsonSlurper().parse(path("${params.outdir}/12_network/network_status.json").toFile())
+             def estimators = workflow.trace.succeeded().findAll { it.name.contains('FASTSPAR') }
+diff --git a/tests/run_deseq2_model.py b/tests/run_deseq2_model.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_deseq2_model.py
+@@ -0,0 +1,242 @@
++#!/usr/bin/env python3
++"""Native fixed1.42 DESEQ2 and original CROSS_SAMPLE on explicit count fixtures.
++
++A separate wide-matrix official API oracle checks full-model contrasts; this is
++an execution/numerical contract check, not biological differential accuracy.
++"""
++import argparse
++import csv
++import hashlib
++import json
++import math
++import os
++from pathlib import Path
++import random
++import shlex
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def read(path):
++    with path.open() as stream:
++        return list(csv.DictReader(stream, delimiter='\t'))
++
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def generate(folder, kind):
++    folder.mkdir()
++    n = 4 if kind == 'two' else 9 if kind == 'three' else 7 if kind == 'ungrouped' else 6
++    ids = ['001', '1', 'NA'] + [f'S{i}' for i in range(3, n)]
++    groups = ['A'] * (n // 2) + ['B'] * (n - n // 2)
++    if kind == 'three': groups = ['A'] * 3 + ['B'] * 3 + ['C'] * 3
++    if kind == 'ungrouped': groups = ['A'] * 3 + ['B'] * 3 + ['']
++    features = [] if kind == 'empty' else ['001', '1', 'NA'] + [f'F{i}' for i in range(3, 100)]
++    rng = random.Random(321)
++    values = []
++    for j in range(len(features)):
++        row = []
++        for i in range(n):
++            mean = (60 if groups[i] == 'A' else 1200) if 3 <= j < 8 else 50 + j * 3
++            count = max(1, round(rng.gauss(mean, .2 * mean)))
++            if kind == 'all-zero' or (kind == 'zero-sample' and i == 0): count = 0
++            if kind == 'low': count = 1 + (i + j) % 9
++            if kind == 'invalid-count' and i == 0 and j == 0: count = ''
++            row.append(count)
++        values.append(row)
++    if kind == 'quoted': groups = ['"A\tcontrol'] * 3 + ['"B\ncase'] * 3
++    with (folder / 'samples.tsv').open('w') as stream:
++        writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
++        writer.writerow(['sample_id', 'group'])
++        writer.writerows(zip(ids, groups))
++    for role, column in [('plasmids', 'plasmid_id'), ('contigs', 'contig_id')]:
++        with (folder / (role + '.tsv')).open('w') as stream:
++            writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
++            writer.writerow([column, 'sample_id', 'raw_count', 'coverage'])
++            for fid, row in zip(features, values):
++                for sid, count in zip(ids, row): writer.writerow([fid, sid, count, '0.125'])
++    with (folder / 'wide.tsv').open('w') as stream:
++        writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
++        writer.writerow(['plasmid_id', *ids])
++        writer.writerows([fid, *row] for fid, row in zip(features, values))
++    with (folder / 'states.tsv').open('w') as stream:
++        writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
++        writer.writerow(['sample_id', 'reference_features', 'plasmid_features', 'eligible_read_alignments', 'plasmid_read_alignments', 'quantification_status'])
++        for i, sid in enumerate(ids):
++            total = sum(row[i] for row in values if isinstance(row[i], int))
++            state = 'empty_catalogue' if not features else 'measured_zero' if not total else 'measured'
++            writer.writerow([sid, len(features), len(features), total, total, state])
++            d = folder / sid
++            d.mkdir()
++            dna = random.Random(222)
++            sequences = [''.join(dna.choices('ACGT', k=1200)) for _ in features]
++            (d / 'plasmids.fasta').write_text(''.join(f'>{fid}\n{seq}\n' for fid, seq in zip(features, sequences)))
++            (d / 'consensus.tsv').write_text('sample_id\tcontig_id\tplasmid_call\tsupporting_tools\n' + ''.join(f'{sid}\t{fid}\tplasmid\tcontrolled_fixture\n' for fid in features))
++            (d / 'structure.tsv').write_text('sample_id\tplasmid_id\tis_circular\n' + ''.join(f'{sid}\t{fid}\tfalse\n' for fid in features))
++    return ids, features
++
++
++def compare(actual, expected):
++    def keyed(rows): return {(r['plasmid_id'], r['group_a'], r['group_b']): r for r in rows}
++    a, e = keyed(actual), keyed(expected)
++    assert len(a) == len(actual) and set(a) == set(e)
++    for key in a:
++        for field in ['log2_fold_change', 'p_value', 'q_value']:
++            av, ev = a[key][field], e[key][field]
++            assert (av == '') == (ev == ''), (key, field, av, ev)
++            if av:
++                assert math.isfinite(float(av))
++                assert math.isclose(float(av), float(ev), rel_tol=1e-8, abs_tol=1e-12), (key, field, av, ev)
++        assert a[key]['method'] == 'DESeq2' and a[key]['warnings'] == ''
++    labels = sorted({r[field] for r in actual for field in ['group_a', 'group_b']})
++    planted = [r for r in actual if r['plasmid_id'] in {f'F{i}' for i in range(3, 8)} and r['group_a'] == labels[0] and r['group_b'] == labels[1]]
++    assert len(planted) == 5 and all(float(r['log2_fold_change']) < -3 and float(r['q_value']) < .01 for r in planted)
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', type=Path, required=True)
++    parser.add_argument('--deseq-prefix', type=Path, required=True)
++    parser.add_argument('--python-prefix', type=Path, required=True)
++    parser.add_argument('--before-dir', type=Path, required=True)
++    a = parser.parse_args()
++    base = a.work_dir.resolve()
++    base.mkdir(parents=True, exist_ok=False)
++    prefix, python, before = a.deseq_prefix.resolve(), a.python_prefix.resolve(), a.before_dir.resolve()
++    sources = ['bin/deseq2_plasmid.R', 'bin/statistics_input_contract.R', 'modules/cross_sample/deseq2.nf',
++               'subworkflows/cross_sample.nf', 'modules/cross_sample/statistics_inputs.nf',
++               'bin/differential_abundance.R', 'modules/cross_sample/differential.nf',
++               'modules/cross_sample/report.nf', 'bin/generate_report.R', 'lib/report_events.nf',
++               'tests/nextflow/deseq2_model.nf', 'tests/nextflow/statistics_eligibility.nf',
++               'tests/deseq2_reference.R', 'tests/run_deseq2_model.py']
++    hashes = {n: sha(ROOT / n) for n in sources}
++    env = os.environ.copy()
++    env['PATH'] = str(python / 'bin') + ':' + str(ROOT / 'bin') + ':' + env['PATH']
++    model_env = env.copy()
++    model_env['PATH'] = str(prefix / 'bin') + ':' + env['PATH']
++    model_env['R_LIBS_USER'] = model_env['R_LIBS_SITE'] = str(prefix / 'lib/R/library')
++    check = subprocess.run([str(prefix / 'bin/Rscript'), '-e', 'cat(as.character(packageVersion("DESeq2")))'], env=model_env, text=True, capture_output=True, check=True)
++    assert check.stdout.strip() == '1.42.0'
++    setup = 'export PATH=' + shlex.quote(str(prefix / 'bin')) + ':"$PATH"\nexport R_LIBS_USER=' + shlex.quote(str(prefix / 'lib/R/library')) + '\nexport R_LIBS_SITE=' + shlex.quote(str(prefix / 'lib/R/library'))
++    literal_setup = "'" + setup.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n") + "'"
++    config = base / 'native.config'
++    config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nprocess.maxForks=1\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\nprocess { withName: 'DESEQ2' { beforeScript = " + literal_setup + ' } }\n')
++    runs, oracles, case_state = [], {}, {}
++    cases = [('before-positive', 'positive', 3, True), ('before-zero', 'all-zero', 3, True), ('before-two', 'two', 2, True),
++             ('positive', 'positive', 3, False), ('three', 'three', 3, False), ('quoted', 'quoted', 3, False), ('two-min2', 'two', 2, False),
++             ('two-default3', 'two', 3, False), ('raised-min4', 'positive', 4, False), ('all-zero', 'all-zero', 3, False),
++             ('zero-sample', 'zero-sample', 3, False), ('empty', 'empty', 3, False), ('low', 'low', 3, False),
++             ('ungrouped', 'ungrouped', 3, False), ('invalid-min0', 'positive', 0, False), ('invalid-count', 'invalid-count', 3, False),
++             ('positive-resume', 'positive', 3, False), ('positive-resume-raised', 'positive', 4, False),
++             ('cross-positive', 'positive', 3, False), ('cross-unchanged', 'positive', 3, False), ('cross-raised', 'positive', 4, False),
++             ('cross-zero', 'all-zero', 3, False), ('cross-invalid', 'positive', 0, False)]
++    expected_reasons = {'two-default3': 'insufficient_replication', 'raised-min4': 'insufficient_replication',
++                        'positive-resume-raised': 'insufficient_replication', 'cross-raised': 'insufficient_replication',
++                        'all-zero': 'all_zero_counts', 'cross-zero': 'all_zero_counts', 'zero-sample': 'zero_count_samples',
++                        'empty': 'zero_features', 'low': 'no_features_after_count_filter'}
++    for name, kind, minimum, old in cases:
++        resume = name in ['positive-resume', 'positive-resume-raised', 'cross-unchanged', 'cross-raised']
++        cross = name.startswith('cross-')
++        reuse = 'cross-positive' if cross else 'positive'
++        if resume:
++            d, fixture, ids, features, harness, params = case_state[reuse]
++            params = dict(params, min_group_replicates=minimum)
++        else:
++            d = base / name
++            d.mkdir()
++            fixture = d / 'fixtures'
++            ids, features = generate(fixture, kind)
++            harness = ROOT / ('tests/nextflow/statistics_eligibility.nf' if cross else 'tests/nextflow/deseq2_model.nf')
++            if old:
++                harness = d / 'old-node.nf'
++                harness.write_text((ROOT / 'tests/nextflow/deseq2_model.nf').read_text().replace("'../../modules/cross_sample/deseq2'", repr(str(before / 'modules/cross_sample/deseq2'))))
++            params = {'abundance': str(fixture / 'plasmids.tsv'), 'metadata': str(fixture / 'samples.tsv'),
++                      'code_dir': str(before / 'bin' if old else ROOT / 'bin'), 'outdir': str(d / 'out'),
++                      'publish_dir_mode': 'copy', 'min_group_replicates': minimum}
++            if cross:
++                params.update(fixture_dir=str(fixture), sample_ids=ids, samplesheet=str(fixture / 'samples.tsv'),
++                              platform='illumina', run_diversity=False, min_diversity_samples=3,
++                              run_differential_internal=False, run_differential_deseq2=True, run_network=False,
++                              network_min_samples=20, project_name='controlled_DESeq2_contract', omit_state=False, duplicate_contig_table=False)
++            case_state[name] = (d, fixture, ids, features, harness, params)
++        inputs = {str(p.relative_to(fixture)): sha(p) for p in fixture.rglob('*') if p.is_file()}
++        trace = d / (name + '.trace.tsv')
++        pf = d / (name + '.params.json')
++        pf.write_text(json.dumps(params))
++        cmd = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(harness), '-params-file', str(pf),
++               '-work-dir', str(d / 'work'), '-with-trace', str(trace), '-ansi-log', 'false'] + (['-resume'] if resume else [])
++        result = subprocess.run(cmd, cwd=d, env=env, text=True, capture_output=True)
++        (d / (name + '.console.log')).write_text(result.stdout + result.stderr)
++        tasks = read(trace) if trace.exists() else []
++        failure = name in ['before-positive', 'before-zero', 'invalid-min0', 'invalid-count', 'cross-invalid']
++        assert (result.returncode != 0) == failure, (name, result.stdout + result.stderr)
++        if failure:
++            stderr = '\n'.join((Path(t['workdir']) / '.command.err').read_text() for t in tasks)
++            needle = 'not parallel' if name == 'before-positive' else 'all samples have 0 counts' if name == 'before-zero' else 'coverage is not a count' if name == 'invalid-count' else '--min-replicates'
++            assert needle in stderr, (name, stderr)
++            assert any(t['status'] == 'FAILED' for t in tasks)
++            assert not any(t['name'].split(' (')[0].endswith('REPORT') for t in tasks)
++            assert not (d / 'out/report/report_data.json').exists()
++            assert not (d / 'out/11_diversity/differential_plasmids.tsv').exists()
++        else:
++            output = d / 'out/11_diversity'
++            actual = read(output / 'differential_plasmids.tsv')
++            assert all(t['status'] in ['COMPLETED', 'CACHED'] for t in tasks)
++            if old:
++                assert name == 'before-two' and actual == []
++            else:
++                status = read(output / 'deseq2_status.tsv')
++                assert len(status) == len(ids) and {r['sample_id'] for r in status} == set(ids)
++                expected = expected_reasons.get(name, 'model_fitted')
++                assert {r['reason'] for r in status} == {expected}, (name, status)
++                assert {int(r['min_replicates']) for r in status} == {minimum}
++                fitted = expected == 'model_fitted'
++                assert {r['model_fitted'] for r in status} == {'TRUE' if fitted else 'FALSE'}
++                if fitted:
++                    assert {r['deseq2_version'] for r in status} == {'1.42.0'}
++                    assert len(actual) == len(features) * (3 if kind == 'three' else 1)
++                    if kind not in oracles:
++                        oracle = base / ('oracle-' + kind + '.tsv')
++                        ocmd = [str(prefix / 'bin/Rscript'), str(ROOT / 'tests/deseq2_reference.R'), str(fixture / 'wide.tsv'), str(fixture / 'samples.tsv'), str(oracle)]
++                        ref = subprocess.run(ocmd, env=model_env, text=True, capture_output=True)
++                        (base / ('oracle-' + kind + '.log')).write_text(ref.stdout + ref.stderr)
++                        assert ref.returncode == 0, ref.stderr
++                        oracles[kind] = {'command': ocmd, 'rows': read(oracle), 'sha256': sha(oracle)}
++                    compare(actual, oracles[kind]['rows'])
++                    if kind == 'ungrouped':
++                        excluded = next(r for r in status if r['sample_id'] == ids[-1])
++                        assert excluded['in_design'] == excluded['used_in_fit'] == 'FALSE' and excluded['model_library_size'] == ''
++                else:
++                    assert actual == [] and all(r['used_in_fit'] == 'FALSE' for r in status)
++                if cross:
++                    assert len(tasks) == 3
++                    manifest = json.loads((d / 'out/report/report_inputs.json').read_text())
++                    records = [r for r in manifest['records'] if r['producer'] == 'DESEQ2']
++                    status_record = next(r for r in records if r['output'] == 'status')
++                    model_task = next(t for t in tasks if t['name'].split(' (')[0].endswith('DESEQ2'))
++                    # REPORTING retains completion evidence as paths; only
++                    # detection files are staged for its counting summaries.
++                    status_evidence = Path(status_record['evidence'])
++                    assert status_evidence == Path(model_task['workdir']) / 'deseq2_status.tsv'
++                    assert sha(status_evidence) == sha(output / 'deseq2_status.tsv')
++                if name in ['positive-resume', 'cross-unchanged']: assert all(t['status'] == 'CACHED' for t in tasks)
++                if name in ['positive-resume-raised', 'cross-raised']:
++                    assert next(t for t in tasks if t['name'].split(' (')[0].endswith('DESEQ2'))['status'] == 'COMPLETED'
++        assert inputs == {str(p.relative_to(fixture)): sha(p) for p in fixture.rglob('*') if p.is_file()}
++        assert hashes == {n: sha(ROOT / n) for n in sources}
++        runs.append({'case': name, 'command': cmd, 'exit': result.returncode, 'tasks': tasks, 'expected_failure': failure})
++        (base / 'run.json').write_text(json.dumps({'pass': len(runs) == len(cases), 'expected_cases': len(cases),
++            'runs': runs, 'source_sha256': hashes, 'oracles': {k: {x: v for x, v in d.items() if x != 'rows'} for k, d in oracles.items()},
++            'limitations': ['native fixed1.42/R4.3 model; explicit synthetic counts/DNA/report inputs, not experimental differential accuracy',
++                            'no image/remote executor/nf-test framework/full real P4 certification; no change to default estimator or read count units',
++                            'before2rep case succeeds empty despite configured2; before positive/allzero failures retained',
++                            'whole-design multi-group oracle uses the official API on separate wide input, not production importer/status code']}, indent=2) + '\n')
++        print('PASS', name, len(tasks), 'trace entries', flush=True)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/run_statistics_input_names.py b/tests/run_statistics_input_names.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_statistics_input_names.py
+@@ -0,0 +1,135 @@
++#!/usr/bin/env python3
++"""Filename and explicit threshold controls in four original statistics wrappers.
++
++Only disposable fixtures may be overwritten by predecessor modules. The old
++DESeq mutation control explicitly needs native1.52, allowed by the old Conda
++constraint; fixed1.42 is used for the repaired production DESeq wrapper.
++"""
++import argparse
++import json
++import os
++from pathlib import Path
++import shlex
++import shutil
++import subprocess
++from run_deseq2_model import ROOT, generate, read, sha
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', type=Path, required=True)
++    parser.add_argument('--before-dir', type=Path, required=True)
++    parser.add_argument('--deseq-prefix', type=Path, required=True)
++    parser.add_argument('--legacy-rscript', type=Path, required=True)
++    a = parser.parse_args()
++    base, before = a.work_dir.resolve(), a.before_dir.resolve()
++    prefix, legacy = a.deseq_prefix.resolve(), a.legacy_rscript.resolve()
++    base.mkdir(parents=True, exist_ok=False)
++    version = subprocess.run([str(legacy), '-e', 'cat(as.character(packageVersion("DESeq2")))'], capture_output=True, text=True, check=True).stdout.strip()
++    assert version == '1.52.0', 'Old wrapper mutation control needs the recorded1.52 native stack, not the default1.42 image'
++    sources = ['modules/cross_sample/deseq2.nf', 'modules/cross_sample/differential.nf',
++               'modules/cross_sample/diversity.nf','modules/cross_sample/network_prepare.nf',
++               'bin/diversity.R','bin/network_prepare.R',
++               'bin/deseq2_plasmid.R', 'bin/differential_abundance.R', 'bin/statistics_input_contract.R',
++               'tests/nextflow/statistics_input_names.nf', 'tests/run_statistics_input_names.py', 'tests/run_deseq2_model.py']
++    hashes = {n: sha(ROOT / n) for n in sources}
++    cases = [('before-deseq', True, 'deseq', False), ('before-internal', True, 'internal', False),
++             ('before-diversity',True,'diversity',False),('before-network',True,'network',False),
++             ('deseq-same-input-output-name', False, 'deseq', True),
++             ('deseq-metadata-status-name', False, 'deseq', False),
++             ('internal-same-input-output-name', False, 'internal', True),
++             ('diversity-same-input-output-name',False,'diversity',True),
++             ('network-same-input-output-name',False,'network',True),
++             ('before-network-min0',True,'network',False),('network-min0',False,'network',False)]
++    outputs = {'deseq':'differential_plasmids.tsv','internal':'differential_abundance.tsv',
++               'diversity':'diversity_metrics.tsv','network':'fastspar_input.tsv'}
++    programs = {'deseq':'deseq2_plasmid.R','internal':'differential_abundance.R',
++                'diversity':'diversity.R','network':'network_prepare.R'}
++    runs = []
++    for name, old, tool, same in cases:
++        d = base / name
++        d.mkdir()
++        fixture = d / 'fixture'
++        ids, features = generate(fixture, 'positive')
++        result_name = outputs[tool]
++        (fixture / 'abundance').mkdir()
++        (fixture / 'cohort').mkdir()
++        zero_minimum = name.endswith('min0')
++        ab = fixture / 'abundance' / ('counts.tsv' if zero_minimum else result_name)
++        meta = fixture / 'cohort' / (result_name if same else 'deseq2_status.tsv' if not old else 'samples.tsv')
++        table_name = 'plasmids.tsv' if tool in ['deseq','network'] else 'contigs.tsv'
++        shutil.copyfile(fixture / table_name, ab)
++        shutil.copyfile(fixture / 'samples.tsv', meta)
++        inputs = {str(p): sha(p) for p in [ab, meta]}
++        code = before / 'bin' if old else ROOT / 'bin'
++        params = {'outdir': str(d / 'out'), 'publish_dir_mode': 'copy', 'min_group_replicates': 3,
++                  'test_tool': tool, 'program': programs[tool],
++                  'abundance': str(ab), 'metadata': str(meta), 'code_dir': str(code)}
++        params['network_min_samples'] = 0 if zero_minimum else 20
++        pf = d / 'params.json'
++        pf.write_text(json.dumps(params))
++        harness = ROOT / 'tests/nextflow/statistics_input_names.nf'
++        if old:
++            harness = d / 'old.nf'
++            text = (ROOT / 'tests/nextflow/statistics_input_names.nf').read_text()
++            for module in ['deseq2', 'differential','diversity','network_prepare']:
++                text = text.replace("'../../modules/cross_sample/" + module + "'", repr(str(before / 'modules/cross_sample' / module)))
++            harness.write_text(text)
++        setup = 'export PATH=' + shlex.quote(str(legacy.parent)) + ':"$PATH"'
++        if not old and tool == 'deseq':
++            setup = 'export PATH=' + shlex.quote(str(prefix / 'bin')) + ':"$PATH"\nexport R_LIBS_USER=' + shlex.quote(str(prefix / 'lib/R/library')) + '\nexport R_LIBS_SITE=' + shlex.quote(str(prefix / 'lib/R/library'))
++        literal = "'" + setup.replace('\\', '\\\\').replace("'", "\\'").replace('\n', '\\n') + "'"
++        config = d / 'native.config'
++        config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\nprocess.beforeScript=" + literal + '\n')
++        cmd = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(harness), '-params-file', str(pf),
++               '-work-dir', str(d / 'work'), '-with-trace', str(d / 'trace.tsv'), '-ansi-log', 'false']
++        result = subprocess.run(cmd, cwd=d, capture_output=True, text=True)
++        (d / 'console.log').write_text(result.stdout + result.stderr)
++        tasks = read(d / 'trace.tsv')
++        after = {str(p): sha(p) for p in [ab, meta]}
++        failure = name=='network-min0'
++        assert (result.returncode!=0)==failure and len(tasks)==1, result.stdout+result.stderr
++        if failure:
++            assert tasks[0]['status']=='FAILED' and inputs==after
++            assert '--min-samples' in (Path(tasks[0]['workdir'])/'.command.err').read_text()
++            assert not (d/'out/12_network/fastspar_input.tsv').exists()
++        elif old and zero_minimum:
++            assert tasks[0]['status']=='COMPLETED' and inputs==after
++            state=json.loads((d/'out/12_network/network_status.json').read_text())
++            assert state['min_samples']==20
++        elif old:
++            assert tasks[0]['status']=='COMPLETED'
++            assert inputs[str(ab)] != after[str(ab)] and inputs[str(meta)] == after[str(meta)]
++            assert set(read(ab)[0]) != set(read(fixture / table_name)[0])
++        else:
++            assert tasks[0]['status']=='COMPLETED'
++            assert inputs == after
++            output = d / ('out/12_network' if tool == 'network' else 'out/11_diversity')
++            rows = read(output / result_name)
++            if tool in ['deseq','internal']:
++                key = 'plasmid_id' if tool == 'deseq' else 'contig_id'
++                assert len(rows) == 100 and {r[key] for r in rows} == set(features)
++            elif tool == 'diversity':
++                assert len(rows)==24 and {r['sample_id'] for r in rows}==set(ids)
++            else:
++                assert len(rows)==100 and {r['#OTU ID'] for r in rows}==set(features)
++                state=json.loads((output/'network_status.json').read_text())
++                assert not state['eligible'] and state['reason']=='insufficient_samples'
++            if tool == 'deseq':
++                status = read(output / 'deseq2_status.tsv')
++                assert {r['sample_id'] for r in status} == set(ids)
++                assert {r['deseq2_version'] for r in status} == {'1.42.0'}
++                assert {r['model_fitted'] for r in status} == {'TRUE'}
++        assert hashes == {n: sha(ROOT / n) for n in sources}
++        runs.append({'case': name, 'command': cmd, 'exit': result.returncode, 'tasks': tasks,
++                     'before_sha256': inputs, 'after_sha256': after, 'source_mutation_expected': old and not zero_minimum})
++        (base / 'run.json').write_text(json.dumps({'pass': len(runs) == len(cases), 'expected_cases': len(cases),
++            'runs': runs, 'source_sha256': hashes, 'legacy_DESeq2': version,
++            'limitations': ['Only private fixtures overwritten; default CROSS_SAMPLE canonical names were not colliding',
++                            'Legacy1.52 stack proves predecessor overwrite, not fixed1.42 biological/model validity',
++                            'Current DESeq uses native fixed1.42; internal uses native R/data.table; no image/framework/scientific accuracy certification']}, indent=2) + '\n')
++        print('PASS', name, 'input overwritten' if old and not zero_minimum else 'inputs unchanged', flush=True)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/test_deseq2_status.py b/tests/test_deseq2_status.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_deseq2_status.py
+@@ -0,0 +1,170 @@
++"""Model-ineligible states preserve the cohort and never manufacture counts."""
++import csv
++import subprocess
++import tempfile
++import unittest
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++class DESeq2StatusTests(unittest.TestCase):
++    def invoke(self, values, groups=None, extra=(), ids=None):
++        with tempfile.TemporaryDirectory() as directory:
++            d = Path(directory)
++            ids = ids if ids is not None else ['001', '1', 'NA', 'S3', 'S4', 'S5']
++            groups = groups if groups is not None else ['A'] * (len(ids) // 2) + ['B'] * (len(ids) - len(ids) // 2)
++            ab = d / 'counts.tsv'
++            ab.write_text('sample_id\tplasmid_id\traw_count\tcoverage\n' + ''.join(
++                f'{sid}\tF{j}\t{value}\t123.5\n'
++                for j, row in enumerate(values) for sid, value in zip(ids, row)))
++            meta = d / 'samples.tsv'
++            with meta.open('w') as stream:
++                writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
++                writer.writerow(['sample_id', 'group'])
++                writer.writerows(zip(ids, groups))
++            cmd = ['Rscript', str(ROOT / 'bin/deseq2_plasmid.R'), '--abundance', str(ab),
++                   '--metadata', str(meta), '--output', str(d / 'out.tsv'),
++                   '--out-status', str(d / 'status.tsv'), *extra]
++            result = subprocess.run(cmd, capture_output=True, text=True)
++            if result.returncode:
++                self.assertFalse((d / 'out.tsv').exists())
++                self.assertFalse((d / 'status.tsv').exists())
++                return result, [], []
++            with (d / 'out.tsv').open() as stream:
++                rows = list(csv.DictReader(stream, delimiter='\t'))
++            with (d / 'status.tsv').open() as stream:
++                status = list(csv.DictReader(stream, delimiter='\t'))
++            self.assertEqual([r['sample_id'] for r in status], ids)
++            self.assertEqual({r['model_fitted'] for r in status}, {'FALSE'})
++            self.assertEqual({r['used_in_fit'] for r in status}, {'FALSE'})
++            return result, rows, status
++
++    def check_state(self, values, reason, **kwargs):
++        result, rows, status = self.invoke(values, **kwargs)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual(rows, [])
++        self.assertEqual({r['reason'] for r in status}, {reason})
++        return status
++
++    def test_empty_feature_set_retains_metadata(self):
++        self.check_state([], 'zero_features')
++
++    def test_all_measured_zero_is_explicit_without_loading_model(self):
++        status = self.check_state([[0] * 6 for _ in range(4)], 'all_zero_counts')
++        self.assertEqual({r['input_library_size'] for r in status}, {'0'})
++        self.assertEqual({r['deseq2_version'] for r in status}, {'not_loaded'})
++
++    def test_positive_low_counts_are_filtered_without_model(self):
++        self.check_state([[1, 2, 3, 4, 5, 6]], 'no_features_after_count_filter')
++
++    def test_zero_library_is_not_dropped_or_imputed(self):
++        status = self.check_state([[0, 50, 40, 60, 30, 70]], 'zero_count_samples')
++        self.assertEqual(status[0]['in_design'], 'TRUE')
++        self.assertEqual(status[0]['model_library_size'], '0')
++
++    def test_filter_can_create_a_zero_library_without_dropping_the_sample(self):
++        values = [[0,50,40,60,30,70] for _ in range(4)] + [[5,0,0,0,0,0]]
++        status = self.check_state(values,'zero_count_samples')
++        self.assertEqual(status[0]['input_library_size'],'5')
++        self.assertEqual(status[0]['model_library_size'],'0')
++        self.assertEqual(status[0]['in_design'],'TRUE')
++        self.assertEqual({r['features_used'] for r in status},{'4'})
++
++    def test_ratio_without_shared_positive_features_does_not_switch_estimator(self):
++        values = [[0 if i == j else 40 + j for i in range(6)] for j in range(6)]
++        status = self.check_state(values, 'no_positive_geometric_means')
++        self.assertEqual({r['sf_type'] for r in status}, {'ratio'})
++
++    def test_unassigned_groups_remain_visible(self):
++        status = self.check_state([[50] * 6], 'insufficient_groups', groups=[''] * 6)
++        self.assertEqual({r['in_design'] for r in status}, {'FALSE'})
++        self.assertEqual({r['model_library_size'] for r in status}, {''})
++
++    def test_single_group_is_not_a_comparison(self):
++        self.check_state([[50] * 6], 'insufficient_groups', groups=['A'] * 6)
++
++    def test_configured_larger_threshold_is_used(self):
++        status = self.check_state([[50] * 6], 'insufficient_replication', extra=['--min-replicates', '4'])
++        self.assertEqual({r['min_replicates'] for r in status}, {'4'})
++
++    def test_one_sample_per_group_has_no_residual_degrees_of_freedom(self):
++        self.check_state([[50, 70]], 'insufficient_residual_degrees_of_freedom',
++                         ids=['001', 'NA'], extra=['--min-replicates', '1'])
++
++    def test_status_preserves_quoted_tab_and_newline_group_labels(self):
++        groups = ['"A\tcontrol'] * 3 + ['"B\ncase'] * 3
++        status = self.check_state([[50] * 6], 'insufficient_replication',
++                                  groups=groups, extra=['--min-replicates', '4'])
++        self.assertEqual([r['group'] for r in status], groups)
++
++    def test_invalid_thresholds_rejected_without_products(self):
++        for value in ['0', '-1', '1.5', 'NaN', 'Inf', 'bad', str(2**31)]:
++            with self.subTest(value=value):
++                result, _, _ = self.invoke([[50] * 6], extra=['--min-replicates', value])
++                self.assertNotEqual(result.returncode, 0)
++                self.assertIn('--min-replicates', result.stderr)
++
++    def test_missing_duplicate_unknown_flags_are_errors(self):
++        for flags in [['--min-replicates'], ['--min-replicates', '3', '--min-replicates', '4'], ['--typo', '3']]:
++            with self.subTest(flags=flags):
++                result, _, _ = self.invoke([[50] * 6], extra=flags)
++                self.assertNotEqual(result.returncode, 0)
++
++    def test_invalid_counts_are_not_replaced_by_positive_coverage(self):
++        for value in ['', 'NA', '0.5', '-1', 'NaN', 'Inf', str(2**31)]:
++            with self.subTest(value=value):
++                result, _, _ = self.invoke([[value] * 6])
++                self.assertNotEqual(result.returncode, 0)
++                self.assertIn('coverage is not a count', result.stderr)
++
++    def test_internal_comparison_rejects_the_same_invalid_shared_thresholds(self):
++        with tempfile.TemporaryDirectory() as directory:
++            out = Path(directory) / 'out.tsv'
++            for value in ['0', '-1', '1.5', 'NaN', 'Inf', 'bad', str(2**31)]:
++                with self.subTest(value=value):
++                    result = subprocess.run(['Rscript', str(ROOT / 'bin/differential_abundance.R'),
++                        '--abundance', str(Path(directory) / 'not_read.tsv'),
++                        '--metadata', str(Path(directory) / 'not_read_meta.tsv'),
++                        '--min-replicates', value, '--out', str(out)], capture_output=True, text=True)
++                    self.assertNotEqual(result.returncode, 0)
++                    self.assertIn('--min-replicates', result.stderr)
++                    self.assertFalse(out.exists())
++
++    def internal(self, groups, tool='internal'):
++        with tempfile.TemporaryDirectory() as directory:
++            d = Path(directory)
++            ids = ['001', '1', 'NA', 'S3', 'S4', 'S5']
++            ab = d / 'counts.tsv'
++            ab.write_text('sample_id\tcontig_id\tcoverage\n' + ''.join(f'{sid}\tF1\t{i+10}\n' for i,sid in enumerate(ids)))
++            meta = d / 'samples.tsv'
++            with meta.open('w') as stream:
++                writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
++                writer.writerow(['sample_id','group'])
++                writer.writerows(zip(ids, groups))
++            script = 'diversity.R' if tool=='diversity' else 'differential_abundance.R'
++            outputs = ['--out-metrics',str(d/'out.tsv'),'--out-beta',str(d/'beta.tsv')] if tool=='diversity' else ['--out',str(d/'out.tsv')]
++            result = subprocess.run(['Rscript',str(ROOT/'bin'/script),
++                '--abundance',str(ab),'--metadata',str(meta),*outputs],capture_output=True,text=True)
++            self.assertEqual(result.returncode,0,result.stderr)
++            with (d/'out.tsv').open() as stream: return list(csv.DictReader(stream,delimiter='\t'))
++
++    def test_internal_comparison_preserves_encoded_group_labels(self):
++        a, b = '"A\tcontrol', '"B\ncase'
++        rows = self.internal([a]*3+[b]*3)
++        self.assertEqual(len(rows),1)
++        self.assertEqual((rows[0]['group1'],rows[0]['group2']),(a,b))
++
++    def test_missing_group_is_not_a_biological_group_named_na(self):
++        self.assertEqual(self.internal(['A']*3+['NA']*3),[])
++
++    def test_diversity_preserves_encoded_group_labels(self):
++        a, b = '"A\tcontrol', '"B\ncase'
++        rows = self.internal([a]*3+[b]*3, tool='diversity')
++        self.assertEqual(len(rows),24)
++        expected = dict(zip(['001','1','NA','S3','S4','S5'],[a]*3+[b]*3))
++        self.assertTrue(all(row['group']==expected[row['sample_id']] for row in rows))
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tests/test_network_eligibility.py b/tests/test_network_eligibility.py
+--- a/tests/test_network_eligibility.py
++++ b/tests/test_network_eligibility.py
+@@ -32,5 +32,17 @@
+     def test_counts_above_R_integer_range_are_not_coerced_to_NA(self):
+         count=2**31+123;status,rows,_=self.invoke([[count+i+j for i in range(20)] for j in range(4)]);self.assertTrue(status['eligible']);self.assertEqual(rows[0]['S0'],str(count));self.assertFalse(any('NA'==v for row in rows for v in row.values()))
+ 
++    def test_invalid_minimum_samples_rejects_before_reading_data(self):
++        with tempfile.TemporaryDirectory() as directory:
++            d=Path(directory)
++            for value in ['0','1','1.5','NaN','Inf','bad']:
++                with self.subTest(value=value):
++                    result=subprocess.run(['Rscript',str(ROOT/'bin/network_prepare.R'),
++                        '--abundance',str(d/'not_read.tsv'),'--min-samples',value,
++                        '--out',str(d/'out.tsv')],capture_output=True,text=True)
++                    self.assertNotEqual(result.returncode,0)
++                    self.assertIn('--min-samples',result.stderr)
++                    self.assertFalse((d/'out.tsv').exists())
++
+ 
+ if __name__=='__main__':unittest.main()

@@ -1,0 +1,3669 @@
+--- a/README.md
++++ b/README.md
+@@ -194,6 +194,8 @@
+ | `--platon_db` | Platon | 官方数据库 |
+ | `--plasx_annotations / --plasx_model` | PlasX | PlasX 官方注释与模型文件 |
+ | `--copla_refgraph / --copla_reflist` | COPLA | COPLA 参考图与列表 |
++| `--copla_dir` | COPLA | 已准备的官方源码、辅助程序及数据库目录；列表中的参考 FASTA 必须位于该目录内 |
++| `--copla_macsyfinder_dir` | COPLA | 独立 Python2/MacSyFinder 1.0.5 环境目录，含 `bin/macsyfinder` |
+ | `--card_db` | RGI | 含 card.json 与 card_database 序列的目录 |
+ | `--eggnog_db` | eggNOG-mapper | `download_eggnog_data.py` |
+ | `--blast_db` | BLASTn | 预构建 BLAST 库目录 |
+@@ -201,6 +203,23 @@
+ | `--plasmidhostfinder_db` | PlasmidHostFinder | 官方数据库（assembly 平台） |
+ 
+ 启用某个可选工具但未配置其数据库时，流程在启动阶段直接报错。
++
++COPLA 按每条候选序列分别运行，再按样本汇总 PTU 表；不把样本里的多个候选
++拼成一条质粒，也不据此推断多条 contig 属于同一个质粒。只有 FASTA 描述中明确的
++`topology=circular` 或 `circular=true` 才使用环状模式，其他未知拓扑按线性处理；
++冲突的明确标记会报错。PTU 的原始分数是图分区一致性分数，完整保留，不作为校准概率。
++
++`--copla_dir` 应包含 `bin/copla.py`、`bin/ani.rb`、官方其他辅助程序及其
++`databases/` 内 MOBscan、CONJScan、PlasmidFinder、CARD 数据；参考图和列表仍
++由各自参数指定，参考目录名称不限。所选图的 accession 必须与列表中的全部
++未压缩 `.fna` 参考对应。固定源码为 `santirdnd/COPLA` 的
++`6b89285ef16d721d93d3c84f3645e76455ba8621`；环境见 `envs/copla.yml`，
++来源与依赖锁见 `tests/copla-native.lock.json`。旧 Perl/Ruby 若缺少
++`libcrypt.so.1`，可在安装目录的 `lib/` 放置匹配的兼容库；锁文件记录了已核验的
++官方 Debian 包来源和校验和，不需要改动系统或共享 Conda 包。
++
++COPLA 会保留逐候选原始结果、序列映射和运行身份；缺文件、外部程序失败或
++参考缺失都会阻止发布该样本的部分汇总。既有 COPLA 样本级合并结果需要重算。
+ 
+ 启用 PLASMe 还须设置 `--plasme_dir`，目录内含 `PLASMe.py`、
+ `bio_script.py`、`trans_data.py`、`trans_model.py`。已核验的源码为
+--- /dev/null
++++ b/bin/run_copla_candidates.py
+@@ -0,0 +1,348 @@
++#!/usr/bin/env python3
++"""Classify independent candidate records with an explicitly staged COPLA installation."""
++import argparse
++import csv
++import gzip
++import hashlib
++import json
++import math
++import os
++from pathlib import Path
++import re
++import shutil
++import subprocess
++import sys
++
++HEADER = ['contig_id', 'length', 'topology', 'entity_scope', 'predicted_ptu', 'host_range', 'score', 'notes']
++PREDICTION = ['#Predicted_PTU', 'Host_Range', 'Score', 'Notes']
++
++
++def sha(path):
++    value = hashlib.sha256()
++    with Path(path).open('rb') as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
++            value.update(chunk)
++    return value.hexdigest()
++
++
++def candidates(path):
++    """Preserve complete input DNA and explicit topology; never join records."""
++    records, seen = [], set()
++    header, sequence = None, []
++
++    def append():
++        if header is None:
++            return
++        parts = header.split()
++        if not parts or parts[0] in seen:
++            raise ValueError('COPLA requires nonempty unique candidate IDs')
++        identifier = parts[0]
++        dna = ''.join(sequence)
++        if not dna or re.search('[^ACGTRYSWKMBDHVNacgtryswkmbdhvn]', dna):
++            raise ValueError('Invalid or empty COPLA candidate DNA: ' + identifier)
++        annotations = set(parts[1:])
++        circular = bool({'topology=circular', 'circular=true'} & annotations)
++        linear = bool({'topology=linear', 'circular=false'} & annotations)
++        if circular and linear:
++            raise ValueError('Conflicting COPLA candidate topology: ' + identifier)
++        records.append({'id': identifier, 'header': header, 'dna': dna,
++                        'topology': 'circular' if circular else 'linear',
++                        'topology_source': 'explicit_header' if circular or linear else 'unknown_treated_as_linear'})
++        seen.add(identifier)
++
++    opener = gzip.open if str(path).lower().endswith('.gz') else open
++    with opener(path, 'rt', encoding='utf-8') as stream:
++        for line in stream:
++            line = line.strip()
++            if not line:
++                continue
++            if line.startswith('>'):
++                append()
++                header, sequence = line[1:], []
++            else:
++                if header is None:
++                    raise ValueError('COPLA FASTA sequence precedes its header')
++                sequence.append(line)
++    append()
++    return records
++
++
++def reference_files(installation, reflist):
++    """References must be declared within the installation, not hidden global files."""
++    installation = Path(installation).resolve()
++    result, seen = [], set()
++    for line in Path(reflist).read_text().splitlines():
++        if not line.strip():
++            raise ValueError('COPLA reference list contains a blank entry')
++        path = Path(line)
++        path = path.resolve() if path.is_absolute() else (installation / path).resolve()
++        if not path.is_relative_to(installation):
++            raise ValueError('COPLA reference is outside the declared installation: ' + str(path))
++        if not path.is_file() or not path.stat().st_size:
++            raise ValueError('Missing COPLA reference: ' + str(path))
++        if path.suffix != '.fna' or not re.fullmatch(r'[A-Za-z0-9_.-]+\.fna', path.name):
++            raise ValueError('COPLA requires safe uncompressed reference FASTA filenames')
++        if path.stem in seen:
++            raise ValueError('Duplicate COPLA reference accession: ' + path.stem)
++        seen.add(path.stem)
++        result.append(path)
++    if not result:
++        raise ValueError('COPLA reference list is empty')
++    return result
++
++
++def one_row(path, fields):
++    with Path(path).open(newline='') as stream:
++        reader = csv.DictReader(stream, delimiter='\t')
++        if reader.fieldnames != fields:
++            raise ValueError('Unexpected COPLA table header: ' + str(path))
++        rows = list(reader)
++    if len(rows) != 1 or None in rows[0] or any(value is None for value in rows[0].values()):
++        raise ValueError('COPLA must emit exactly one complete result per candidate: ' + str(path))
++    return rows[0]
++
++
++def prediction(path):
++    row = one_row(path, PREDICTION)
++    try:
++        score = float(row['Score'])
++    except ValueError as error:
++        raise ValueError('Invalid COPLA score') from error
++    if not math.isfinite(score) or not 0 <= score <= 1:
++        raise ValueError('COPLA score must be finite and within [0,1]')
++    if not row['#Predicted_PTU'] or not row['Notes'] or row['Host_Range'] not in ['-', 'I', 'II', 'III', 'IV', 'V', 'VI']:
++        raise ValueError('Incomplete COPLA PTU or host-range result')
++    return row
++
++
++def prepare_program(installation, work, macsyfinder, threads):
++    """Private, exact-version integration corrections; preserve all scientific parameters."""
++    source = Path(installation) / 'bin'
++    target = work / 'bin'
++    target.mkdir()
++    for path in source.iterdir():
++        if path.is_file():
++            shutil.copyfile(path, target / path.name)
++            (target / path.name).chmod(0o755)
++    script = target / 'copla.py'
++    original = sha(script)
++    # Known official 6b89285e source; another compatible source is recorded unchanged.
++    if original != 'a27f52f1f9af475f0de2de70ef46b1c4c9079c96ddb39b93126d9d03df51d7e5':
++        return {'applied': False, 'original_copla_sha256': original}
++    expected_helpers = {
++        'get_ani_identity.pl': 'fcac3e4a2a8a6cbc94956cd5ad1fb68c5f4ef7910147594ce083c6aa968986ac',
++        'get_ani_identity_job.pl': '56711294d80f033c0806886092669b6e6a8824b2ae3cd9f68476dbf80e1effc9',
++        'check_conjugation_systems.sh': 'dcc640e343b2289a4c7fbe8229cac43bbf5e435dee26d39454045242720dbe48',
++        'ani.rb': '0151a14698c02b6ec7adfe3400e6693066cb0ab300077a4274a39d41a7878cb1'}
++    for name, expected in expected_helpers.items():
++        if sha(source / name) != expected:
++            raise ValueError('Pinned COPLA helper source does not match: ' + name)
++    text = script.read_text()
++    text = text.replace("cmd = ['hmmscan', '--cpu', '9',", "cmd = ['hmmscan', '--cpu', str(int(os.environ['COPLA_THREADS'])),")
++    text = text.replace('import graph_tool.all as gt\n', 'import graph_tool.all as gt\ngt.openmp_set_num_threads(int(os.environ["COPLA_THREADS"]))\n')
++    text = text.replace('shutil.copy2(', 'shutil.copyfile(')
++    # The first copy is into an output directory, so supply its final filename explicitly.
++    text = text.replace('shutil.copyfile(args.sequence, args.outdir)',
++                        'shutil.copyfile(args.sequence, os.path.join(args.outdir, os.path.basename(args.sequence)))')
++    text = text.replace('shutil.copyfile(args.aminoacid, args.outdir)',
++                        'shutil.copyfile(args.aminoacid, os.path.join(args.outdir, os.path.basename(args.aminoacid)))')
++    text = text.replace('except subprocess.CalledProcessError:\n        mob_label',
++                        'except subprocess.CalledProcessError:\n        if os.path.getsize(fname) != 0: raise\n        mob_label')
++    text = text.replace('    pathlib.Path(outdir).mkdir(parents=True, exist_ok=True)\n\n    # Check why',
++                        '    pathlib.Path(outdir).mkdir(parents=True, exist_ok=True)\n'
++                        '    if os.path.getsize(fname) == 0: return "-"\n\n    # Check why')
++    lines = []
++    for line in text.splitlines(True):
++        if 'cp = subprocess.run(' in line and not line.lstrip().startswith('#') and 'check=True' not in line:
++            line = line.replace('stderr=subprocess.DEVNULL)', 'stderr=None, check=True)')
++        elif 'stderr=subprocess.DEVNULL, shell=True)' in line:
++            line = line.replace('stderr=subprocess.DEVNULL, shell=True)', 'stderr=None, shell=True, check=True)')
++        lines.append(line)
++    script.write_text(''.join(lines))
++    # Helper scripts previously hid GNU Parallel, Ruby and MacSyFinder errors.
++    for name in ['get_ani_identity.pl', 'get_ani_identity_job.pl']:
++        path = target / name
++        text = path.read_text()
++        lines = []
++        for line in text.splitlines(True):
++            if line.startswith('system('):
++                line = line.replace('> /dev/null 2>&1', '> $fname_tsv.stdout 2> $fname_tsv.stderr')
++                line = line.rstrip('\n')[:-1] + ' == 0 or die "COPLA helper child failed: $?\\n";\n'
++            lines.append(line)
++        text = ''.join(lines)
++        if name == 'get_ani_identity_job.pl':
++            text += ('\nopen my $STATUS, ">", "$fname_tsv.status" or die $!;\n'
++                     'print $STATUS (-e "$fname_tsv.not_evaluable" ? "not_evaluable_no_fragments" : '
++                     '(-s $fname_tsv ? "edge" : "no_edge_insufficient_reciprocal_hits"));\nclose $STATUS;\n')
++        else:
++            marker = 'system("rm -r $work_dir")'
++            diagnostics = ('open my $EVAL, ">", "$fname_qry.ani_evaluation.tsv" or die $!;\n'
++                'print $EVAL "reference\\tstatus\\n";\n'
++                'open my $DIAG, ">", "$fname_qry.ani_diagnostics.log" or die $!;\n'
++                'for my $file (sort glob("$work_dir*.status")) {\n'
++                '    my $ref = basename($file); $ref =~ s/\\.tsv\\.status$//;\n'
++                '    open my $S, "<", $file or die $!; my $status = <$S>; close $S;\n'
++                '    print $EVAL "$ref\\t$status\\n";\n'
++                '    my $prefix = substr($file, 0, length($file)-7);\n'
++                '    for my $kind ("stdout", "stderr") {\n'
++                '        open my $L, "<", "$prefix.$kind" or die $!;\n'
++                '        print $DIAG "== $ref $kind ==\\n";\n'
++                '        while (my $line = <$L>) { print $DIAG $line; } close $L;\n'
++                '    }\n}\nclose $EVAL; close $DIAG;\n\n')
++            if text.count(marker) != 1:
++                raise ValueError('Unexpected pinned COPLA ANI cleanup')
++            text = text.replace(marker, diagnostics + marker)
++        path.write_text(text)
++    path = target / 'check_conjugation_systems.sh'
++    text = path.read_text()
++    begin = text.index('source "$(dirname')
++    end = text.index('\n\nQRYFILE=', begin)
++    text = text[:begin] + 'set -euo pipefail\nexport PATH="${COPLA_MACSYFINDER%/*}:$PATH"\n' + text[end:]
++    text = text.replace('THREADS=20', 'THREADS=${COPLA_THREADS:?}')
++    text = text.replace('    macsyfinder ${conj_type}', '    "${COPLA_MACSYFINDER:?}" ${conj_type}')
++    text = text.replace('rm ${QRYFILE}.*', 'rm -f -- ${QRYFILE}.*')
++    path.write_text(text)
++    # ani.rb uses backticks and ignored failed BLAST children. Require success,
++    # while a successful comparison with insufficient reciprocal hits stays valid.
++    path = target / 'ani.rb'
++    text = path.read_text()
++    text = text.replace('`"#{o[:bin]}makeblastdb" -in "#{dir}/#{seq.to_s}.fa" -dbtype nucl`',
++                        'system("#{o[:bin]}makeblastdb", "-in", "#{dir}/#{seq.to_s}.fa", "-dbtype", "nucl", :out=>File::NULL) or abort "makeblastdb failed"')
++    old = '`"#{o[:bin]}blastn" -db "#{s}" -query "#{q}" \\\n      -dust no -max_target_seqs 1 \\\n      -num_threads #{o[:thr]} -outfmt 6 -out "#{dir}/#{i}.tab"`'
++    if text.count(old) != 1:
++        raise ValueError('Unexpected pinned Enveomics BLAST command')
++    text = text.replace(old, 'system("#{o[:bin]}blastn", "-db", s, "-query", q, "-dust", "no", "-max_target_seqs", "1", "-num_threads", o[:thr].to_s, "-outfmt", "6", "-out", "#{dir}/#{i}.tab") or abort "blastn failed"')
++    marker = '    case o[:program].downcase\n'
++    # Preserve the existing 1000bp/200bp eligibility rule. A reference with no
++    # informative window is explicitly unevaluable, rather than a BLAST failure.
++    if text.count(marker) != 2:
++        raise ValueError('Unexpected pinned ANI fragment generation boundary')
++    text = text.replace(marker,
++                        '    if frgs == 0\n'
++                        '      File.write(o[:tab] + ".not_evaluable", "no_informative_fragments\\t" + seq.to_s) unless o[:tab].nil?\n'
++                        '      exit 0\n    end\n' + marker, 1)
++    path.write_text(text)
++    return {'applied': True, 'original_copla_sha256': original,
++            'source_commit': '6b89285ef16d721d93d3c84f3645e76455ba8621',
++            'scope': 'child failure propagation, resource/thread paths and byte-only copies; no ANI threshold, reference parser or graph/model change',
++            'private_source_sha256': {p.name: sha(p) for p in target.iterdir() if p.is_file()}}
++
++
++def run(args):
++    installation = Path(args.installation).resolve()
++    graph = Path(args.refgraph).resolve()
++    macsy = Path(args.macsyfinder).resolve()
++    for path in [graph, Path(args.reflist), installation / 'bin/copla.py', installation / 'bin/ani.rb', macsy / 'bin/macsyfinder']:
++        if not path.is_file() or not path.stat().st_size:
++            raise ValueError('Missing COPLA resource: ' + str(path))
++    for name in ['MOBscan_171004', 'MacSyFinder_190530/Conjugation', 'PlasmidFinder_190731', 'CARD_201015']:
++        if not (installation / 'databases' / name).is_dir():
++            raise ValueError('Missing COPLA database directory: ' + name)
++    if args.threads < 1:
++        raise ValueError('COPLA threads must be positive')
++    if Path(args.output).exists() or Path(args.raw).exists() or Path('copla_program').exists():
++        raise ValueError('COPLA refuses pre-existing output/program paths')
++    refs = reference_files(installation, args.reflist)
++    records = candidates(args.assembly)
++    for exe in ['prodigal', 'hmmscan', 'plasmidfinder.py', 'blastn', 'makeblastdb', 'parallel', 'ruby', 'perl']:
++        if not shutil.which(exe):
++            raise ValueError('Missing COPLA executable: ' + exe)
++    work = Path('copla_program');work.mkdir()
++    (work / 'databases').symlink_to(installation / 'databases', target_is_directory=True)
++    (work / 'reference.pickle').symlink_to(graph)
++    references = work / 'reference_sequences'
++    references.mkdir()
++    for path in refs:
++        (references / path.name).symlink_to(path)
++    (work / 'references.fofn').write_text(''.join('reference_sequences/' + p.name + '\n' for p in refs))
++    patch = prepare_program(installation, work, macsy, args.threads)
++    (work / 'queries').mkdir();(work / 'results').mkdir()
++    environment = os.environ.copy()
++    if (installation / 'lib').is_dir():
++        environment['LD_LIBRARY_PATH'] = str(installation / 'lib') + (os.pathsep + environment['LD_LIBRARY_PATH'] if environment.get('LD_LIBRARY_PATH') else '')
++    environment.update(COPLA_THREADS=str(args.threads), COPLA_MACSYFINDER=str(macsy / 'bin/macsyfinder'),
++                       OMP_NUM_THREADS=str(args.threads), PARALLEL='--jobs ' + str(args.threads) + ' --halt soon,fail=1',
++                       MPLCONFIGDIR=str((work / 'mpl-cache').resolve()))
++    manifest = {'entity_scope': 'independent_candidate_record_not_reconstructed_multicontig_plasmid',
++                'input_sha256': sha(args.assembly), 'reference_graph_sha256': sha(graph),
++                'reference_list_sha256': sha(args.reflist), 'reference_count': len(refs),
++                'source_patch': patch, 'threads': args.threads, 'entities': []}
++    if patch['applied']:
++        import pickle
++        import graph_tool.all as gt
++        import numpy
++        import pandas
++        gt.openmp_set_num_threads(args.threads)
++        with graph.open('rb') as stream:
++            network, state = pickle.load(stream)
++        accessions = list(network.vp.AccessionVersion)
++        if len(accessions) != len(set(accessions)) or set(accessions) != {p.stem for p in refs}:
++            raise ValueError('COPLA graph accessions do not match declared reference FASTAs')
++        manifest['runtime_versions'] = {'graph_tool': gt.__version__, 'numpy': numpy.__version__, 'pandas': pandas.__version__}
++        manifest['reference_graph_vertices'] = network.num_vertices()
++        del network, state
++    rows = []
++    for index, record in enumerate(records, 1):
++        key = 'candidate_%06d' % index
++        query = work / 'queries' / (key + '.fna')
++        query.write_text('>' + record['header'] + '\n' + record['dna'] + '\n')
++        out = work / 'results' / key
++        command = [sys.executable, 'bin/copla.py', 'queries/' + query.name,
++                   'reference.pickle', 'references.fofn', 'results/' + key, '-t', record['topology']]
++        with (work / (key + '.stdout')).open('w') as stdout, (work / (key + '.stderr')).open('w') as stderr:
++            result = subprocess.run(command, cwd=work, env=environment, stdout=stdout, stderr=stderr)
++        if result.returncode:
++            raise ValueError('COPLA failed for candidate ' + record['id'] + '; inspect ' + str(work / (key + '.stderr')))
++        prefix = out / query.name
++        for suffix in ['', '.faa', '.ani.tsv', '.related_plasmids.tsv', '.qry_info.tsv', '.ptu_prediction.tsv']:
++            if not Path(str(prefix) + suffix).is_file():
++                raise ValueError('Missing exact COPLA product for ' + record['id'] + ': ' + suffix)
++        if candidates(prefix) != [record]:
++            raise ValueError('COPLA output query DNA/identity changed')
++        if patch['applied']:
++            evaluation = Path(str(prefix) + '.ani_evaluation.tsv')
++            with evaluation.open(newline='') as stream:
++                reader = csv.DictReader(stream, delimiter='\t')
++                if reader.fieldnames != ['reference', 'status']:
++                    raise ValueError('Missing COPLA ANI assessment contract')
++                assessments = list(reader)
++            if (len(assessments) != len(refs) or {r['reference'] for r in assessments} != {p.name for p in refs}
++                    or any(r['status'] not in ['edge', 'no_edge_insufficient_reciprocal_hits', 'not_evaluable_no_fragments'] for r in assessments)):
++                raise ValueError('COPLA did not assess every declared reference')
++        info = one_row(str(prefix) + '.qry_info.tsv', ['#Total bp', 'MOB', 'MPF', 'Replicon', 'AMR'])
++        if info['#Total bp'] != str(len(record['dna'])):
++            raise ValueError('COPLA query length does not match its individual record')
++        value = prediction(str(prefix) + '.ptu_prediction.tsv')
++        rows.append([record['id'], str(len(record['dna'])), record['topology'], 'candidate_record',
++                     value['#Predicted_PTU'], value['Host_Range'], value['Score'], value['Notes']])
++        manifest['entities'].append({'id': record['id'], 'length': len(record['dna']), 'key': key,
++                                     'topology': record['topology'], 'topology_source': record['topology_source'],
++                                     'DNA_sha256': hashlib.sha256(record['dna'].encode()).hexdigest(),
++                                     'command': command, 'exit': result.returncode})
++    # Only publish aggregate and raw results after every candidate has passed.
++    (work / 'entities.json').write_text(json.dumps(manifest, indent=2) + '\n')
++    (work / 'databases').unlink()
++    (work / 'reference.pickle').unlink()
++    shutil.rmtree(work / 'reference_sequences')
++    with Path(args.output).open('w', newline='') as stream:
++        writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
++        writer.writerow(HEADER);writer.writerows(rows)
++    work.rename(args.raw)
++    return 0
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    for name in ['assembly', 'installation', 'refgraph', 'reflist', 'macsyfinder', 'output', 'raw']:
++        parser.add_argument('--' + name, required=True)
++    parser.add_argument('--threads', type=int, required=True)
++    args = parser.parse_args()
++    try:
++        return run(args)
++    except (ValueError, OSError, EOFError, UnicodeError, csv.Error) as error:
++        print('COPLA candidate adapter: ' + str(error), file=sys.stderr)
++        return 1
++
++
++if __name__ == '__main__':
++    raise SystemExit(main())
+--- a/envs/copla.yml
++++ b/envs/copla.yml
+@@ -3,4 +3,14 @@
+   - conda-forge
+   - bioconda
+ dependencies:
+-  - copla>=1.0
++  # Official COPLA1.0 dependencies; source/resources are explicit process inputs.
++  - python=3.9.0
++  - graph-tool=2.35
++  - numpy=1.19.4
++  - pandas=1.1.5
++  - blast=2.10.1
++  - prodigal=2.6.3
++  - hmmer=3.3.1
++  - plasmidfinder=2.1.1
++  - ruby=2.7.2
++  - parallel=20201122
+--- a/main.nf
++++ b/main.nf
+@@ -142,6 +142,8 @@
+     if (selectedTools(params.typing_optional_tools).contains('copla')) {
+         required << ['copla_refgraph', params.copla_refgraph]
+         required << ['copla_reflist', params.copla_reflist]
++        required << ['copla_dir', params.copla_dir]
++        required << ['copla_macsyfinder_dir', params.copla_macsyfinder_dir]
+     }
+     if (selectedTools(params.annotation_tools).contains('bakta')) required << ['bakta_db', params.bakta_db]
+     if (selectedTools(params.annotation_tools).contains('amrfinderplus')) required << ['amrfinderplus_db', params.amrfinderplus_db]
+@@ -171,6 +173,19 @@
+         if (!source.isDirectory()) paramError('--plasme_dir must be a source directory')
+         ['PLASMe.py', 'bio_script.py', 'trans_data.py', 'trans_model.py'].each { name ->
+             if (!new File(source, name).isFile()) paramError("--plasme_dir missing source file ${name}")
++        }
++    }
++    if (selectedTools(params.typing_optional_tools).contains('copla')) {
++        def installation = new File(params.copla_dir.toString())
++        if (!installation.isDirectory()) paramError('--copla_dir must be a prepared installation directory')
++        ['bin/copla.py', 'bin/ani.rb'].each { name ->
++            if (!new File(installation, name).isFile()) paramError("--copla_dir missing source file ${name}")
++        }
++        ['MOBscan_171004', 'MacSyFinder_190530/Conjugation', 'PlasmidFinder_190731', 'CARD_201015'].each { name ->
++            if (!new File(installation, 'databases/' + name).isDirectory()) paramError("--copla_dir missing database directory ${name}")
++        }
++        if (!new File(params.copla_macsyfinder_dir.toString(), 'bin/macsyfinder').isFile()) {
++            paramError('--copla_macsyfinder_dir missing bin/macsyfinder')
+         }
+     }
+     if (!['megahit', 'metaspades'].contains(params.short_read_assembler)) {
+--- a/modules/typing/copla.nf
++++ b/modules/typing/copla.nf
+@@ -5,22 +5,31 @@
+ process COPLA {
+     tag { meta.id }
+     label 'process_medium'
+-    conda "${projectDir}/envs/copla.yml"
++    conda "${moduleDir}/../../envs/copla.yml"
+ 
+     publishDir "${params.outdir}/06_plasmid_typing/copla", mode: params.publish_dir_mode
+ 
+     input:
+     tuple val(meta), path(plasmid_contigs)
+-    path copla_refgraph
+-    path copla_reflist
++    path(copla_refgraph, stageAs: 'copla_reference.pickle')
++    path(copla_reflist, stageAs: 'copla_references.fofn')
++    path(copla_install, stageAs: 'copla_install')
++    path(copla_macsyfinder, stageAs: 'copla_macsyfinder')
+ 
+     output:
+     tuple val(meta), path("${meta.id}.copla.tsv"), emit: typing
++    tuple val(meta), path("${meta.id}.copla"), emit: raw
+ 
+     script:
++    def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
++    def adapter = file("${moduleDir}/../../bin/run_copla_candidates.py").text
+     """
+-    copla --input ${plasmid_contigs} --refgraph ${copla_refgraph} \\
+-        --reflist ${copla_reflist} --output-dir copla_out
+-    find copla_out -name '*.tsv' | head -1 | xargs -I{} cp {} ${meta.id}.copla.tsv
++    cat > run_copla_candidates.py <<'COPLA_CANDIDATES_PY'
++${adapter}
++COPLA_CANDIDATES_PY
++    python3 run_copla_candidates.py --assembly ${shellQuote.call(plasmid_contigs)} \\
++        --installation ${copla_install} --refgraph ${copla_refgraph} --reflist ${copla_reflist} \\
++        --macsyfinder ${copla_macsyfinder} --threads ${task.cpus} \\
++        --output ${meta.id}.copla.tsv --raw ${meta.id}.copla
+     """
+ }
+--- a/nextflow.config
++++ b/nextflow.config
+@@ -106,6 +106,8 @@
+     platon_db           = null
+     copla_refgraph      = null
+     copla_reflist       = null
++    copla_dir           = null    // prepared official source/bin/databases, including all listed reference FASTAs
++    copla_macsyfinder_dir = null   // separate Python2 MacSyFinder1.0.5 prefix
+     blast_db            = null
+     reference_plasmids  = null
+     plasmidhostfinder_db = null
+--- a/subworkflows/plasmid_downstream.nf
++++ b/subworkflows/plasmid_downstream.nf
+@@ -62,7 +62,9 @@
+     if (selectedTools(params.typing_optional_tools).contains('copla')) {
+         COPLA(ch_plasmids,
+               Channel.value(file(params.copla_refgraph, checkIfExists: true)),
+-              Channel.value(file(params.copla_reflist, checkIfExists: true)))
++              Channel.value(file(params.copla_reflist, checkIfExists: true)),
++              Channel.value(file(params.copla_dir, checkIfExists: true)),
++              Channel.value(file(params.copla_macsyfinder_dir, checkIfExists: true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: COPLA.out], '06_plasmid_typing', 'COPLA'))
+     }
+     def run_conjscan    = selectedTools(params.typing_optional_tools).contains('conjscan')
+--- /dev/null
++++ b/tests/copla-native.lock.json
+@@ -0,0 +1,2623 @@
++{
++  "schema": 1,
++  "tool": "COPLA",
++  "version": "1.0",
++  "source": {
++    "commit": "6b89285ef16d721d93d3c84f3645e76455ba8621",
++    "files": {
++      ".gitattributes": {
++        "path": ".gitattributes",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "dfe0770424b2a19faf507a501ebfc23be8f54e7b",
++        "size": 66,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/dfe0770424b2a19faf507a501ebfc23be8f54e7b",
++        "sha256": "1a1dbe176bc233b499d35a57db7513f2941c99ab9759f177830c9149be99005b"
++      },
++      "LICENSE": {
++        "path": "LICENSE",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "e62ec04cdeece724caeeeeaeb6ae1f6af1bb6b9a",
++        "size": 35129,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/e62ec04cdeece724caeeeeaeb6ae1f6af1bb6b9a",
++        "sha256": "605e9047a563c5c8396ffb18232aa4304ec56586aee537c45064c6fb425e44ad"
++      },
++      "Outcomes.png": {
++        "path": "Outcomes.png",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "cd0e3ea114d1767d13c76a7434ef18bc1ec81c21",
++        "size": 190503,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/cd0e3ea114d1767d13c76a7434ef18bc1ec81c21",
++        "sha256": "3666154c6565d3cda9ca9e5236f1bffe30f2c7df0438cef5797615e0f12e2acb"
++      },
++      "README.md": {
++        "path": "README.md",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "4496260e8cf36dd2912091d4038e68c4fd5f9a9b",
++        "size": 14177,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/4496260e8cf36dd2912091d4038e68c4fd5f9a9b",
++        "sha256": "1556d19788d6a4bc4f6922ca8dede40d4faa139640f86a4de33619d2dba12131"
++      },
++      "RS200_plasmid_metadata.tsv": {
++        "path": "RS200_plasmid_metadata.tsv",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "278faeaf7d6a88dcc749392579fd67a4ae055145",
++        "size": 8708310,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/278faeaf7d6a88dcc749392579fd67a4ae055145",
++        "sha256": "93732965f9403073febf168da38bbb9373918f75e677af63f3046ed3b997a7ba"
++      },
++      "RS84_plasmid_metadata.tsv": {
++        "path": "RS84_plasmid_metadata.tsv",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "edc837517260dde668ae9414fb7cd411a65789eb",
++        "size": 2914434,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/edc837517260dde668ae9414fb7cd411a65789eb",
++        "sha256": "7b0f695afd621fb88ff7f934f4c632f3dca00d92b51970ec50f6aadd8c51dde0"
++      },
++      "Results.png": {
++        "path": "Results.png",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "fdbb76bce94cc4abe737a5bd51b811dab05d1fc2",
++        "size": 31088,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/fdbb76bce94cc4abe737a5bd51b811dab05d1fc2",
++        "sha256": "50d4f41c570e7a755cf11d16b020af468302de763661c2268beb4c3ff7f2e893"
++      },
++      "bin/check_conjugation_systems.sh": {
++        "path": "bin/check_conjugation_systems.sh",
++        "mode": "100755",
++        "type": "blob",
++        "sha": "c3b7caad6160aebbbef10d8900000b2afb60a806",
++        "size": 1542,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/c3b7caad6160aebbbef10d8900000b2afb60a806",
++        "sha256": "dcc640e343b2289a4c7fbe8229cac43bbf5e435dee26d39454045242720dbe48"
++      },
++      "bin/copla.py": {
++        "path": "bin/copla.py",
++        "mode": "100755",
++        "type": "blob",
++        "sha": "2c6b9ce3b4830d9d2360063c61f84300db639e3c",
++        "size": 31701,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/2c6b9ce3b4830d9d2360063c61f84300db639e3c",
++        "sha256": "a27f52f1f9af475f0de2de70ef46b1c4c9079c96ddb39b93126d9d03df51d7e5"
++      },
++      "bin/download_Copla_databases.sh": {
++        "path": "bin/download_Copla_databases.sh",
++        "mode": "100755",
++        "type": "blob",
++        "sha": "b017c6805b98933c2d255fe9edbf8e972ce77d1d",
++        "size": 390,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/b017c6805b98933c2d255fe9edbf8e972ce77d1d",
++        "sha256": "5fecec3079c63e4fc1850216ca2530dd18a20a7d702bb7c13bd1a77575d3a96f"
++      },
++      "bin/generate_test_output.sh": {
++        "path": "bin/generate_test_output.sh",
++        "mode": "100755",
++        "type": "blob",
++        "sha": "7f54ac043634bf2d13c8c306b1b9c9a1d0643d98",
++        "size": 1213,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/7f54ac043634bf2d13c8c306b1b9c9a1d0643d98",
++        "sha256": "29a2f6e2237de214d9a87053a3f3eecd7b51bf391f9a7c0a27d5168e94074379"
++      },
++      "bin/get_ani_identity.pl": {
++        "path": "bin/get_ani_identity.pl",
++        "mode": "100755",
++        "type": "blob",
++        "sha": "6d95862b04cdbdf831df2f0779a996f0ce1a9659",
++        "size": 2224,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/6d95862b04cdbdf831df2f0779a996f0ce1a9659",
++        "sha256": "fcac3e4a2a8a6cbc94956cd5ad1fb68c5f4ef7910147594ce083c6aa968986ac"
++      },
++      "bin/get_ani_identity_job.pl": {
++        "path": "bin/get_ani_identity_job.pl",
++        "mode": "100755",
++        "type": "blob",
++        "sha": "9cd915f8897613e67d245b64b7c29ffa404fa6d7",
++        "size": 1485,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/9cd915f8897613e67d245b64b7c29ffa404fa6d7",
++        "sha256": "56711294d80f033c0806886092669b6e6a8824b2ae3cd9f68476dbf80e1effc9"
++      },
++      "bin/get_fastani_identity.sh": {
++        "path": "bin/get_fastani_identity.sh",
++        "mode": "100755",
++        "type": "blob",
++        "sha": "209a088d00644b1bcd44fa8082b03a5a3586b27c",
++        "size": 474,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/209a088d00644b1bcd44fa8082b03a5a3586b27c",
++        "sha256": "919c96701e7d8efca1a6224d5bd5a2965575f8884b0dc2480dce002d874b2e69"
++      },
++      "bin/hmmscan_domtblout_summarize.py": {
++        "path": "bin/hmmscan_domtblout_summarize.py",
++        "mode": "100755",
++        "type": "blob",
++        "sha": "90c881d7f8d61817ab5f13f51f7f6722f521947b",
++        "size": 4991,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/90c881d7f8d61817ab5f13f51f7f6722f521947b",
++        "sha256": "0313cd4e069b3dadc643e727ae7d1754ae211f3d571ffa3831205a8a16061a3d"
++      },
++      "bin/post_install_test.sh": {
++        "path": "bin/post_install_test.sh",
++        "mode": "100755",
++        "type": "blob",
++        "sha": "deece8f02f8caef151c3082a2adcac0c34f7ad1d",
++        "size": 8802,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/deece8f02f8caef151c3082a2adcac0c34f7ad1d",
++        "sha256": "89fd46dc41de4963f4191e222281895df16ff720e2d2dde0da407068fe3205e9"
++      },
++      "bin/sHSBM.py": {
++        "path": "bin/sHSBM.py",
++        "mode": "100755",
++        "type": "blob",
++        "sha": "658e18d60b47f5e04bb1720e73ebe273388018cb",
++        "size": 20818,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/658e18d60b47f5e04bb1720e73ebe273388018cb",
++        "sha256": "e885938b7dc644051b79f93e583f359ecc076cb2991d1c0bc121c7c1d0aa323d"
++      },
++      "copla.environment.yml": {
++        "path": "copla.environment.yml",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "eecd2bb67531736a3dccd3436b1bc3d3d78fc68e",
++        "size": 220,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/eecd2bb67531736a3dccd3436b1bc3d3d78fc68e",
++        "sha256": "9bb8d727ab9103d1e500001278592a2b280fe79d6de9cfebbd14f1074fb407ef"
++      },
++      "copla.ini": {
++        "path": "copla.ini",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "f1d1d9e3b19fbb818b2c9015954e65d15b1de080",
++        "size": 225,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/f1d1d9e3b19fbb818b2c9015954e65d15b1de080",
++        "sha256": "ebfba7750b5220a98e026b21f2a9e957185840e37ace71b4a126f7386bf55113"
++      },
++      "copla.spec-file.txt": {
++        "path": "copla.spec-file.txt",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "79c61a7e547c43a6c15e9de5f6c833ca5963260c",
++        "size": 15857,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/79c61a7e547c43a6c15e9de5f6c833ca5963260c",
++        "sha256": "582dab6e5cf71211eed9a0eb34a6eedfccd42badc50ad4921417370695bdb96a"
++      },
++      "macsyfinder.environment.yml": {
++        "path": "macsyfinder.environment.yml",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "596033fa0177b649839a09792d642db2154954f4",
++        "size": 140,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/596033fa0177b649839a09792d642db2154954f4",
++        "sha256": "e9a2293a1e36a0c0a674c70c9c68311102da290bb39abb892684a6042d6bad2f"
++      },
++      "macsyfinder.spec-file.txt": {
++        "path": "macsyfinder.spec-file.txt",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "043e0a420b4c4755ff932a2d0271b6e7c3e9e126",
++        "size": 8360,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/043e0a420b4c4755ff932a2d0271b6e7c3e9e126",
++        "sha256": "a61ad7946aecb9632f846ef4cfdc7bc3a35f16748654c2c5855a2447f61b9f79"
++      },
++      "test/NZ_CP028167.1.faa": {
++        "path": "test/NZ_CP028167.1.faa",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "a7dc217843323d4a756f248c45edd65ca7daaf14",
++        "size": 10095,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/a7dc217843323d4a756f248c45edd65ca7daaf14",
++        "sha256": "bcd3e5e2cfd4f199df2b9157ad8d0cf7077bfdcb2480b371e8489b2fa13f79cf"
++      },
++      "test/NZ_CP028167.1.fna": {
++        "path": "test/NZ_CP028167.1.fna",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "2be7ea8d857a3698d48a62d81bc4fdc54321f74b",
++        "size": 33397,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/2be7ea8d857a3698d48a62d81bc4fdc54321f74b",
++        "sha256": "c9977b20f97147986a22729ef27f2fa7974fac527ed9b88dcbe74a2bdc3123f3"
++      },
++      "test/NZ_CP028167.1.fna_stdout": {
++        "path": "test/NZ_CP028167.1.fna_stdout",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "20642d93b7014a2e7b0795f8a10d9258db0b6d18",
++        "size": 154,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/20642d93b7014a2e7b0795f8a10d9258db0b6d18",
++        "sha256": "d21349a759791878e2368854041b7b4f1a6a3441e5198bf15eea26fbea2f3989"
++      },
++      "test/NZ_CP028167.1.tgz": {
++        "path": "test/NZ_CP028167.1.tgz",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "dd187aad3e8146d1b42eec7ce03e93c835e8e9c8",
++        "size": 224158,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/dd187aad3e8146d1b42eec7ce03e93c835e8e9c8",
++        "sha256": "782051e9d9c13f9e65f239b244341a345715900345f0a7a7712fef70896dd610"
++      },
++      "test/NZ_CP028329.1.faa": {
++        "path": "test/NZ_CP028329.1.faa",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "773495d9be2bed31b9c856b2b8315ffdc5551b8d",
++        "size": 11146,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/773495d9be2bed31b9c856b2b8315ffdc5551b8d",
++        "sha256": "ee8b18aad03f086054ac79a04e6c0000b7dc7c6f52c42ec661e336bf3ca40271"
++      },
++      "test/NZ_CP028329.1.fna": {
++        "path": "test/NZ_CP028329.1.fna",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "0f46fe74d8949bd4e94fb82d74113ec91646fd5b",
++        "size": 49512,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/0f46fe74d8949bd4e94fb82d74113ec91646fd5b",
++        "sha256": "65847ed3cffe544246c66cf76305a105374c13de3d1763b43ae1ce57db2d9bc2"
++      },
++      "test/NZ_CP028329.1.fna_stdout": {
++        "path": "test/NZ_CP028329.1.fna_stdout",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "b9b1901b43c341edd0ecbcc9bc4b6d6972702db1",
++        "size": 206,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/b9b1901b43c341edd0ecbcc9bc4b6d6972702db1",
++        "sha256": "d5c2b4db1a788439b10c59ad6741613fa45757740742f8ef1bbc5f593e4c27c5"
++      },
++      "test/NZ_CP028329.1.tgz": {
++        "path": "test/NZ_CP028329.1.tgz",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "8df18467a7fa3e337ed4c3a8886d7ae24879a0b0",
++        "size": 186474,
++        "url": "https://api.github.com/repos/santirdnd/COPLA/git/blobs/8df18467a7fa3e337ed4c3a8886d7ae24879a0b0",
++        "sha256": "aff642754d58a9416d65144ee125211cdbb7552f4eae1b24d07369c582ba616a"
++      }
++    },
++    "archive_sha256": "a2412fc9c09d00b950cd41b57e554ed62495c3cd3e306ac4cc2a96cc3a74d862",
++    "source": "results/tool-audit/runtime/COPLA-6b89285e"
++  },
++  "database": {
++    "original_url": "https://castillo.dicom.unican.es/zaguan/Copla/Copla_databases_RS84.tar",
++    "archive_url": "https://web.archive.org/web/20220709162449if_/https://castillo.dicom.unican.es/zaguan/Copla/Copla_databases_RS84.tar",
++    "archive_bytes": 357242880,
++    "archive_sha1": "814e4a572991db2367770517fa714e07fedece4f",
++    "archive_sha256": "977fdc4fb31b56fc901b1ec4908266f581748276c46cc10218abe8e5a3d4df5c",
++    "CDX_base32_sha1": "QFHEUVZJSHNSGZ3XAUL7U4KOA77N5TSP",
++    "archive_time": "20220709162449",
++    "original_last_modified": "2020-12-14T15:13:08Z",
++    "full_archive": true,
++    "tar_members": 10240,
++    "scope": "Complete archived RS84 graph/references, original bundled MOB/CONJ/PlasmidFinder/CARD3.1.0, not a latest DB claim",
++    "reference_count": 9894,
++    "regular_archive_members": 10228,
++    "raw_and_uncompressed_relative_file_count": 20122,
++    "relative_path_SHA256_tsv_sha256": "f372375c0a589646456295042f94531a4a1ef17cfd6edb158246df1d904645ad",
++    "graph_sha256": "a009ed1a789ee11e90fdb6a85a56829733caecd3f7e1a47a264e96f5ad13c3cc",
++    "full_manifest_receipt_sha256": "4a1515e36cab48e604e7357042efc0f9909082adf799589005e3f1e2f61b93db"
++  },
++  "packages": {
++    "copla-1.0": [
++      {
++        "name": "_libgcc_mutex",
++        "version": "0.1",
++        "build": "conda_forge",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2",
++        "md5": "d7c89558ba9fa0495403155b64376d81",
++        "sha256": "fe51de6107f9edc7aa4f786a70f4a883943bc9d39b3bb7307c04c41410990726"
++      },
++      {
++        "name": "_openmp_mutex",
++        "version": "4.5",
++        "build": "1_gnu",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-1_gnu.tar.bz2",
++        "md5": "561e277319a41d4f24f5c05a9ef63c04",
++        "sha256": "81c74d38c80345e195106dc3a5b4063b61f2209402bf9f6c7e2abadef4f544a3"
++      },
++      {
++        "name": "at-spi2-atk",
++        "version": "2.38.0",
++        "build": "hdfca744_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/at-spi2-atk-2.38.0-hdfca744_2.tar.bz2",
++        "md5": "f04afd9c5c414a4260af20059d5ef71c",
++        "sha256": "9bea79f48c73d1f433c3ebd0fd7616f7e3cf9898922dc406ea23de87666f7f17"
++      },
++      {
++        "name": "at-spi2-core",
++        "version": "2.38.0",
++        "build": "hdfca744_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/at-spi2-core-2.38.0-hdfca744_2.tar.bz2",
++        "md5": "9ced049f2a3420ea813140e7c9a46d44",
++        "sha256": "69e1c7ffb81a99fcba46fecbde8506e6fc6ff4fb9f40c254dde25beccd787b96"
++      },
++      {
++        "name": "atk-1.0",
++        "version": "2.36.0",
++        "build": "h3371d22_4",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/atk-1.0-2.36.0-h3371d22_4.tar.bz2",
++        "md5": "661e1ed5d92552785d9f8c781ce68685",
++        "sha256": "dde04e006d330e42165c49778546c466aa5ae03499f20cdd2bcbc7f0306f896d"
++      },
++      {
++        "name": "biopython",
++        "version": "1.78",
++        "build": "py39hbd71b63_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/biopython-1.78-py39hbd71b63_1.tar.bz2",
++        "md5": "7baba2a3449e83d13d2b379dfbfd55a6",
++        "sha256": "1c1870d78360559d3d79404f87f9c38cec17212b74482784e34bc2a8654231e3"
++      },
++      {
++        "name": "blast",
++        "version": "2.10.1",
++        "build": "pl526he19e7b1_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/blast-2.10.1-pl526he19e7b1_3.tar.bz2",
++        "md5": "ddbd5c1b2f19dbac2fbf32cd350bc6c8",
++        "sha256": "970a142713b432ec1a359b705afec70145ff0633ed0a9852235b393ab98cd67e"
++      },
++      {
++        "name": "boost",
++        "version": "1.72.0",
++        "build": "py39ha90915f_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/boost-1.72.0-py39ha90915f_1.tar.bz2",
++        "md5": "a533b11d033375b5c50de066c490b2a8",
++        "sha256": "9640ac18978b606a4e3a8626f1e71b63648232106430c043797e741f7cc99b3a"
++      },
++      {
++        "name": "boost-cpp",
++        "version": "1.72.0",
++        "build": "h9359b55_3",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/boost-cpp-1.72.0-h9359b55_3.tar.bz2",
++        "md5": "454600482f9a60fb4d8f221279111ff1",
++        "sha256": "f7205b670df2f1f703a04e77044c9ec8b41aa0f37e91ead93c5f97fe215f386c"
++      },
++      {
++        "name": "bzip2",
++        "version": "1.0.8",
++        "build": "h7f98852_4",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-h7f98852_4.tar.bz2",
++        "md5": "a1fd65c7ccbf10880423d82bca54eb54",
++        "sha256": "cb521319804640ff2ad6a9f118d972ed76d86bea44e5626c09a13d38f562e1fa"
++      },
++      {
++        "name": "c-ares",
++        "version": "1.17.1",
++        "build": "h36c2ea0_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/c-ares-1.17.1-h36c2ea0_0.tar.bz2",
++        "md5": "1aa683618a2df66800d568409d6841d1",
++        "sha256": "434659e424e6101e1e2f88f0d2aab257916e7f747faf8aef4b2392d017f3ec04"
++      },
++      {
++        "name": "ca-certificates",
++        "version": "2020.12.5",
++        "build": "ha878542_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/ca-certificates-2020.12.5-ha878542_0.tar.bz2",
++        "md5": "7eb5d4ffeee663caa1635cd67071bc1b",
++        "sha256": "20a5490c4401334698aa6947fd3a257fe1bd2f941f149a07c7a1d01939430513"
++      },
++      {
++        "name": "cairo",
++        "version": "1.16.0",
++        "build": "h9f066cc_1006",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/cairo-1.16.0-h9f066cc_1006.tar.bz2",
++        "md5": "9f8ef44d205f35056dccc1a92fbe6592",
++        "sha256": "423f83baa104b68874ff29931c9fd4a1bdd2c4cffd79f439ccf67a7cb3c7f013"
++      },
++      {
++        "name": "cairomm",
++        "version": "1.12.2",
++        "build": "2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/cairomm-1.12.2-2.tar.bz2",
++        "md5": "a4ceb82bb5e91b3185bb993fdc43bb3d",
++        "sha256": "d12a10aef62b652e1212017e093c584d94554f127b5988d7d8d800407aa590ba"
++      },
++      {
++        "name": "cairomm-1.0",
++        "version": "1.12.2",
++        "build": "h0069156_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/cairomm-1.0-1.12.2-h0069156_2.tar.bz2",
++        "md5": "786a33c26963c77e8f4bd00b500ed862",
++        "sha256": "c267fef5d98cdc7d324580b3f9eac94c41fcb854255c0328627a6bd4a3ce180f"
++      },
++      {
++        "name": "certifi",
++        "version": "2020.12.5",
++        "build": "py39hf3d152e_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/certifi-2020.12.5-py39hf3d152e_0.tar.bz2",
++        "md5": "d5f340e3e31e4853a49704bb78421b0b",
++        "sha256": "06ce1b8d8af229e1e837f5fb4deae18a88020f509739c323c0333154fc707a0e"
++      },
++      {
++        "name": "cffi",
++        "version": "1.14.4",
++        "build": "py39he88106c_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/cffi-1.14.4-py39he88106c_0.tar.bz2",
++        "md5": "260cdcadbaff728fe0f7597276b798c3",
++        "sha256": "27904708a0cd81923fe0cc3009c7e5d3e289dd812de36623d772b96316be5594"
++      },
++      {
++        "name": "cgecore",
++        "version": "1.5.6",
++        "build": "pyh3252c3a_0",
++        "url": "https://conda.anaconda.org/bioconda/noarch/cgecore-1.5.6-pyh3252c3a_0.tar.bz2",
++        "md5": "5671d81bddfc5e522cc0b762268d100f",
++        "sha256": "46e1ecc84fef6fa630db478bf84b3d4aceb49e54f60620df4a8739820c0f023b"
++      },
++      {
++        "name": "curl",
++        "version": "7.71.1",
++        "build": "he644dc0_8",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/curl-7.71.1-he644dc0_8.tar.bz2",
++        "md5": "7fadfa44182e1cc0dbbe0c169c0b15cc",
++        "sha256": "11c818304bc481cef8b17f716e7d3b6063b7baedb6de6aa408c06c66ef99c971"
++      },
++      {
++        "name": "cycler",
++        "version": "0.10.0",
++        "build": "py_2",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/cycler-0.10.0-py_2.tar.bz2",
++        "md5": "f6d7c7e6d8f42cbbec7e07a8d879f91c",
++        "sha256": "beb7a9bc3a667af6ff3b865e97080dc8c3544816034ce908327957ede4c5c951"
++      },
++      {
++        "name": "dbus",
++        "version": "1.13.6",
++        "build": "hfdff14a_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/dbus-1.13.6-hfdff14a_1.tar.bz2",
++        "md5": "4caaca6356992ee545080c7d7193b5a3",
++        "sha256": "811b1759a8c33cd6d14dc1134aa60bd98eb62861a42413fecb367a2e06d7c4a1"
++      },
++      {
++        "name": "entrez-direct",
++        "version": "13.9",
++        "build": "pl526h375a9b1_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/entrez-direct-13.9-pl526h375a9b1_0.tar.bz2",
++        "md5": "275bfe1fa87756b0f25c2ffd7a94f249",
++        "sha256": "fa1ff91825507b16419a345e6b9c00092396d2d2391828e763c336b19cc7af7d"
++      },
++      {
++        "name": "epoxy",
++        "version": "1.5.4",
++        "build": "h36c2ea0_4",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/epoxy-1.5.4-h36c2ea0_4.tar.bz2",
++        "md5": "1766b409ee27b14495889c946fdcb7c0",
++        "sha256": "909ecb3a3d73b36d8586ee375a83571b9a248a3927262fcdff4ecb4edc8eaf56"
++      },
++      {
++        "name": "expat",
++        "version": "2.2.9",
++        "build": "he1b5a44_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/expat-2.2.9-he1b5a44_2.tar.bz2",
++        "md5": "285f5b5ca3209d492224935affd00aab",
++        "sha256": "6fa79b725a995001c8bf4f232d377c66c6caf5259b34833a81934477443b8d5e"
++      },
++      {
++        "name": "fontconfig",
++        "version": "2.13.1",
++        "build": "h7e3eb15_1002",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/fontconfig-2.13.1-h7e3eb15_1002.tar.bz2",
++        "md5": "24b40f20bd46b6f75872dbff650fa129",
++        "sha256": "b76af747a2f96bbfd13b50701015198ac9ee7cd02430dbf263aef5dab68e91e1"
++      },
++      {
++        "name": "freetype",
++        "version": "2.10.4",
++        "build": "h7ca028e_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/freetype-2.10.4-h7ca028e_0.tar.bz2",
++        "md5": "1e6bf409916fdf455a5bb8627b626285",
++        "sha256": "7ee9bc1b47a78e0c2a5f1bcec6cd0b869256b8482128629495fcbafc7ff007d3"
++      },
++      {
++        "name": "fribidi",
++        "version": "1.0.10",
++        "build": "h36c2ea0_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/fribidi-1.0.10-h36c2ea0_0.tar.bz2",
++        "md5": "ac7bc6a654f8f41b352b38f4051135f8",
++        "sha256": "5d7b6c0ee7743ba41399e9e05a58ccc1cfc903942e49ff6f677f6e423ea7a627"
++      },
++      {
++        "name": "gdbm",
++        "version": "1.18",
++        "build": "h0a1914f_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/gdbm-1.18-h0a1914f_2.tar.bz2",
++        "md5": "b77bc399b07a19c00fe12fdc95ee0297",
++        "sha256": "8b9606dc896bd9262d09ab2ef1cb55c4ee43f352473209b58b37a9289dd7b00c"
++      },
++      {
++        "name": "gdk-pixbuf",
++        "version": "2.42.2",
++        "build": "h19a9c64_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/gdk-pixbuf-2.42.2-h19a9c64_1.tar.bz2",
++        "md5": "55598c22ee2bfc6752181dbdeaa23f15",
++        "sha256": "c0e153b1e5d21648ed6e9699dfadbd28fd1eb1f46ab3963842232a5bb2fa3b29"
++      },
++      {
++        "name": "gettext",
++        "version": "0.19.8.1",
++        "build": "hf34092f_1004",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/gettext-0.19.8.1-hf34092f_1004.tar.bz2",
++        "md5": "5582e1349bee4a25705adca745bf6845",
++        "sha256": "45bbbbdc1851bfdf139756bed113c83d8e8326a77f09a022847879e84c24880c"
++      },
++      {
++        "name": "glib",
++        "version": "2.66.3",
++        "build": "h58526e2_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/glib-2.66.3-h58526e2_0.tar.bz2",
++        "md5": "62c2e5c84f6cdc7ded2307ef9c30dc8c",
++        "sha256": "d5aa4854acd35dae97d61ce20ac2d12bf78e7fc3fd9656765b4823d52f32eadb"
++      },
++      {
++        "name": "gmp",
++        "version": "6.2.1",
++        "build": "h58526e2_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/gmp-6.2.1-h58526e2_0.tar.bz2",
++        "md5": "b94cf2db16066b242ebd26db2facbd56",
++        "sha256": "07a5319e1ac54fe5d38f50c60f7485af7f830b036da56957d0bfb7558a886198"
++      },
++      {
++        "name": "gobject-introspection",
++        "version": "1.66.1",
++        "build": "py39h2c9ecb4_3",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/gobject-introspection-1.66.1-py39h2c9ecb4_3.tar.bz2",
++        "md5": "1c9dca5165100236a298f9b0fa0d634f",
++        "sha256": "0f95666b6229558ce19bff308f5cb6a16b48ab5460f6f0e17b1909ea2257e9ba"
++      },
++      {
++        "name": "graph-tool",
++        "version": "2.35",
++        "build": "py39h946176e_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/graph-tool-2.35-py39h946176e_1.tar.bz2",
++        "md5": "adb176ac2318c1cc4fb5e225bb4f9566",
++        "sha256": "a800f411597ed9f55affc56ce24ebfb8654eb1a244364b44af92e32fd95ee9b7"
++      },
++      {
++        "name": "graphite2",
++        "version": "1.3.13",
++        "build": "h58526e2_1001",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/graphite2-1.3.13-h58526e2_1001.tar.bz2",
++        "md5": "8c54672728e8ec6aa6db90cf2806d220",
++        "sha256": "65da967f3101b737b08222de6a6a14e20e480e7d523a5d1e19ace7b960b5d6b1"
++      },
++      {
++        "name": "gtk3",
++        "version": "3.24.24",
++        "build": "h8300230_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/gtk3-3.24.24-h8300230_0.tar.bz2",
++        "md5": "ad4c295705bf4b36a80489071377a25b",
++        "sha256": "87dae7aa0ad4499524ac8afbfe3e0d1bdf5f91940692ab0dd4dd0e8296c58ce6"
++      },
++      {
++        "name": "harfbuzz",
++        "version": "2.7.2",
++        "build": "ha5b49bf_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/harfbuzz-2.7.2-ha5b49bf_1.tar.bz2",
++        "md5": "71644db5e3e9a0bd6e04439d06e5190b",
++        "sha256": "2ece17e6eac7d055cf348762e16dcc07b7c78f3b188fb7efbd936277f48f3955"
++      },
++      {
++        "name": "hicolor-icon-theme",
++        "version": "0.17",
++        "build": "ha770c72_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/hicolor-icon-theme-0.17-ha770c72_2.tar.bz2",
++        "md5": "bbf6f174dcd3254e19a2f5d2295ce808",
++        "sha256": "336f29ceea9594f15cc8ec4c45fdc29e10796573c697ee0d57ebb7edd7e92043"
++      },
++      {
++        "name": "hmmer",
++        "version": "3.3.1",
++        "build": "he1b5a44_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/hmmer-3.3.1-he1b5a44_0.tar.bz2",
++        "md5": "2dcad3eb9a869a3a7d53bf73b3c61ab9",
++        "sha256": "4c895effd60121dd848da8b46f2877520473d54a45754fb1394bf5593abac150"
++      },
++      {
++        "name": "icu",
++        "version": "67.1",
++        "build": "he1b5a44_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/icu-67.1-he1b5a44_0.tar.bz2",
++        "md5": "7ced6a5e5c94726af797d2b5a2b09228",
++        "sha256": "755102651e25f3c024f1ae4c54d770a5e7079961e0074b794edabf55dec74b14"
++      },
++      {
++        "name": "jpeg",
++        "version": "9d",
++        "build": "h36c2ea0_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/jpeg-9d-h36c2ea0_0.tar.bz2",
++        "md5": "ea02ce6037dbe81803ae6123e5ba1568",
++        "sha256": "59a158e00a622722af9cef3e608f1e4f66cae9a3e116cb3d49f224639d80207e"
++      },
++      {
++        "name": "kiwisolver",
++        "version": "1.3.1",
++        "build": "py39h081fc7a_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/kiwisolver-1.3.1-py39h081fc7a_0.tar.bz2",
++        "md5": "35135221637146dba1fc3f42d935e9b5",
++        "sha256": "302782ae8f4bd2641d879a5391c05f6614a6f5569b10773f989673b7efeba4a5"
++      },
++      {
++        "name": "kma",
++        "version": "1.3.9",
++        "build": "hed695b0_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/kma-1.3.9-hed695b0_0.tar.bz2",
++        "md5": "2884e8c185f2379e75397e47c8d2fbb3",
++        "sha256": "88a6eba927fb66ed8a79c9e130864a611e1b812440577e4a939510792ce6cf79"
++      },
++      {
++        "name": "krb5",
++        "version": "1.17.2",
++        "build": "h926e7f8_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/krb5-1.17.2-h926e7f8_0.tar.bz2",
++        "md5": "926325c11478d6e781e76072c117763b",
++        "sha256": "abc0215ea012b0e55d5fac452901fec4073e067452620cba8d8c684330b4eaee"
++      },
++      {
++        "name": "lcms2",
++        "version": "2.11",
++        "build": "hcbb858e_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/lcms2-2.11-hcbb858e_1.tar.bz2",
++        "md5": "89fcd6a52a99f3e255989f8cfc80c489",
++        "sha256": "e368f2cf2ba049c8d847c5a04cf39e355535b85b9de25ee49c0e06391c90038f"
++      },
++      {
++        "name": "ld_impl_linux-64",
++        "version": "2.35.1",
++        "build": "hea4e1c9_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.35.1-hea4e1c9_1.tar.bz2",
++        "md5": "cdabe198d509eeae33a9fc8741d7841d",
++        "sha256": "555a335ca0127173f4a5e4f4843b80b4b7de131f993ccfcb6f584d1dcc864399"
++      },
++      {
++        "name": "libblas",
++        "version": "3.9.0",
++        "build": "3_openblas",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libblas-3.9.0-3_openblas.tar.bz2",
++        "md5": "45bf606ba7dc222c7c3eda0be241c948",
++        "sha256": "7db989bfff0b2f558dbc8dd4ad06a57feafe214ac05c3f5e1b79b6347b66bf41"
++      },
++      {
++        "name": "libcblas",
++        "version": "3.9.0",
++        "build": "3_openblas",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libcblas-3.9.0-3_openblas.tar.bz2",
++        "md5": "2499ea2d37a37324abab3fd034faab44",
++        "sha256": "04dec371b122bae29a6fd44a0b457db4e769c7685c1a8ce090dd524580c4f9ff"
++      },
++      {
++        "name": "libcups",
++        "version": "2.2.12",
++        "build": "hf10b501_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libcups-2.2.12-hf10b501_1.tar.bz2",
++        "md5": "730c3c0a738bc7e1deeb153482cd97af",
++        "sha256": "20f1d88e927cdebd3d115eb4ea14ca5437be0768689ece5d7bae15924c1ca1c9"
++      },
++      {
++        "name": "libcurl",
++        "version": "7.71.1",
++        "build": "hcdd3856_8",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libcurl-7.71.1-hcdd3856_8.tar.bz2",
++        "md5": "2c81fb9f0d82c04b08617fc73eb615af",
++        "sha256": "b99f1b7c90bba10f971ccfc0f358aa22c39bdf5ba36af6db0e0511566c17cda0"
++      },
++      {
++        "name": "libedit",
++        "version": "3.1.20191231",
++        "build": "he28a2e2_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libedit-3.1.20191231-he28a2e2_2.tar.bz2",
++        "md5": "4d331e44109e3f0e19b4cb8f9b82f3e1",
++        "sha256": "a57d37c236d8f7c886e01656f4949d9dcca131d2a0728609c6f7fa338b65f1cf"
++      },
++      {
++        "name": "libev",
++        "version": "4.33",
++        "build": "h516909a_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libev-4.33-h516909a_1.tar.bz2",
++        "md5": "6f8720dff19e17ce5d48cfe7f3d2f0a3",
++        "sha256": "8c9635aa0ea28922877dc96358f9547f6a55fc7e2eb75a556b05f1725496baf9"
++      },
++      {
++        "name": "libffi",
++        "version": "3.2.1",
++        "build": "he1b5a44_1007",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libffi-3.2.1-he1b5a44_1007.tar.bz2",
++        "md5": "11389072d7d6036fd811c3d9460475cd",
++        "sha256": "992246df63724484e9ee8652ce3ca0237f707961beab8b813096bbc647cf84f4"
++      },
++      {
++        "name": "libgcc-ng",
++        "version": "9.3.0",
++        "build": "h5dbcf3e_17",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-9.3.0-h5dbcf3e_17.tar.bz2",
++        "md5": "fc9f5adabc4d55cd4b491332adc413e0",
++        "sha256": "ac9fea79ea83a2c7c6a2eec55595f6ab3d1ad17f9b311597c136f4ad3dc10738"
++      },
++      {
++        "name": "libgfortran-ng",
++        "version": "9.3.0",
++        "build": "he4bcb1c_17",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libgfortran-ng-9.3.0-he4bcb1c_17.tar.bz2",
++        "md5": "f92019e2b944dc3e5d33d0efba4a3461",
++        "sha256": "99ab57a60cf41bdf0f7d3d23b393990f12b6cfa421174050ee5eddf35e5c1795"
++      },
++      {
++        "name": "libgfortran5",
++        "version": "9.3.0",
++        "build": "he4bcb1c_17",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libgfortran5-9.3.0-he4bcb1c_17.tar.bz2",
++        "md5": "0c15349375fc3d0cb2114fcabe2f0aba",
++        "sha256": "55aff95b9f7877a48bab611faa7a024693a91eb50f089fd8ef33aef7bb198f82"
++      },
++      {
++        "name": "libglib",
++        "version": "2.66.3",
++        "build": "hbe7bbb4_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libglib-2.66.3-hbe7bbb4_0.tar.bz2",
++        "md5": "d5a09a9e981849b751cb75656b7302a0",
++        "sha256": "7af955f570502d7ad9eaf90b4b872a448cf1838cbf4827488d29df5017f43cf0"
++      },
++      {
++        "name": "libgomp",
++        "version": "9.3.0",
++        "build": "h5dbcf3e_17",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libgomp-9.3.0-h5dbcf3e_17.tar.bz2",
++        "md5": "8fd587013b9da8b52050268d50c12305",
++        "sha256": "3b9a08ad9614deda093d1fcfee280b578a2451ab1c7bc630e152da0a1cb70565"
++      },
++      {
++        "name": "libiconv",
++        "version": "1.16",
++        "build": "h516909a_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libiconv-1.16-h516909a_0.tar.bz2",
++        "md5": "5c0f338a513a2943c659ae619fca9211",
++        "sha256": "1ba9d434e982536abbbcd63505276270cb3a62844a0f1b6e52962e70be078abe"
++      },
++      {
++        "name": "liblapack",
++        "version": "3.9.0",
++        "build": "3_openblas",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/liblapack-3.9.0-3_openblas.tar.bz2",
++        "md5": "8fd9fca8f58e6e132f55dd2330cae671",
++        "sha256": "ee19d851d000e53518efe5a0b7b45991376358adb8c320eb62c8611cfb9f3eb9"
++      },
++      {
++        "name": "libnghttp2",
++        "version": "1.41.0",
++        "build": "h8cfc5f6_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libnghttp2-1.41.0-h8cfc5f6_2.tar.bz2",
++        "md5": "726ca0fed4bde95b056ef26df1efaf60",
++        "sha256": "5b07dcd269ea68e5f8d842e6b9c763477aacd93eebc1cb892e912d6422afe57f"
++      },
++      {
++        "name": "libopenblas",
++        "version": "0.3.12",
++        "build": "pthreads_h4812303_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libopenblas-0.3.12-pthreads_h4812303_1.tar.bz2",
++        "md5": "2c7126a584f05e7bc8885d64dad3d21a",
++        "sha256": "1d77e229f4190c041cf437db66c993037a6d50b9f6dacbe0196a07edcf398def"
++      },
++      {
++        "name": "libpng",
++        "version": "1.6.37",
++        "build": "h21135ba_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libpng-1.6.37-h21135ba_2.tar.bz2",
++        "md5": "b6acf807307d033d4b7e758b4f44b036",
++        "sha256": "9f2af351ecd913ba5868820329a4202f55b6c1898b3e75d49c64d9c7f83bf40c"
++      },
++      {
++        "name": "librsvg",
++        "version": "2.50.2",
++        "build": "h3442318_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/librsvg-2.50.2-h3442318_1.tar.bz2",
++        "md5": "fb5d9c3c3e335796580f86556294f20b",
++        "sha256": "475be9a0cc92d9eaad7f241f9a8a9f97d9fabbb60b8c4b66f5a299ffa0c84be1"
++      },
++      {
++        "name": "libssh2",
++        "version": "1.9.0",
++        "build": "hab1572f_5",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libssh2-1.9.0-hab1572f_5.tar.bz2",
++        "md5": "18aaa1bd2238ae2b5e89591046973123",
++        "sha256": "9e494b56a276c72a171bcebf9e3008ff4ce8f96d9c52a81a96833ddb635b1db6"
++      },
++      {
++        "name": "libstdcxx-ng",
++        "version": "9.3.0",
++        "build": "h2ae2ef3_17",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-9.3.0-h2ae2ef3_17.tar.bz2",
++        "md5": "342f3c931d0a3a209ab09a522469d20c",
++        "sha256": "2bc1e7ee3d492187bf3657680a8971f4adefd8b6e5c988b254084e4fe9f43042"
++      },
++      {
++        "name": "libtiff",
++        "version": "4.1.0",
++        "build": "h4f3a223_6",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libtiff-4.1.0-h4f3a223_6.tar.bz2",
++        "md5": "26f3a89355b93d26418088a749fd9880",
++        "sha256": "3c11e1d067bb8d4ae091536b890ff437c98510d8545782cd1ed8647aea2b3729"
++      },
++      {
++        "name": "libuuid",
++        "version": "2.32.1",
++        "build": "h7f98852_1000",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.32.1-h7f98852_1000.tar.bz2",
++        "md5": "772d69f030955d9646d3d0eaf21d859d",
++        "sha256": "54f118845498353c936826f8da79b5377d23032bcac8c4a02de2019e26c3f6b3"
++      },
++      {
++        "name": "libwebp-base",
++        "version": "1.1.0",
++        "build": "h36c2ea0_3",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libwebp-base-1.1.0-h36c2ea0_3.tar.bz2",
++        "md5": "5d2fa0f54b5cc9b500269437a62cba3b",
++        "sha256": "104895101db583cfbdab484650fe52f283ac1ee481847a40c724700caa8ae3df"
++      },
++      {
++        "name": "libxcb",
++        "version": "1.13",
++        "build": "h14c3975_1002",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libxcb-1.13-h14c3975_1002.tar.bz2",
++        "md5": "ca4eb860b5528d5c6de8d97021d9ef78",
++        "sha256": "d97ebd364177e6b1d87ed33c82c442cb2e277c8d6b6a921be9bb1ec0032c8683"
++      },
++      {
++        "name": "libxml2",
++        "version": "2.9.10",
++        "build": "h68273f3_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libxml2-2.9.10-h68273f3_2.tar.bz2",
++        "md5": "0315cae0468a1e17f1e7fad5b13d53f8",
++        "sha256": "0a13f26b94cb22f54da978398572563af0c59b76af5fe2a5a3d5899a7046fc88"
++      },
++      {
++        "name": "lz4-c",
++        "version": "1.9.2",
++        "build": "he1b5a44_3",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/lz4-c-1.9.2-he1b5a44_3.tar.bz2",
++        "md5": "b2e54aad8640e7a877d2280d3ebfe85b",
++        "sha256": "0e0a7e89b217cd0b4e04c7e67d610681c5dbc714e84ee1ffb2049c28338c712d"
++      },
++      {
++        "name": "matplotlib-base",
++        "version": "3.3.3",
++        "build": "py39h98787fa_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/matplotlib-base-3.3.3-py39h98787fa_0.tar.bz2",
++        "md5": "e9cb1a46753e6682f16d12992473a6eb",
++        "sha256": "c6973a492eb5d473466d2db3780f29c72462bd71d76b8de202ea6032a50a2213"
++      },
++      {
++        "name": "ncurses",
++        "version": "6.2",
++        "build": "h58526e2_4",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.2-h58526e2_4.tar.bz2",
++        "md5": "509f2a21c4a09214cd737a480dfd80c9",
++        "sha256": "e88a81d9e27eabe306ab9cfbf708b9895a0df46445c1ae67b0f845b9ec599664"
++      },
++      {
++        "name": "numpy",
++        "version": "1.19.4",
++        "build": "py39hdbf815f_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/numpy-1.19.4-py39hdbf815f_2.tar.bz2",
++        "md5": "86d741003c8c83d3b4dc55df42113de2",
++        "sha256": "50cb252b7612ef04e9dea8738d7f9495f70401bbbacf59218ed1e6a87cf40dbf"
++      },
++      {
++        "name": "olefile",
++        "version": "0.46",
++        "build": "pyh9f0ad1d_1",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/olefile-0.46-pyh9f0ad1d_1.tar.bz2",
++        "md5": "0b2e68acc8c78c8cc392b90983481f58",
++        "sha256": "4e203bc6cba69662991ae491aedf840f5ffe26a826943a1164de25ad89af044a"
++      },
++      {
++        "name": "openssl",
++        "version": "1.1.1i",
++        "build": "h7f98852_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/openssl-1.1.1i-h7f98852_0.tar.bz2",
++        "md5": "bc63956d32024c8e0853ff2ca7f2bf05",
++        "sha256": "e982bd8343d636920281210f0b470d3c55c55806ba1b9e76947c56b1b228d59e"
++      },
++      {
++        "name": "pandas",
++        "version": "1.1.5",
++        "build": "py39hde0f152_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/pandas-1.1.5-py39hde0f152_0.tar.bz2",
++        "md5": "79fc4b5b3a865b90dd3701cecf1ad33c",
++        "sha256": "f104a60194c3d39b1b0097bfd889aec57d5d5f074e3e76ac9173318ba8de07fd"
++      },
++      {
++        "name": "pango",
++        "version": "1.42.4",
++        "build": "h69149e4_5",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/pango-1.42.4-h69149e4_5.tar.bz2",
++        "md5": "9e325ab71e743c57955e73172d1db615",
++        "sha256": "14c28d612a158e2edc8166c4bbf442c36c1b9129440849ffd3b4348e4552bd5d"
++      },
++      {
++        "name": "parallel",
++        "version": "20201122",
++        "build": "ha770c72_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/parallel-20201122-ha770c72_0.tar.bz2",
++        "md5": "885f202035ac1de7454eaf3f98895a76",
++        "sha256": "5e188fd7fd7555bca84a0f1425cddaacb8601ddadb4ba8e22c4f7ce17039f0f9"
++      },
++      {
++        "name": "pcre",
++        "version": "8.44",
++        "build": "he1b5a44_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/pcre-8.44-he1b5a44_0.tar.bz2",
++        "md5": "e647d89cd5cdf62760cf283a001841ff",
++        "sha256": "7c6424ed08b62f5c7ae3617be720c72578fc75542a68a689663f4ed39f54cc1d"
++      },
++      {
++        "name": "perl",
++        "version": "5.26.2",
++        "build": "h36c2ea0_1008",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/perl-5.26.2-h36c2ea0_1008.tar.bz2",
++        "md5": "880aa2aacfafa2bc69f7d42168fcee7d",
++        "sha256": "b15cda798804fa388be0a7397fd75a2396c95affeabb8e17aa335c88912b9a55"
++      },
++      {
++        "name": "perl-app-cpanminus",
++        "version": "1.7044",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-app-cpanminus-1.7044-pl526_1.tar.bz2",
++        "md5": "dcd34d99b75ca3feb8af1623a3859b20",
++        "sha256": "ea4eced88f158a138f1c68fa14479e780b2efb2544a09736496a9fd8a35b90d9"
++      },
++      {
++        "name": "perl-archive-tar",
++        "version": "2.32",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-archive-tar-2.32-pl526_0.tar.bz2",
++        "md5": "961b7fd4f58d59d7d4f9f3e48f679477",
++        "sha256": "2506dad246f306e5262ccdae2c0e779f0c6425b90189d5d5afc9a6671fc1b350"
++      },
++      {
++        "name": "perl-base",
++        "version": "2.23",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-base-2.23-pl526_1.tar.bz2",
++        "md5": "03db12873cdeb00d4e8d02bcbf583a04",
++        "sha256": "357499f4a6c3713f8db3e046b7973db97c824dae9ce4c1af33ee4146ec1e6a94"
++      },
++      {
++        "name": "perl-business-isbn",
++        "version": "3.004",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-business-isbn-3.004-pl526_0.tar.bz2",
++        "md5": "982a9766a06c69ce335cbd8567e98e7a",
++        "sha256": "a57fb4d8306c7586e56f2a0a58bde646f090d6dc262c826ae6520472f3e55456"
++      },
++      {
++        "name": "perl-business-isbn-data",
++        "version": "20140910.003",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-business-isbn-data-20140910.003-pl526_0.tar.bz2",
++        "md5": "a3388b8a93d46fd71c88675528c11570",
++        "sha256": "e097f17087eb800707677ce22cf46f4d5493eba36ac1400fcf3e3a607e249388"
++      },
++      {
++        "name": "perl-carp",
++        "version": "1.38",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-carp-1.38-pl526_3.tar.bz2",
++        "md5": "984c76663b1bd6e880683ce6fa58da4c",
++        "sha256": "72c31ae5a335f764385fdd1a4c6bf8e6abfcfbc31604a60b64539fbbee4a6a28"
++      },
++      {
++        "name": "perl-common-sense",
++        "version": "3.74",
++        "build": "pl526_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-common-sense-3.74-pl526_2.tar.bz2",
++        "md5": "66f1c27dc24f6fc5d76d25cd9771f043",
++        "sha256": "afec70a4e48d8a6ebda4958917183f1a913dfb41aca84d8bc022d2be58a5eb24"
++      },
++      {
++        "name": "perl-compress-raw-bzip2",
++        "version": "2.087",
++        "build": "pl526he1b5a44_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-compress-raw-bzip2-2.087-pl526he1b5a44_0.tar.bz2",
++        "md5": "452ca14d71cd5973a6db6998b50f30e3",
++        "sha256": "637ebbf40bf60183a7beadf4207e6fdf0fbab797fcdc0b2275b504084ae20f8a"
++      },
++      {
++        "name": "perl-compress-raw-zlib",
++        "version": "2.087",
++        "build": "pl526hc9558a2_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-compress-raw-zlib-2.087-pl526hc9558a2_0.tar.bz2",
++        "md5": "6a7842c318054b9110268696ce2fe7be",
++        "sha256": "87bf47b84e245aaf61a6182a862ea6123420a7c500763b6a4ed7fe6ad28e386d"
++      },
++      {
++        "name": "perl-constant",
++        "version": "1.33",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-constant-1.33-pl526_1.tar.bz2",
++        "md5": "5037eea2bb962fab567d2d5ea43bc81a",
++        "sha256": "f59d4584fc96a3f356728b6dbdcdcae359a4698be233357c72f145bd4c8ace09"
++      },
++      {
++        "name": "perl-data-dumper",
++        "version": "2.173",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-data-dumper-2.173-pl526_0.tar.bz2",
++        "md5": "8057e13103637c6e8700c652d1b83682",
++        "sha256": "00b274985ca22b5870d7ea2f172d0e1e943c89fa2a55c40a02f821450aaf7193"
++      },
++      {
++        "name": "perl-digest-hmac",
++        "version": "1.03",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-digest-hmac-1.03-pl526_3.tar.bz2",
++        "md5": "8034b317d96bf32090e66ab8c6db9671",
++        "sha256": "625d26bfe0721d85dc4a94bf0204790af64f64d37ffa9b0748dc1cc0bd077e8f"
++      },
++      {
++        "name": "perl-digest-md5",
++        "version": "2.55",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-digest-md5-2.55-pl526_0.tar.bz2",
++        "md5": "c10e244cdea0a2556c4a72111fa6ed38",
++        "sha256": "033af6555a7098426291771eb8fe1b3af6123a0035b8b17264e2881ec58e55e3"
++      },
++      {
++        "name": "perl-encode",
++        "version": "2.88",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-encode-2.88-pl526_1.tar.bz2",
++        "md5": "0db0d9088045596254fb8a88a9a37294",
++        "sha256": "7b56e52d3c71a30f5130f9e75ecf525b143e5bf2b4f033b7c477e37494a820c5"
++      },
++      {
++        "name": "perl-encode-locale",
++        "version": "1.05",
++        "build": "pl526_6",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-encode-locale-1.05-pl526_6.tar.bz2",
++        "md5": "8b76e07f2ee0eb2a4429e517f1ae0bbd",
++        "sha256": "5494cbebd17821fbe8af400d00697e0b9bcb9e85acd866b836e2edfb40d4d004"
++      },
++      {
++        "name": "perl-exporter",
++        "version": "5.72",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-exporter-5.72-pl526_1.tar.bz2",
++        "md5": "5ecf4d143181f4a4d71349811ea29177",
++        "sha256": "1170f5360c09eb802732313bbd7f5a1470c3b59987d373c3ae94ab09ef5ce2d1"
++      },
++      {
++        "name": "perl-exporter-tiny",
++        "version": "1.002001",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-exporter-tiny-1.002001-pl526_0.tar.bz2",
++        "md5": "b84ce6dbb823c77ddba901d1083c2e84",
++        "sha256": "d9603728d081a2b3a7c0009066bf72afab2dce7ae1b2c37c842f9f7f1accf354"
++      },
++      {
++        "name": "perl-extutils-makemaker",
++        "version": "7.36",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-extutils-makemaker-7.36-pl526_1.tar.bz2",
++        "md5": "32d1b791177a614aeae12e67bca620b0",
++        "sha256": "2fe1ece13d215785a74c8115d15e46f950002adf454eb87a0b01904e5336624d"
++      },
++      {
++        "name": "perl-file-listing",
++        "version": "6.04",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-file-listing-6.04-pl526_1.tar.bz2",
++        "md5": "2a2f44c2b29a326f46abb72aea331845",
++        "sha256": "cace74e1f6e1aebc92c441b500a7fc98e378cd3c4bdbbe85490ed48cd8a71e4e"
++      },
++      {
++        "name": "perl-file-path",
++        "version": "2.16",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-file-path-2.16-pl526_0.tar.bz2",
++        "md5": "c58f86c77e01c9c62415ba917f7b651e",
++        "sha256": "bd8eddada117a9bdd773fee06a26892686a225e1d515fab46918d205ac048607"
++      },
++      {
++        "name": "perl-file-temp",
++        "version": "0.2304",
++        "build": "pl526_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-file-temp-0.2304-pl526_2.tar.bz2",
++        "md5": "1e7930ea1b3a6d93a55c6b316a60a891",
++        "sha256": "1ddd2bd4842c36ee4f2a5b78d8a371f6b84cacb9e1083f6621699f82993e816b"
++      },
++      {
++        "name": "perl-html-parser",
++        "version": "3.72",
++        "build": "pl526h6bb024c_5",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-html-parser-3.72-pl526h6bb024c_5.tar.bz2",
++        "md5": "9874aecaa5a6f19c55f32baa5cc7302e",
++        "sha256": "9bf25c8e0b4b20f902cd20c964c965d613d1c9945d2921d4566bb3a0e3dee2d5"
++      },
++      {
++        "name": "perl-html-tagset",
++        "version": "3.20",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-html-tagset-3.20-pl526_3.tar.bz2",
++        "md5": "169010ee892bae283dc8ae4c37ad268b",
++        "sha256": "614b5c19533945cd879680ea7a1019ef6ff994f745c9a67226b3609355aa26cb"
++      },
++      {
++        "name": "perl-html-tree",
++        "version": "5.07",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-html-tree-5.07-pl526_1.tar.bz2",
++        "md5": "ea8d27cb7cfc1a14cc6d168e2f394dec",
++        "sha256": "30e1c0169eb5f79af410f37580be4872e721712a74e3c2762d55ddfd2fdc8ac4"
++      },
++      {
++        "name": "perl-http-cookies",
++        "version": "6.04",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-http-cookies-6.04-pl526_0.tar.bz2",
++        "md5": "24c2429d0ac0467c11a34cae14f366ce",
++        "sha256": "3ad107da6184a8606f9016e7c6bf7d27c1570eab12c8fefc731b9d33b9adb40c"
++      },
++      {
++        "name": "perl-http-daemon",
++        "version": "6.01",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-http-daemon-6.01-pl526_1.tar.bz2",
++        "md5": "b6540672ea97f10b1088ece63b799177",
++        "sha256": "a46abd49eeefb08c8578fb2bd16e83f721b422e16637cd963eecf0b66791ba26"
++      },
++      {
++        "name": "perl-http-date",
++        "version": "6.02",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-http-date-6.02-pl526_3.tar.bz2",
++        "md5": "b1cc187d512357b0a68dc29a100ae1df",
++        "sha256": "961f5e169eb91bb816e8b6489db9c43cc336e37a2ef05a85f42e7b2df775e107"
++      },
++      {
++        "name": "perl-http-message",
++        "version": "6.18",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-http-message-6.18-pl526_0.tar.bz2",
++        "md5": "96eb00c7acca58e160fb34a41ea546c5",
++        "sha256": "f855a671d68016344ef7656b98f18240f0bfe2916317d4645bca312fc9d9572d"
++      },
++      {
++        "name": "perl-http-negotiate",
++        "version": "6.01",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-http-negotiate-6.01-pl526_3.tar.bz2",
++        "md5": "3be31b3d87352fdd54246212bae3ede9",
++        "sha256": "00385dff3f0cb72739c83223103a81736301e95acdc1be3523722c8cd2727297"
++      },
++      {
++        "name": "perl-io-compress",
++        "version": "2.087",
++        "build": "pl526he1b5a44_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-io-compress-2.087-pl526he1b5a44_0.tar.bz2",
++        "md5": "67679464cddb80ccc4692c6d76a439d5",
++        "sha256": "123b355e2ac2a1ad834fc30842bd71a87f430f525bce4874fd4de48345d7e42a"
++      },
++      {
++        "name": "perl-io-html",
++        "version": "1.001",
++        "build": "pl526_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-io-html-1.001-pl526_2.tar.bz2",
++        "md5": "64455bdee28a81f80825a314a4044061",
++        "sha256": "94af7ef1b3d574c1c4e37186247c789b0840357ec49237de01a736f82e12a426"
++      },
++      {
++        "name": "perl-io-socket-ssl",
++        "version": "2.066",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-io-socket-ssl-2.066-pl526_0.tar.bz2",
++        "md5": "16748c0ece26b643c259805c188b4114",
++        "sha256": "e972ed068f3dc617886fb4accb8d86c097312403a4f3042844bc3a68a78ffb6f"
++      },
++      {
++        "name": "perl-io-zlib",
++        "version": "1.10",
++        "build": "pl526_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-io-zlib-1.10-pl526_2.tar.bz2",
++        "md5": "14acb0318f4ad06603b5d38706ae043a",
++        "sha256": "13bb0943904eb07d1da9c418bd682967fe9ccdbbe7d01d5a2adf7b2f0938f5b7"
++      },
++      {
++        "name": "perl-json",
++        "version": "4.02",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-json-4.02-pl526_0.tar.bz2",
++        "md5": "14082a3e2b78deb9aa3ca880ab9eb854",
++        "sha256": "fb32334567e4b0cced5f3d45bf42847390c2e17da5ffb655cd411ad05b370199"
++      },
++      {
++        "name": "perl-json-xs",
++        "version": "2.34",
++        "build": "pl526h6bb024c_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-json-xs-2.34-pl526h6bb024c_3.tar.bz2",
++        "md5": "3a5b157d275eae1d3ba16de1ccae8241",
++        "sha256": "b5d913b71b54b2d9278e06e324d638195343fbee9c7ea41322039badf6365737"
++      },
++      {
++        "name": "perl-libwww-perl",
++        "version": "6.39",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/noarch/perl-libwww-perl-6.39-pl526_0.tar.bz2",
++        "md5": "54f96d7a0ea63cc4505f8cc653c831ee",
++        "sha256": "62c18d828acaf401ce7e15373a2714706b11a68ca51b7b74efd3ee72c685d5f9"
++      },
++      {
++        "name": "perl-list-moreutils",
++        "version": "0.428",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-list-moreutils-0.428-pl526_1.tar.bz2",
++        "md5": "699e3399479d2b1aa1f675b476406e0d",
++        "sha256": "d5aed70001220d91a32df7c89ea255cf18c1f822b7541671315b753ccd408f98"
++      },
++      {
++        "name": "perl-list-moreutils-xs",
++        "version": "0.428",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-list-moreutils-xs-0.428-pl526_0.tar.bz2",
++        "md5": "65212b0ac443324d61e649d1752947c7",
++        "sha256": "82c2a8d8e9f83877845ef2af4dc6bc7fd5a881dbb4d547e553aa16b9b528e749"
++      },
++      {
++        "name": "perl-lwp-mediatypes",
++        "version": "6.04",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-lwp-mediatypes-6.04-pl526_0.tar.bz2",
++        "md5": "39688aa6f280b77af17f539350fe1744",
++        "sha256": "9385d424f0c9ed2d1d39922d555de6ef03b5d25c55a8e859f710e14fac3a7611"
++      },
++      {
++        "name": "perl-lwp-protocol-https",
++        "version": "6.07",
++        "build": "pl526_4",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-lwp-protocol-https-6.07-pl526_4.tar.bz2",
++        "md5": "890387d167b855b7ba31853e8a470030",
++        "sha256": "f8c6655711907a9c4d8b40fb2c741b1a281c6dc703860978b8d8d983cd26e40e"
++      },
++      {
++        "name": "perl-mime-base64",
++        "version": "3.15",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-mime-base64-3.15-pl526_1.tar.bz2",
++        "md5": "6ebc750ac3e57ca1f02d3f580ff281b3",
++        "sha256": "525c789bf3bc0865cc97579b0149a203c74643eea8b3c777127eaeb787d88654"
++      },
++      {
++        "name": "perl-mozilla-ca",
++        "version": "20180117",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-mozilla-ca-20180117-pl526_1.tar.bz2",
++        "md5": "33c797816376ee2a58fd4187848ced82",
++        "sha256": "cfd43b974bca1584ac849639876312d9726a0a2c44f98518d6f0b240b8be5942"
++      },
++      {
++        "name": "perl-net-http",
++        "version": "6.19",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/noarch/perl-net-http-6.19-pl526_0.tar.bz2",
++        "md5": "160f8e846ea37406d973acbf83b5a26b",
++        "sha256": "cdc812619d775be965a3566f6f6d14abfc3f96216d6ab7b84851479ea768205a"
++      },
++      {
++        "name": "perl-net-ssleay",
++        "version": "1.88",
++        "build": "pl526h90d6eec_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-net-ssleay-1.88-pl526h90d6eec_0.tar.bz2",
++        "md5": "8b541f03a7629fd90f71a797599b6c51",
++        "sha256": "bd3b112d8b60daaa40b00992acffb31480702f35d99cfa53a8fdb9e8f217355e"
++      },
++      {
++        "name": "perl-ntlm",
++        "version": "1.09",
++        "build": "pl526_4",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-ntlm-1.09-pl526_4.tar.bz2",
++        "md5": "7863718bc88444211e686dc91dbf4292",
++        "sha256": "34acb2fe7c17d7e65b5afca0fe047e9e61c99a512f5f2e9a71b42c33b9a841f8"
++      },
++      {
++        "name": "perl-parent",
++        "version": "0.236",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-parent-0.236-pl526_1.tar.bz2",
++        "md5": "389bb45e15d386db8e32613a2eb2e949",
++        "sha256": "1aa3fa3a94ce012f12d531bf40f80573e191e766b670f5b91cc7cdc5c54b7c26"
++      },
++      {
++        "name": "perl-pathtools",
++        "version": "3.75",
++        "build": "pl526h14c3975_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-pathtools-3.75-pl526h14c3975_1.tar.bz2",
++        "md5": "4ac5eb7fe5450b7a28c9dc5423c7c293",
++        "sha256": "2bc811011a444c5fe9f66141bb73911dfb47ca5e9746589cc3076996d9685c78"
++      },
++      {
++        "name": "perl-scalar-list-utils",
++        "version": "1.52",
++        "build": "pl526h516909a_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-scalar-list-utils-1.52-pl526h516909a_0.tar.bz2",
++        "md5": "8c78fca5814513924f9637a9211c0c77",
++        "sha256": "72f9276f2f6749385e006bfdfd401a0a9dcd85af85c38739c5725c70ed8bdedd"
++      },
++      {
++        "name": "perl-socket",
++        "version": "2.027",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-socket-2.027-pl526_1.tar.bz2",
++        "md5": "bbce777723970c529b99e0beaa09ec1c",
++        "sha256": "21e09aeb71ca7519d19429b5c95f3e52af309823c10991dc99607b2d4ebde61a"
++      },
++      {
++        "name": "perl-storable",
++        "version": "3.15",
++        "build": "pl526h14c3975_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-storable-3.15-pl526h14c3975_0.tar.bz2",
++        "md5": "ad27b25076f3d76c10085d900bdf3a48",
++        "sha256": "ab77cbce0a3a9c846c92e4b24530c77a2b6a674ec4e4054e2103bd342f93d2f8"
++      },
++      {
++        "name": "perl-test-requiresinternet",
++        "version": "0.05",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-test-requiresinternet-0.05-pl526_0.tar.bz2",
++        "md5": "47a9cfbedd72952aa493625692404a4e",
++        "sha256": "1a9503152aebcc18a148eb1bc81410cd6ab7ffc55276367ad80260198b99fb5e"
++      },
++      {
++        "name": "perl-time-local",
++        "version": "1.28",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-time-local-1.28-pl526_1.tar.bz2",
++        "md5": "d24b02d0c1a45310c46fb48c691f51ce",
++        "sha256": "397c18b5c2f1e2623c5903bb116db06ef64bb3fe0ba36250f6443a6585c8f5c3"
++      },
++      {
++        "name": "perl-try-tiny",
++        "version": "0.30",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-try-tiny-0.30-pl526_1.tar.bz2",
++        "md5": "cf04b17e5804be0615363036e37b9ca7",
++        "sha256": "562b49ae4ee457fd59094778b9b72215e555834b17c4c041314cea421b0afafe"
++      },
++      {
++        "name": "perl-types-serialiser",
++        "version": "1.0",
++        "build": "pl526_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-types-serialiser-1.0-pl526_2.tar.bz2",
++        "md5": "77250c3feefab1e4a8f0fd482af07048",
++        "sha256": "175d1e0e283a20dc7509e4bd1df526aef27d6c04e66f9ab805fb77a9ba40f523"
++      },
++      {
++        "name": "perl-uri",
++        "version": "1.76",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-uri-1.76-pl526_0.tar.bz2",
++        "md5": "30afcde2552ea47cdb5420e5319f66ad",
++        "sha256": "4f56fa57abfcbdf31a223d2a644370c8fd26eaf38a157991ef7bdcc49bee72ef"
++      },
++      {
++        "name": "perl-www-robotrules",
++        "version": "6.02",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-www-robotrules-6.02-pl526_3.tar.bz2",
++        "md5": "8b06331804b3b94eb99b3c1c4b7a4d72",
++        "sha256": "3031682ff5efead2aeee3c030bb7823ade294aade85614eb9293b4c2948d1c8b"
++      },
++      {
++        "name": "perl-xml-namespacesupport",
++        "version": "1.12",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-xml-namespacesupport-1.12-pl526_0.tar.bz2",
++        "md5": "14a68d6d3f08c2d64284919697a2a7ae",
++        "sha256": "a67049f659d712a171dcd19926c334b0cdad5bbf93e271479dcc787af4c17e96"
++      },
++      {
++        "name": "perl-xml-parser",
++        "version": "2.44_01",
++        "build": "pl526ha1d75be_1002",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/perl-xml-parser-2.44_01-pl526ha1d75be_1002.tar.bz2",
++        "md5": "820106e548cef13737a8f434a2e26224",
++        "sha256": "104ea8db108549d0c743fa03229c1636bf243585ab24044268229703edd0bf52"
++      },
++      {
++        "name": "perl-xml-sax",
++        "version": "1.02",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/noarch/perl-xml-sax-1.02-pl526_0.tar.bz2",
++        "md5": "b4fda7e83376806d5eedbef2c3a3b356",
++        "sha256": "0909e4d3989a1595a65c4d000cc121bd2eeb568eb0ec809404566ab5037bdeaf"
++      },
++      {
++        "name": "perl-xml-sax-base",
++        "version": "1.09",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-xml-sax-base-1.09-pl526_0.tar.bz2",
++        "md5": "1a66227c893c9aa02e442019f8052374",
++        "sha256": "2ef3f05c69f23309b2443545007009b03079d93e9ba7b03bbf2441de9709f47e"
++      },
++      {
++        "name": "perl-xml-sax-expat",
++        "version": "0.51",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-xml-sax-expat-0.51-pl526_3.tar.bz2",
++        "md5": "dd0420867f8efc417116567491cccffa",
++        "sha256": "4b70b56129ea4e7cabdcb93ac0d937a0e2f9fd659eee0aa97b6e09b040fba2d7"
++      },
++      {
++        "name": "perl-xml-simple",
++        "version": "2.25",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-xml-simple-2.25-pl526_1.tar.bz2",
++        "md5": "f410354a825d186da9f843f6ff9cd15e",
++        "sha256": "801e2aa8e9d70203e9765c62fbcb14905ffe9e1944f131fde659c68ab2a5e866"
++      },
++      {
++        "name": "perl-xsloader",
++        "version": "0.24",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-xsloader-0.24-pl526_0.tar.bz2",
++        "md5": "878d48f2a6bdff58c7b9589e3b25ff6b",
++        "sha256": "9951be44863dc6e992f254cc5bb61fce62adc7db0346d2deab51004eee0b2983"
++      },
++      {
++        "name": "pillow",
++        "version": "8.0.1",
++        "build": "py39h397ff4d_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/pillow-8.0.1-py39h397ff4d_0.tar.bz2",
++        "md5": "28d5b78f940a82b06129a78b3a9db278",
++        "sha256": "0fca18e87c60a0a4aaa42eb35bde85ff7d501a00e271c2655f53258e36d93eb4"
++      },
++      {
++        "name": "pip",
++        "version": "20.3.1",
++        "build": "pyhd8ed1ab_0",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/pip-20.3.1-pyhd8ed1ab_0.tar.bz2",
++        "md5": "bd6aa73eed4afc399688200778a609f6",
++        "sha256": "3fce093ae043e49e2786433f80fb47158d3a383673d8a8d27fd56e55578c8a2b"
++      },
++      {
++        "name": "pixman",
++        "version": "0.40.0",
++        "build": "h36c2ea0_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/pixman-0.40.0-h36c2ea0_0.tar.bz2",
++        "md5": "660e72c82f2e75a6b3fe6a6e75c79f19",
++        "sha256": "6a0630fff84b5a683af6185a6c67adc8bdfa2043047fcb251add0d352ef60e79"
++      },
++      {
++        "name": "plasmidfinder",
++        "version": "2.1.1",
++        "build": "0",
++        "url": "https://conda.anaconda.org/bioconda/noarch/plasmidfinder-2.1.1-0.tar.bz2",
++        "md5": "16d4ec183125fdc513170adba51c47d1",
++        "sha256": "dc9be982aa828afc90917b7b388f0ed5edcd401c62f51bd0e96bad0dd21b88a9"
++      },
++      {
++        "name": "prodigal",
++        "version": "2.6.3",
++        "build": "h516909a_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/prodigal-2.6.3-h516909a_2.tar.bz2",
++        "md5": "96d5aa2d9910bf82f7b5dcf335c6eac2",
++        "sha256": "78ec4d7952e19b1628fd7a9edd43e19bd8500637ac54686fe7b41e432a3595da"
++      },
++      {
++        "name": "pthread-stubs",
++        "version": "0.4",
++        "build": "h36c2ea0_1001",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/pthread-stubs-0.4-h36c2ea0_1001.tar.bz2",
++        "md5": "22dad4df6e8630e8dff2428f6f6a7036",
++        "sha256": "67c84822f87b641d89df09758da498b2d4558d47b920fd1d3fe6d3a871e000ff"
++      },
++      {
++        "name": "pycairo",
++        "version": "1.20.0",
++        "build": "py39h08627d8_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/pycairo-1.20.0-py39h08627d8_1.tar.bz2",
++        "md5": "bf1f74e693aa3ae83745d12af187f9a8",
++        "sha256": "6910ff87c5d1277ed4d880987bba22fbc522bfd723fecd2e795781e90901974f"
++      },
++      {
++        "name": "pycparser",
++        "version": "2.20",
++        "build": "pyh9f0ad1d_2",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/pycparser-2.20-pyh9f0ad1d_2.tar.bz2",
++        "md5": "aa798d50ffd182a0f6f31478c7f434f6",
++        "sha256": "fad26d8a02f19cd619a9335dca0b0e9195b228e529e7695578d829f7d67b8ac7"
++      },
++      {
++        "name": "pygobject",
++        "version": "3.38.0",
++        "build": "py39h5a08de2_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/pygobject-3.38.0-py39h5a08de2_2.tar.bz2",
++        "md5": "76ca331c89835140b81d826bf703d117",
++        "sha256": "ef6d109557de0fc606d84040ef7db1bcad4e121ff2a9d684167d13b69ad28150"
++      },
++      {
++        "name": "pyparsing",
++        "version": "2.4.7",
++        "build": "pyh9f0ad1d_0",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/pyparsing-2.4.7-pyh9f0ad1d_0.tar.bz2",
++        "md5": "626c4f20d5bf06dcec9cf2eaa31725c7",
++        "sha256": "f1c801916dd64cb2e2c8ad9d65c2b63ccf968d8c976eed47ff45d21e47705608"
++      },
++      {
++        "name": "python",
++        "version": "3.9.0",
++        "build": "h2a148a8_4_cpython",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/python-3.9.0-h2a148a8_4_cpython.tar.bz2",
++        "md5": "cb273019874ded6e4dc57713f7c89bf6",
++        "sha256": "cd373e4f8e9a69656db4ee46927915b428237033cd0941c5b4e95e8e1722bb3d"
++      },
++      {
++        "name": "python-dateutil",
++        "version": "2.8.1",
++        "build": "py_0",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/python-dateutil-2.8.1-py_0.tar.bz2",
++        "md5": "0d0150ed9c2d25817f5324108d3f7571",
++        "sha256": "5bf47c858f799d475299f0926fd665b0f07c6ace873b866707856418f69d5c71"
++      },
++      {
++        "name": "python_abi",
++        "version": "3.9",
++        "build": "1_cp39",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/python_abi-3.9-1_cp39.tar.bz2",
++        "md5": "9ee3692d976902241a3392495768fe98",
++        "sha256": "9b0cab911de6c097b5f5bbd79156cbcb36ddb9301ef61dc31ef2755e045d0890"
++      },
++      {
++        "name": "pytz",
++        "version": "2020.4",
++        "build": "pyhd8ed1ab_0",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/pytz-2020.4-pyhd8ed1ab_0.tar.bz2",
++        "md5": "14aefc827cbbd156cb1bd9e992210380",
++        "sha256": "d6257b5819d884c5cdbe87ee03f85d8cfac1d8e54b8f11c318443fd9ca8a33b4"
++      },
++      {
++        "name": "readline",
++        "version": "8.0",
++        "build": "he28a2e2_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/readline-8.0-he28a2e2_2.tar.bz2",
++        "md5": "4d0ae8d473f863696088f76800ef9d38",
++        "sha256": "022752e1e49ea963c038195f82550a0ee6793f24f24c229e4a6ad8f05559410a"
++      },
++      {
++        "name": "ruby",
++        "version": "2.7.2",
++        "build": "h0b71e51_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/ruby-2.7.2-h0b71e51_2.tar.bz2",
++        "md5": "9bfb03519f0af05c95b016eb7ff76cc0",
++        "sha256": "aede7537ec66a6d2e580d9db6cac1830f7a3550310e30a0dd1a62234860addef"
++      },
++      {
++        "name": "scipy",
++        "version": "1.5.3",
++        "build": "py39hee8e79c_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/scipy-1.5.3-py39hee8e79c_0.tar.bz2",
++        "md5": "75667380743d3a87af3b50e942377db9",
++        "sha256": "528c5b85df458d7f1d5718c6c1afb33e0459cbad17bad12bd934e3bf153527d5"
++      },
++      {
++        "name": "setuptools",
++        "version": "49.6.0",
++        "build": "py39h079e4ff_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/setuptools-49.6.0-py39h079e4ff_2.tar.bz2",
++        "md5": "7cebf33355b537e5706bfe0a546bb193",
++        "sha256": "ad7271b24278a20378329206f6bd205bebd0630ff41fc258108357ebc27e0f6d"
++      },
++      {
++        "name": "sigcpp-2.0",
++        "version": "2.10.3",
++        "build": "h58526e2_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/sigcpp-2.0-2.10.3-h58526e2_0.tar.bz2",
++        "md5": "6e16895d9b247eda8cb0f2edf2755227",
++        "sha256": "6267385cbbe744c0908d480a593f511a27dd7f94cfb25869d3ffa2992595b640"
++      },
++      {
++        "name": "six",
++        "version": "1.15.0",
++        "build": "pyh9f0ad1d_0",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/six-1.15.0-pyh9f0ad1d_0.tar.bz2",
++        "md5": "1eec421f0f1f39e579e44e4a5ce646a2",
++        "sha256": "2514c7bcfb419c470eb953d62deba070f3b757ca12988691d0744e7757147f2a"
++      },
++      {
++        "name": "sparsehash",
++        "version": "2.0.3",
++        "build": "hf484d3e_1000",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/sparsehash-2.0.3-hf484d3e_1000.tar.bz2",
++        "md5": "ffa50462dc277a61301f457c01ad5a85",
++        "sha256": "b54b5cd7ae681426992a6a8e24a8f2b4b784cb847a95d7b68cc4d1c8b6eb59d0"
++      },
++      {
++        "name": "sqlite",
++        "version": "3.34.0",
++        "build": "h74cdb3f_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/sqlite-3.34.0-h74cdb3f_0.tar.bz2",
++        "md5": "0a83e21e8c1929cc9a1e21ebb2459fc5",
++        "sha256": "513cc5889738984d1d3e0dfab6b2a102252c48ef52a8c0aa402333e7967c2eb4"
++      },
++      {
++        "name": "tabulate",
++        "version": "0.8.7",
++        "build": "pyh9f0ad1d_0",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/tabulate-0.8.7-pyh9f0ad1d_0.tar.bz2",
++        "md5": "229780178ffe9121c873e00ba8de39bf",
++        "sha256": "123a2bc35d1ec5efdaabc1b8ffbfa37db8c1425425679f100e81c29838c4bbcd"
++      },
++      {
++        "name": "tk",
++        "version": "8.6.10",
++        "build": "h21135ba_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.10-h21135ba_1.tar.bz2",
++        "md5": "c647f70aa7e3d4cc4e029cc1c9a99953",
++        "sha256": "e5c853d8583a947a1bfc108bf353dbe20ac7bc499ef78ecc77c4efc828b137a0"
++      },
++      {
++        "name": "tornado",
++        "version": "6.1",
++        "build": "py39hbd71b63_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/tornado-6.1-py39hbd71b63_0.tar.bz2",
++        "md5": "3f830c4c7c92e5573eae2cbd68843017",
++        "sha256": "6b2416ef1572b333239e58209f54b9d8d0f178f085f5dd456373fdac98a67902"
++      },
++      {
++        "name": "tzdata",
++        "version": "2020d",
++        "build": "h516909a_0",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/tzdata-2020d-h516909a_0.tar.bz2",
++        "md5": "153abe529c372caadf52bde5e07656e3",
++        "sha256": "039b454439d6402d11479f77bca206dc23db0a6f57a79fbbe216a6e6b1ab7b43"
++      },
++      {
++        "name": "wheel",
++        "version": "0.36.2",
++        "build": "pyhd3deb0d_0",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/wheel-0.36.2-pyhd3deb0d_0.tar.bz2",
++        "md5": "768bfbe026426d0e76b377997d1f2b98",
++        "sha256": "cfb66749cf71fc68bcf429edbaeb4f1e1ebe69b23285fabd1d455e093667b7ed"
++      },
++      {
++        "name": "xorg-kbproto",
++        "version": "1.0.7",
++        "build": "h14c3975_1002",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xorg-kbproto-1.0.7-h14c3975_1002.tar.bz2",
++        "md5": "6dfe5dbe10d55266e4a5e89287eed578",
++        "sha256": "e0ecf489734baf996703b2b274b0d130485476162ef5aae1d4e74851549a470e"
++      },
++      {
++        "name": "xorg-libice",
++        "version": "1.0.10",
++        "build": "h516909a_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xorg-libice-1.0.10-h516909a_0.tar.bz2",
++        "md5": "4dfda1ccfd0cc90c4fe6786acece9a30",
++        "sha256": "f50039ecba88e6ab8aa84c34ab77054ab42e9d80432b169b6c0dad6df238cce2"
++      },
++      {
++        "name": "xorg-libsm",
++        "version": "1.2.3",
++        "build": "h84519dc_1000",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xorg-libsm-1.2.3-h84519dc_1000.tar.bz2",
++        "md5": "56cc238b81624db9e3e36b2b6a482cc1",
++        "sha256": "b34fe36b4ad950e6506e615744ed9c1bb77bc8f4dbcf7f911a997249eb34a07c"
++      },
++      {
++        "name": "xorg-libx11",
++        "version": "1.6.12",
++        "build": "h516909a_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xorg-libx11-1.6.12-h516909a_0.tar.bz2",
++        "md5": "cdea71c3e27611e012419faea02c56bd",
++        "sha256": "f82756be7d7cb25151e78a08f68baac97516a9f005836914b097196f229803ef"
++      },
++      {
++        "name": "xorg-libxau",
++        "version": "1.0.9",
++        "build": "h14c3975_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xorg-libxau-1.0.9-h14c3975_0.tar.bz2",
++        "md5": "ffa7c2b7a2c7dc779ed9e38b10a93c3c",
++        "sha256": "0150c0dbf564220d83ff893b1d2d61209fb6212e237685f786d07879b4dd1d20"
++      },
++      {
++        "name": "xorg-libxdmcp",
++        "version": "1.1.3",
++        "build": "h516909a_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xorg-libxdmcp-1.1.3-h516909a_0.tar.bz2",
++        "md5": "e95a160e60b2a327309a6d323a4d780e",
++        "sha256": "6cd3f826a853bb26bf303b26560439b135ebc2a88c9806e70a8d6935cfeeea91"
++      },
++      {
++        "name": "xorg-libxext",
++        "version": "1.3.4",
++        "build": "h516909a_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xorg-libxext-1.3.4-h516909a_0.tar.bz2",
++        "md5": "aba40ec20012e0a2641ced275a0abdca",
++        "sha256": "e01edd7d1a8cfcd00b5b1ec5562849b0d7f4eeacba60d414b98456305121d6a2"
++      },
++      {
++        "name": "xorg-libxrender",
++        "version": "0.9.10",
++        "build": "h516909a_1002",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xorg-libxrender-0.9.10-h516909a_1002.tar.bz2",
++        "md5": "bf3514891c6743ed808602fa9f4f1508",
++        "sha256": "521bfeee313944bc24c8917f6c18e00fc1111f1d23f8f9a302b9576bfc10a8ad"
++      },
++      {
++        "name": "xorg-renderproto",
++        "version": "0.11.1",
++        "build": "h14c3975_1002",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xorg-renderproto-0.11.1-h14c3975_1002.tar.bz2",
++        "md5": "fbcb7fa11dee1a5d3df4371cc55bb229",
++        "sha256": "bbed3c5ab97fdde0a0a2d725be15cd9b5fc770086e0afecebc8c155873bfff73"
++      },
++      {
++        "name": "xorg-xextproto",
++        "version": "7.3.0",
++        "build": "h14c3975_1002",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xorg-xextproto-7.3.0-h14c3975_1002.tar.bz2",
++        "md5": "f08999859c405bad87c4bf9b6cdc7bbb",
++        "sha256": "dbe269b4007e1219a23bfe9dd1ea7239b73a945c813b88d9b338ab3eb5586ee4"
++      },
++      {
++        "name": "xorg-xproto",
++        "version": "7.0.31",
++        "build": "h7f98852_1007",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xorg-xproto-7.0.31-h7f98852_1007.tar.bz2",
++        "md5": "b4a4381d54784606820704f7b5f05a15",
++        "sha256": "f197bb742a17c78234c24605ad1fe2d88b1d25f332b75d73e5ba8cf8fbc2a10d"
++      },
++      {
++        "name": "xz",
++        "version": "5.2.5",
++        "build": "h516909a_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/xz-5.2.5-h516909a_1.tar.bz2",
++        "md5": "33f601066901f3e1a85af3522a8113f9",
++        "sha256": "1e2823cb2a526bc3a7031ad5dbfb992891f9ff9740d1c17cb6dbb8ebdfd33b27"
++      },
++      {
++        "name": "yaml",
++        "version": "0.2.5",
++        "build": "h516909a_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/yaml-0.2.5-h516909a_0.tar.bz2",
++        "md5": "03a530e925414902547cf48da7756db8",
++        "sha256": "c7b41bb50eea81efe97fbf49d77a3001a8e9e4d339f2067102daed284e285904"
++      },
++      {
++        "name": "zlib",
++        "version": "1.2.11",
++        "build": "h516909a_1010",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/zlib-1.2.11-h516909a_1010.tar.bz2",
++        "md5": "339cc5584e6d26bc73a875ba900028c3",
++        "sha256": "6c9a12053937ba2abfec94ee2c9e71a7a8cbca0e4093a1aea34afa9282110a94"
++      },
++      {
++        "name": "zstandard",
++        "version": "0.14.1",
++        "build": "py39he80948d_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/zstandard-0.14.1-py39he80948d_0.tar.bz2",
++        "md5": "270b96a2367f0c119c34d3a4d99dbf7b",
++        "sha256": "7f8f792c1771d50d6441455e59ac97c0786db2ee377589fec17a894cc1f92dd5"
++      },
++      {
++        "name": "zstd",
++        "version": "1.4.5",
++        "build": "h6597ccf_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/zstd-1.4.5-h6597ccf_2.tar.bz2",
++        "md5": "d60d50f369d40f9787878cdd866fc9d3",
++        "sha256": "030c1ac19d91fd6206877eb3c6d2137cd267c1e60bd9a5a43d3e9c4007b0bd30"
++      }
++    ],
++    "copla-macsyfinder-1.0.5": [
++      {
++        "name": "_libgcc_mutex",
++        "version": "0.1",
++        "build": "conda_forge",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2",
++        "md5": "d7c89558ba9fa0495403155b64376d81",
++        "sha256": "fe51de6107f9edc7aa4f786a70f4a883943bc9d39b3bb7307c04c41410990726"
++      },
++      {
++        "name": "_openmp_mutex",
++        "version": "4.5",
++        "build": "1_gnu",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-1_gnu.tar.bz2",
++        "md5": "561e277319a41d4f24f5c05a9ef63c04",
++        "sha256": "81c74d38c80345e195106dc3a5b4063b61f2209402bf9f6c7e2abadef4f544a3"
++      },
++      {
++        "name": "blast",
++        "version": "2.9.0",
++        "build": "pl526he19e7b1_7",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/blast-2.9.0-pl526he19e7b1_7.tar.bz2",
++        "md5": "358993b69423823764e7e085d908bd81",
++        "sha256": "12a3814e6790783dbf3af4d274382446522709193ab389be56a32d3a0e5910f4"
++      },
++      {
++        "name": "bzip2",
++        "version": "1.0.8",
++        "build": "h7f98852_4",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-h7f98852_4.tar.bz2",
++        "md5": "a1fd65c7ccbf10880423d82bca54eb54",
++        "sha256": "cb521319804640ff2ad6a9f118d972ed76d86bea44e5626c09a13d38f562e1fa"
++      },
++      {
++        "name": "c-ares",
++        "version": "1.17.1",
++        "build": "h7f98852_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/c-ares-1.17.1-h7f98852_1.tar.bz2",
++        "md5": "ed1dc233ed5e3eaa9bfbaac64d130c5e",
++        "sha256": "7276c14d281c68721bce7ade01c7b810ef5898183ef44c9b76ec04c5c6d129ce"
++      },
++      {
++        "name": "ca-certificates",
++        "version": "2020.12.5",
++        "build": "ha878542_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/ca-certificates-2020.12.5-ha878542_0.tar.bz2",
++        "md5": "7eb5d4ffeee663caa1635cd67071bc1b",
++        "sha256": "20a5490c4401334698aa6947fd3a257fe1bd2f941f149a07c7a1d01939430513"
++      },
++      {
++        "name": "certifi",
++        "version": "2019.11.28",
++        "build": "py27h8c360ce_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/certifi-2019.11.28-py27h8c360ce_1.tar.bz2",
++        "md5": "a345324a2547908c1f9ca4b65d93f5ba",
++        "sha256": "df6ab33f2d723b23de6cbb7571962f2fc6fee2d5ea24c1571ed771bc25832258"
++      },
++      {
++        "name": "curl",
++        "version": "7.76.0",
++        "build": "h979ede3_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/curl-7.76.0-h979ede3_0.tar.bz2",
++        "md5": "c1b5e7869f2878fdd66118345a2e49f2",
++        "sha256": "8352e32b70381dab7e4b6cec84b2fa68e7d5da68be01e860743a9db5df93877d"
++      },
++      {
++        "name": "entrez-direct",
++        "version": "13.9",
++        "build": "pl5262he881be0_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/entrez-direct-13.9-pl5262he881be0_2.tar.bz2",
++        "md5": "5ece76e55eca04580baad3bec606807f",
++        "sha256": "7f4bf4e02f08b111a82c44a86346b8066d476afd4d96ea56a174f216809692db"
++      },
++      {
++        "name": "expat",
++        "version": "2.3.0",
++        "build": "h9c3ff4c_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/expat-2.3.0-h9c3ff4c_0.tar.bz2",
++        "md5": "1fb8f0254eb78a2a0c120155e1b1a207",
++        "sha256": "b5b9463522878762902718ce556c1aec1372d5ee6c58bf843c3aecc0a4e0f4b3"
++      },
++      {
++        "name": "hmmer",
++        "version": "3.3.2",
++        "build": "h1b792b2_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/hmmer-3.3.2-h1b792b2_1.tar.bz2",
++        "md5": "da989ed798d5e4c2bdff92c40f4cf169",
++        "sha256": "f0933911eb0ae8753c0a016e2aa7e680759d3948a7677be482f0776562a581d3"
++      },
++      {
++        "name": "krb5",
++        "version": "1.17.2",
++        "build": "h926e7f8_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/krb5-1.17.2-h926e7f8_0.tar.bz2",
++        "md5": "926325c11478d6e781e76072c117763b",
++        "sha256": "abc0215ea012b0e55d5fac452901fec4073e067452620cba8d8c684330b4eaee"
++      },
++      {
++        "name": "ld_impl_linux-64",
++        "version": "2.35.1",
++        "build": "hea4e1c9_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.35.1-hea4e1c9_2.tar.bz2",
++        "md5": "83610dba766a186bdc7a116053b782a4",
++        "sha256": "fb6cc9b601980cbb20890f0c912f2b46ca46d6f9e4b88a684446b5e1d472fd5c"
++      },
++      {
++        "name": "libcurl",
++        "version": "7.76.0",
++        "build": "hc4aaa36_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libcurl-7.76.0-hc4aaa36_0.tar.bz2",
++        "md5": "ef274544b3de8d0f474fe113b568c7fb",
++        "sha256": "5bec4de5378949442d5827ed83b329f559bd05997b3a39afd88d046796aa7d2e"
++      },
++      {
++        "name": "libedit",
++        "version": "3.1.20191231",
++        "build": "he28a2e2_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libedit-3.1.20191231-he28a2e2_2.tar.bz2",
++        "md5": "4d331e44109e3f0e19b4cb8f9b82f3e1",
++        "sha256": "a57d37c236d8f7c886e01656f4949d9dcca131d2a0728609c6f7fa338b65f1cf"
++      },
++      {
++        "name": "libev",
++        "version": "4.33",
++        "build": "h516909a_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libev-4.33-h516909a_1.tar.bz2",
++        "md5": "6f8720dff19e17ce5d48cfe7f3d2f0a3",
++        "sha256": "8c9635aa0ea28922877dc96358f9547f6a55fc7e2eb75a556b05f1725496baf9"
++      },
++      {
++        "name": "libffi",
++        "version": "3.2.1",
++        "build": "he1b5a44_1007",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libffi-3.2.1-he1b5a44_1007.tar.bz2",
++        "md5": "11389072d7d6036fd811c3d9460475cd",
++        "sha256": "992246df63724484e9ee8652ce3ca0237f707961beab8b813096bbc647cf84f4"
++      },
++      {
++        "name": "libgcc-ng",
++        "version": "9.3.0",
++        "build": "h2828fa1_19",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-9.3.0-h2828fa1_19.tar.bz2",
++        "md5": "9d5cdfc51476ee4dcdd96ed2dca3f943",
++        "sha256": "a386710b3388430411d4f242c5bd612cf4595eba053f165c09ae07d453e77c27"
++      },
++      {
++        "name": "libgomp",
++        "version": "9.3.0",
++        "build": "h2828fa1_19",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libgomp-9.3.0-h2828fa1_19.tar.bz2",
++        "md5": "ab0a307912033126da02507b59e79ec9",
++        "sha256": "4ff3e69e3cc148c7f00091ea139134f0fc0c7d6ff7866528747d958f083671bd"
++      },
++      {
++        "name": "libnghttp2",
++        "version": "1.43.0",
++        "build": "h812cca2_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libnghttp2-1.43.0-h812cca2_0.tar.bz2",
++        "md5": "1867d1e9658596b3fac8847a7702eef4",
++        "sha256": "c371a45a73a7bf923938c3e9d471b6b8b53d1dc4a4bdf9487f9e0aafb5610afe"
++      },
++      {
++        "name": "libssh2",
++        "version": "1.9.0",
++        "build": "ha56f1ee_6",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libssh2-1.9.0-ha56f1ee_6.tar.bz2",
++        "md5": "f0dfb86444df325e599dbc3f4c0a3f5b",
++        "sha256": "f9521197df9643b82dcc40150779c48492b8656a09df514fccf7a37ae3687f40"
++      },
++      {
++        "name": "libstdcxx-ng",
++        "version": "9.3.0",
++        "build": "h6de172a_19",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-9.3.0-h6de172a_19.tar.bz2",
++        "md5": "cd9a24a8dde03ec0cf0e603b0bea85a1",
++        "sha256": "da1b43b1aa8f56da7ad6054ccf71c8ab19f050742651e163f9f7dd8e6ed55260"
++      },
++      {
++        "name": "ncurses",
++        "version": "6.2",
++        "build": "h58526e2_4",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.2-h58526e2_4.tar.bz2",
++        "md5": "509f2a21c4a09214cd737a480dfd80c9",
++        "sha256": "e88a81d9e27eabe306ab9cfbf708b9895a0df46445c1ae67b0f845b9ec599664"
++      },
++      {
++        "name": "openssl",
++        "version": "1.1.1k",
++        "build": "h7f98852_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/openssl-1.1.1k-h7f98852_0.tar.bz2",
++        "md5": "07fae2cb088379c8441e0f3ffa1f4025",
++        "sha256": "fab459def10172482eab3062e645928552bb3ea01329db577de12581775e98a8"
++      },
++      {
++        "name": "pcre",
++        "version": "8.44",
++        "build": "he1b5a44_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/pcre-8.44-he1b5a44_0.tar.bz2",
++        "md5": "e647d89cd5cdf62760cf283a001841ff",
++        "sha256": "7c6424ed08b62f5c7ae3617be720c72578fc75542a68a689663f4ed39f54cc1d"
++      },
++      {
++        "name": "perl",
++        "version": "5.26.2",
++        "build": "h36c2ea0_1008",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/perl-5.26.2-h36c2ea0_1008.tar.bz2",
++        "md5": "880aa2aacfafa2bc69f7d42168fcee7d",
++        "sha256": "b15cda798804fa388be0a7397fd75a2396c95affeabb8e17aa335c88912b9a55"
++      },
++      {
++        "name": "perl-app-cpanminus",
++        "version": "1.7044",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-app-cpanminus-1.7044-pl526_1.tar.bz2",
++        "md5": "dcd34d99b75ca3feb8af1623a3859b20",
++        "sha256": "ea4eced88f158a138f1c68fa14479e780b2efb2544a09736496a9fd8a35b90d9"
++      },
++      {
++        "name": "perl-archive-tar",
++        "version": "2.32",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-archive-tar-2.32-pl526_0.tar.bz2",
++        "md5": "961b7fd4f58d59d7d4f9f3e48f679477",
++        "sha256": "2506dad246f306e5262ccdae2c0e779f0c6425b90189d5d5afc9a6671fc1b350"
++      },
++      {
++        "name": "perl-base",
++        "version": "2.23",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-base-2.23-pl526_1.tar.bz2",
++        "md5": "03db12873cdeb00d4e8d02bcbf583a04",
++        "sha256": "357499f4a6c3713f8db3e046b7973db97c824dae9ce4c1af33ee4146ec1e6a94"
++      },
++      {
++        "name": "perl-business-isbn",
++        "version": "3.004",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-business-isbn-3.004-pl526_0.tar.bz2",
++        "md5": "982a9766a06c69ce335cbd8567e98e7a",
++        "sha256": "a57fb4d8306c7586e56f2a0a58bde646f090d6dc262c826ae6520472f3e55456"
++      },
++      {
++        "name": "perl-business-isbn-data",
++        "version": "20140910.003",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-business-isbn-data-20140910.003-pl526_0.tar.bz2",
++        "md5": "a3388b8a93d46fd71c88675528c11570",
++        "sha256": "e097f17087eb800707677ce22cf46f4d5493eba36ac1400fcf3e3a607e249388"
++      },
++      {
++        "name": "perl-carp",
++        "version": "1.38",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-carp-1.38-pl526_3.tar.bz2",
++        "md5": "984c76663b1bd6e880683ce6fa58da4c",
++        "sha256": "72c31ae5a335f764385fdd1a4c6bf8e6abfcfbc31604a60b64539fbbee4a6a28"
++      },
++      {
++        "name": "perl-common-sense",
++        "version": "3.74",
++        "build": "pl526_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-common-sense-3.74-pl526_2.tar.bz2",
++        "md5": "66f1c27dc24f6fc5d76d25cd9771f043",
++        "sha256": "afec70a4e48d8a6ebda4958917183f1a913dfb41aca84d8bc022d2be58a5eb24"
++      },
++      {
++        "name": "perl-compress-raw-bzip2",
++        "version": "2.087",
++        "build": "pl526he1b5a44_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-compress-raw-bzip2-2.087-pl526he1b5a44_0.tar.bz2",
++        "md5": "452ca14d71cd5973a6db6998b50f30e3",
++        "sha256": "637ebbf40bf60183a7beadf4207e6fdf0fbab797fcdc0b2275b504084ae20f8a"
++      },
++      {
++        "name": "perl-compress-raw-zlib",
++        "version": "2.087",
++        "build": "pl526hc9558a2_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-compress-raw-zlib-2.087-pl526hc9558a2_0.tar.bz2",
++        "md5": "6a7842c318054b9110268696ce2fe7be",
++        "sha256": "87bf47b84e245aaf61a6182a862ea6123420a7c500763b6a4ed7fe6ad28e386d"
++      },
++      {
++        "name": "perl-constant",
++        "version": "1.33",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-constant-1.33-pl526_1.tar.bz2",
++        "md5": "5037eea2bb962fab567d2d5ea43bc81a",
++        "sha256": "f59d4584fc96a3f356728b6dbdcdcae359a4698be233357c72f145bd4c8ace09"
++      },
++      {
++        "name": "perl-data-dumper",
++        "version": "2.173",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-data-dumper-2.173-pl526_0.tar.bz2",
++        "md5": "8057e13103637c6e8700c652d1b83682",
++        "sha256": "00b274985ca22b5870d7ea2f172d0e1e943c89fa2a55c40a02f821450aaf7193"
++      },
++      {
++        "name": "perl-digest-hmac",
++        "version": "1.03",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-digest-hmac-1.03-pl526_3.tar.bz2",
++        "md5": "8034b317d96bf32090e66ab8c6db9671",
++        "sha256": "625d26bfe0721d85dc4a94bf0204790af64f64d37ffa9b0748dc1cc0bd077e8f"
++      },
++      {
++        "name": "perl-digest-md5",
++        "version": "2.55",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-digest-md5-2.55-pl526_0.tar.bz2",
++        "md5": "c10e244cdea0a2556c4a72111fa6ed38",
++        "sha256": "033af6555a7098426291771eb8fe1b3af6123a0035b8b17264e2881ec58e55e3"
++      },
++      {
++        "name": "perl-encode",
++        "version": "2.88",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-encode-2.88-pl526_1.tar.bz2",
++        "md5": "0db0d9088045596254fb8a88a9a37294",
++        "sha256": "7b56e52d3c71a30f5130f9e75ecf525b143e5bf2b4f033b7c477e37494a820c5"
++      },
++      {
++        "name": "perl-encode-locale",
++        "version": "1.05",
++        "build": "pl526_6",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-encode-locale-1.05-pl526_6.tar.bz2",
++        "md5": "8b76e07f2ee0eb2a4429e517f1ae0bbd",
++        "sha256": "5494cbebd17821fbe8af400d00697e0b9bcb9e85acd866b836e2edfb40d4d004"
++      },
++      {
++        "name": "perl-exporter",
++        "version": "5.72",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-exporter-5.72-pl526_1.tar.bz2",
++        "md5": "5ecf4d143181f4a4d71349811ea29177",
++        "sha256": "1170f5360c09eb802732313bbd7f5a1470c3b59987d373c3ae94ab09ef5ce2d1"
++      },
++      {
++        "name": "perl-exporter-tiny",
++        "version": "1.002001",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-exporter-tiny-1.002001-pl526_0.tar.bz2",
++        "md5": "b84ce6dbb823c77ddba901d1083c2e84",
++        "sha256": "d9603728d081a2b3a7c0009066bf72afab2dce7ae1b2c37c842f9f7f1accf354"
++      },
++      {
++        "name": "perl-extutils-makemaker",
++        "version": "7.36",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-extutils-makemaker-7.36-pl526_1.tar.bz2",
++        "md5": "32d1b791177a614aeae12e67bca620b0",
++        "sha256": "2fe1ece13d215785a74c8115d15e46f950002adf454eb87a0b01904e5336624d"
++      },
++      {
++        "name": "perl-file-listing",
++        "version": "6.04",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-file-listing-6.04-pl526_1.tar.bz2",
++        "md5": "2a2f44c2b29a326f46abb72aea331845",
++        "sha256": "cace74e1f6e1aebc92c441b500a7fc98e378cd3c4bdbbe85490ed48cd8a71e4e"
++      },
++      {
++        "name": "perl-file-path",
++        "version": "2.16",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-file-path-2.16-pl526_0.tar.bz2",
++        "md5": "c58f86c77e01c9c62415ba917f7b651e",
++        "sha256": "bd8eddada117a9bdd773fee06a26892686a225e1d515fab46918d205ac048607"
++      },
++      {
++        "name": "perl-file-temp",
++        "version": "0.2304",
++        "build": "pl526_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-file-temp-0.2304-pl526_2.tar.bz2",
++        "md5": "1e7930ea1b3a6d93a55c6b316a60a891",
++        "sha256": "1ddd2bd4842c36ee4f2a5b78d8a371f6b84cacb9e1083f6621699f82993e816b"
++      },
++      {
++        "name": "perl-html-parser",
++        "version": "3.72",
++        "build": "pl526h6bb024c_5",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-html-parser-3.72-pl526h6bb024c_5.tar.bz2",
++        "md5": "9874aecaa5a6f19c55f32baa5cc7302e",
++        "sha256": "9bf25c8e0b4b20f902cd20c964c965d613d1c9945d2921d4566bb3a0e3dee2d5"
++      },
++      {
++        "name": "perl-html-tagset",
++        "version": "3.20",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-html-tagset-3.20-pl526_3.tar.bz2",
++        "md5": "169010ee892bae283dc8ae4c37ad268b",
++        "sha256": "614b5c19533945cd879680ea7a1019ef6ff994f745c9a67226b3609355aa26cb"
++      },
++      {
++        "name": "perl-html-tree",
++        "version": "5.07",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-html-tree-5.07-pl526_1.tar.bz2",
++        "md5": "ea8d27cb7cfc1a14cc6d168e2f394dec",
++        "sha256": "30e1c0169eb5f79af410f37580be4872e721712a74e3c2762d55ddfd2fdc8ac4"
++      },
++      {
++        "name": "perl-http-cookies",
++        "version": "6.04",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-http-cookies-6.04-pl526_0.tar.bz2",
++        "md5": "24c2429d0ac0467c11a34cae14f366ce",
++        "sha256": "3ad107da6184a8606f9016e7c6bf7d27c1570eab12c8fefc731b9d33b9adb40c"
++      },
++      {
++        "name": "perl-http-daemon",
++        "version": "6.01",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-http-daemon-6.01-pl526_1.tar.bz2",
++        "md5": "b6540672ea97f10b1088ece63b799177",
++        "sha256": "a46abd49eeefb08c8578fb2bd16e83f721b422e16637cd963eecf0b66791ba26"
++      },
++      {
++        "name": "perl-http-date",
++        "version": "6.02",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-http-date-6.02-pl526_3.tar.bz2",
++        "md5": "b1cc187d512357b0a68dc29a100ae1df",
++        "sha256": "961f5e169eb91bb816e8b6489db9c43cc336e37a2ef05a85f42e7b2df775e107"
++      },
++      {
++        "name": "perl-http-message",
++        "version": "6.18",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-http-message-6.18-pl526_0.tar.bz2",
++        "md5": "96eb00c7acca58e160fb34a41ea546c5",
++        "sha256": "f855a671d68016344ef7656b98f18240f0bfe2916317d4645bca312fc9d9572d"
++      },
++      {
++        "name": "perl-http-negotiate",
++        "version": "6.01",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-http-negotiate-6.01-pl526_3.tar.bz2",
++        "md5": "3be31b3d87352fdd54246212bae3ede9",
++        "sha256": "00385dff3f0cb72739c83223103a81736301e95acdc1be3523722c8cd2727297"
++      },
++      {
++        "name": "perl-io-compress",
++        "version": "2.087",
++        "build": "pl526he1b5a44_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-io-compress-2.087-pl526he1b5a44_0.tar.bz2",
++        "md5": "67679464cddb80ccc4692c6d76a439d5",
++        "sha256": "123b355e2ac2a1ad834fc30842bd71a87f430f525bce4874fd4de48345d7e42a"
++      },
++      {
++        "name": "perl-io-html",
++        "version": "1.001",
++        "build": "pl526_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-io-html-1.001-pl526_2.tar.bz2",
++        "md5": "64455bdee28a81f80825a314a4044061",
++        "sha256": "94af7ef1b3d574c1c4e37186247c789b0840357ec49237de01a736f82e12a426"
++      },
++      {
++        "name": "perl-io-socket-ssl",
++        "version": "2.066",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-io-socket-ssl-2.066-pl526_0.tar.bz2",
++        "md5": "16748c0ece26b643c259805c188b4114",
++        "sha256": "e972ed068f3dc617886fb4accb8d86c097312403a4f3042844bc3a68a78ffb6f"
++      },
++      {
++        "name": "perl-io-zlib",
++        "version": "1.10",
++        "build": "pl526_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-io-zlib-1.10-pl526_2.tar.bz2",
++        "md5": "14acb0318f4ad06603b5d38706ae043a",
++        "sha256": "13bb0943904eb07d1da9c418bd682967fe9ccdbbe7d01d5a2adf7b2f0938f5b7"
++      },
++      {
++        "name": "perl-json",
++        "version": "4.02",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-json-4.02-pl526_0.tar.bz2",
++        "md5": "14082a3e2b78deb9aa3ca880ab9eb854",
++        "sha256": "fb32334567e4b0cced5f3d45bf42847390c2e17da5ffb655cd411ad05b370199"
++      },
++      {
++        "name": "perl-json-xs",
++        "version": "2.34",
++        "build": "pl526h6bb024c_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-json-xs-2.34-pl526h6bb024c_3.tar.bz2",
++        "md5": "3a5b157d275eae1d3ba16de1ccae8241",
++        "sha256": "b5d913b71b54b2d9278e06e324d638195343fbee9c7ea41322039badf6365737"
++      },
++      {
++        "name": "perl-libwww-perl",
++        "version": "6.39",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/noarch/perl-libwww-perl-6.39-pl526_0.tar.bz2",
++        "md5": "54f96d7a0ea63cc4505f8cc653c831ee",
++        "sha256": "62c18d828acaf401ce7e15373a2714706b11a68ca51b7b74efd3ee72c685d5f9"
++      },
++      {
++        "name": "perl-list-moreutils",
++        "version": "0.428",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-list-moreutils-0.428-pl526_1.tar.bz2",
++        "md5": "699e3399479d2b1aa1f675b476406e0d",
++        "sha256": "d5aed70001220d91a32df7c89ea255cf18c1f822b7541671315b753ccd408f98"
++      },
++      {
++        "name": "perl-list-moreutils-xs",
++        "version": "0.428",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-list-moreutils-xs-0.428-pl526_0.tar.bz2",
++        "md5": "65212b0ac443324d61e649d1752947c7",
++        "sha256": "82c2a8d8e9f83877845ef2af4dc6bc7fd5a881dbb4d547e553aa16b9b528e749"
++      },
++      {
++        "name": "perl-lwp-mediatypes",
++        "version": "6.04",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-lwp-mediatypes-6.04-pl526_0.tar.bz2",
++        "md5": "39688aa6f280b77af17f539350fe1744",
++        "sha256": "9385d424f0c9ed2d1d39922d555de6ef03b5d25c55a8e859f710e14fac3a7611"
++      },
++      {
++        "name": "perl-lwp-protocol-https",
++        "version": "6.07",
++        "build": "pl526_4",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-lwp-protocol-https-6.07-pl526_4.tar.bz2",
++        "md5": "890387d167b855b7ba31853e8a470030",
++        "sha256": "f8c6655711907a9c4d8b40fb2c741b1a281c6dc703860978b8d8d983cd26e40e"
++      },
++      {
++        "name": "perl-mime-base64",
++        "version": "3.15",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-mime-base64-3.15-pl526_1.tar.bz2",
++        "md5": "6ebc750ac3e57ca1f02d3f580ff281b3",
++        "sha256": "525c789bf3bc0865cc97579b0149a203c74643eea8b3c777127eaeb787d88654"
++      },
++      {
++        "name": "perl-mozilla-ca",
++        "version": "20180117",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-mozilla-ca-20180117-pl526_1.tar.bz2",
++        "md5": "33c797816376ee2a58fd4187848ced82",
++        "sha256": "cfd43b974bca1584ac849639876312d9726a0a2c44f98518d6f0b240b8be5942"
++      },
++      {
++        "name": "perl-net-http",
++        "version": "6.19",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/noarch/perl-net-http-6.19-pl526_0.tar.bz2",
++        "md5": "160f8e846ea37406d973acbf83b5a26b",
++        "sha256": "cdc812619d775be965a3566f6f6d14abfc3f96216d6ab7b84851479ea768205a"
++      },
++      {
++        "name": "perl-net-ssleay",
++        "version": "1.88",
++        "build": "pl526h90d6eec_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-net-ssleay-1.88-pl526h90d6eec_0.tar.bz2",
++        "md5": "8b541f03a7629fd90f71a797599b6c51",
++        "sha256": "bd3b112d8b60daaa40b00992acffb31480702f35d99cfa53a8fdb9e8f217355e"
++      },
++      {
++        "name": "perl-ntlm",
++        "version": "1.09",
++        "build": "pl526_4",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-ntlm-1.09-pl526_4.tar.bz2",
++        "md5": "7863718bc88444211e686dc91dbf4292",
++        "sha256": "34acb2fe7c17d7e65b5afca0fe047e9e61c99a512f5f2e9a71b42c33b9a841f8"
++      },
++      {
++        "name": "perl-parent",
++        "version": "0.236",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-parent-0.236-pl526_1.tar.bz2",
++        "md5": "389bb45e15d386db8e32613a2eb2e949",
++        "sha256": "1aa3fa3a94ce012f12d531bf40f80573e191e766b670f5b91cc7cdc5c54b7c26"
++      },
++      {
++        "name": "perl-pathtools",
++        "version": "3.75",
++        "build": "pl526h14c3975_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-pathtools-3.75-pl526h14c3975_1.tar.bz2",
++        "md5": "4ac5eb7fe5450b7a28c9dc5423c7c293",
++        "sha256": "2bc811011a444c5fe9f66141bb73911dfb47ca5e9746589cc3076996d9685c78"
++      },
++      {
++        "name": "perl-scalar-list-utils",
++        "version": "1.52",
++        "build": "pl526h516909a_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-scalar-list-utils-1.52-pl526h516909a_0.tar.bz2",
++        "md5": "8c78fca5814513924f9637a9211c0c77",
++        "sha256": "72f9276f2f6749385e006bfdfd401a0a9dcd85af85c38739c5725c70ed8bdedd"
++      },
++      {
++        "name": "perl-socket",
++        "version": "2.027",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-socket-2.027-pl526_1.tar.bz2",
++        "md5": "bbce777723970c529b99e0beaa09ec1c",
++        "sha256": "21e09aeb71ca7519d19429b5c95f3e52af309823c10991dc99607b2d4ebde61a"
++      },
++      {
++        "name": "perl-storable",
++        "version": "3.15",
++        "build": "pl526h14c3975_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-storable-3.15-pl526h14c3975_0.tar.bz2",
++        "md5": "ad27b25076f3d76c10085d900bdf3a48",
++        "sha256": "ab77cbce0a3a9c846c92e4b24530c77a2b6a674ec4e4054e2103bd342f93d2f8"
++      },
++      {
++        "name": "perl-test-requiresinternet",
++        "version": "0.05",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-test-requiresinternet-0.05-pl526_0.tar.bz2",
++        "md5": "47a9cfbedd72952aa493625692404a4e",
++        "sha256": "1a9503152aebcc18a148eb1bc81410cd6ab7ffc55276367ad80260198b99fb5e"
++      },
++      {
++        "name": "perl-time-local",
++        "version": "1.28",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-time-local-1.28-pl526_1.tar.bz2",
++        "md5": "d24b02d0c1a45310c46fb48c691f51ce",
++        "sha256": "397c18b5c2f1e2623c5903bb116db06ef64bb3fe0ba36250f6443a6585c8f5c3"
++      },
++      {
++        "name": "perl-try-tiny",
++        "version": "0.30",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-try-tiny-0.30-pl526_1.tar.bz2",
++        "md5": "cf04b17e5804be0615363036e37b9ca7",
++        "sha256": "562b49ae4ee457fd59094778b9b72215e555834b17c4c041314cea421b0afafe"
++      },
++      {
++        "name": "perl-types-serialiser",
++        "version": "1.0",
++        "build": "pl526_2",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-types-serialiser-1.0-pl526_2.tar.bz2",
++        "md5": "77250c3feefab1e4a8f0fd482af07048",
++        "sha256": "175d1e0e283a20dc7509e4bd1df526aef27d6c04e66f9ab805fb77a9ba40f523"
++      },
++      {
++        "name": "perl-uri",
++        "version": "1.76",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-uri-1.76-pl526_0.tar.bz2",
++        "md5": "30afcde2552ea47cdb5420e5319f66ad",
++        "sha256": "4f56fa57abfcbdf31a223d2a644370c8fd26eaf38a157991ef7bdcc49bee72ef"
++      },
++      {
++        "name": "perl-www-robotrules",
++        "version": "6.02",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-www-robotrules-6.02-pl526_3.tar.bz2",
++        "md5": "8b06331804b3b94eb99b3c1c4b7a4d72",
++        "sha256": "3031682ff5efead2aeee3c030bb7823ade294aade85614eb9293b4c2948d1c8b"
++      },
++      {
++        "name": "perl-xml-namespacesupport",
++        "version": "1.12",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-xml-namespacesupport-1.12-pl526_0.tar.bz2",
++        "md5": "14a68d6d3f08c2d64284919697a2a7ae",
++        "sha256": "a67049f659d712a171dcd19926c334b0cdad5bbf93e271479dcc787af4c17e96"
++      },
++      {
++        "name": "perl-xml-parser",
++        "version": "2.44_01",
++        "build": "pl526ha1d75be_1002",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/perl-xml-parser-2.44_01-pl526ha1d75be_1002.tar.bz2",
++        "md5": "820106e548cef13737a8f434a2e26224",
++        "sha256": "104ea8db108549d0c743fa03229c1636bf243585ab24044268229703edd0bf52"
++      },
++      {
++        "name": "perl-xml-sax",
++        "version": "1.02",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/noarch/perl-xml-sax-1.02-pl526_0.tar.bz2",
++        "md5": "b4fda7e83376806d5eedbef2c3a3b356",
++        "sha256": "0909e4d3989a1595a65c4d000cc121bd2eeb568eb0ec809404566ab5037bdeaf"
++      },
++      {
++        "name": "perl-xml-sax-base",
++        "version": "1.09",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-xml-sax-base-1.09-pl526_0.tar.bz2",
++        "md5": "1a66227c893c9aa02e442019f8052374",
++        "sha256": "2ef3f05c69f23309b2443545007009b03079d93e9ba7b03bbf2441de9709f47e"
++      },
++      {
++        "name": "perl-xml-sax-expat",
++        "version": "0.51",
++        "build": "pl526_3",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-xml-sax-expat-0.51-pl526_3.tar.bz2",
++        "md5": "dd0420867f8efc417116567491cccffa",
++        "sha256": "4b70b56129ea4e7cabdcb93ac0d937a0e2f9fd659eee0aa97b6e09b040fba2d7"
++      },
++      {
++        "name": "perl-xml-simple",
++        "version": "2.25",
++        "build": "pl526_1",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-xml-simple-2.25-pl526_1.tar.bz2",
++        "md5": "f410354a825d186da9f843f6ff9cd15e",
++        "sha256": "801e2aa8e9d70203e9765c62fbcb14905ffe9e1944f131fde659c68ab2a5e866"
++      },
++      {
++        "name": "perl-xsloader",
++        "version": "0.24",
++        "build": "pl526_0",
++        "url": "https://conda.anaconda.org/bioconda/linux-64/perl-xsloader-0.24-pl526_0.tar.bz2",
++        "md5": "878d48f2a6bdff58c7b9589e3b25ff6b",
++        "sha256": "9951be44863dc6e992f254cc5bb61fce62adc7db0346d2deab51004eee0b2983"
++      },
++      {
++        "name": "pip",
++        "version": "20.1.1",
++        "build": "pyh9f0ad1d_0",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/pip-20.1.1-pyh9f0ad1d_0.tar.bz2",
++        "md5": "cd67a20c73ff2514cf5f34cae28fc867",
++        "sha256": "d36d4300f320f6f8352548dbd8750dbf9679fe4e439b23bab9e2797663491275"
++      },
++      {
++        "name": "python",
++        "version": "2.7.15",
++        "build": "h5a48372_1011_cpython",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/python-2.7.15-h5a48372_1011_cpython.tar.bz2",
++        "md5": "d1824ac0987155f58a03b7ffda01db38",
++        "sha256": "1aab076b979046983a74d10b890dc4534eaedcc08a6e2f4e7fb16cc4a05e02e0"
++      },
++      {
++        "name": "python_abi",
++        "version": "2.7",
++        "build": "1_cp27mu",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/python_abi-2.7-1_cp27mu.tar.bz2",
++        "md5": "02d6ad6bce3a798e6ee85494cd9b3d8d",
++        "sha256": "c42da0c09f4afe9f781e68b3af499a52a71d0f1c7dabb79d461d8c01564f77d3"
++      },
++      {
++        "name": "readline",
++        "version": "8.0",
++        "build": "he28a2e2_2",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/readline-8.0-he28a2e2_2.tar.bz2",
++        "md5": "4d0ae8d473f863696088f76800ef9d38",
++        "sha256": "022752e1e49ea963c038195f82550a0ee6793f24f24c229e4a6ad8f05559410a"
++      },
++      {
++        "name": "setuptools",
++        "version": "44.0.0",
++        "build": "py27_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/setuptools-44.0.0-py27_0.tar.bz2",
++        "md5": "a1dcb0ca393c777d0611faf5b86602be",
++        "sha256": "3383e099e1266bc539c89b5ba07c0bef838d5e9d7c29f8b82dd39aaa556a9b49"
++      },
++      {
++        "name": "sqlite",
++        "version": "3.35.4",
++        "build": "h74cdb3f_0",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/sqlite-3.35.4-h74cdb3f_0.tar.bz2",
++        "md5": "bc1c6047464060ba82a71448292be9c3",
++        "sha256": "6d64307e98431d928ff5d37857cfb0a2b0f4f17d7f908df3a0e781258396ac52"
++      },
++      {
++        "name": "tk",
++        "version": "8.6.10",
++        "build": "h21135ba_1",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.10-h21135ba_1.tar.bz2",
++        "md5": "c647f70aa7e3d4cc4e029cc1c9a99953",
++        "sha256": "e5c853d8583a947a1bfc108bf353dbe20ac7bc499ef78ecc77c4efc828b137a0"
++      },
++      {
++        "name": "wheel",
++        "version": "0.36.2",
++        "build": "pyhd3deb0d_0",
++        "url": "https://conda.anaconda.org/conda-forge/noarch/wheel-0.36.2-pyhd3deb0d_0.tar.bz2",
++        "md5": "768bfbe026426d0e76b377997d1f2b98",
++        "sha256": "cfb66749cf71fc68bcf429edbaeb4f1e1ebe69b23285fabd1d455e093667b7ed"
++      },
++      {
++        "name": "zlib",
++        "version": "1.2.11",
++        "build": "h516909a_1010",
++        "url": "https://conda.anaconda.org/conda-forge/linux-64/zlib-1.2.11-h516909a_1010.tar.bz2",
++        "md5": "339cc5584e6d26bc73a875ba900028c3",
++        "sha256": "6c9a12053937ba2abfec94ee2c9e71a7a8cbca0e4093a1aea34afa9282110a94"
++      }
++    ]
++  },
++  "ANI": {
++    "repository": "https://github.com/lmrodriguezr/enveomics",
++    "commit": "fcf1517fbe0a9a2b499a6e4dadebc1c26758ea9c",
++    "path": "Scripts/ani.rb",
++    "sha256": "0151a14698c02b6ec7adfe3400e6693066cb0ab300077a4274a39d41a7878cb1",
++    "scope": "Last file commit before the README download date2017-03-16; native reference-pair result exactly matches official example"
++  },
++  "MacSyFinder": {
++    "version": "1.0.5",
++    "archive_sha256": "99b604eca0a455ddafc4f01e4f180a146734a409cce27cdbccf3518c8030b203",
++    "MacSyView_version": "1.0.1",
++    "MacSyView_archive_sha256": "54c760726f38d219ab7adbb9de5564c73c92cca54e8e2526591cbec72468cc73",
++    "upstream_tests": "103 unit +1 functional; external dependency self-checks, not pipeline case count"
++  },
++  "legacy_ABI": {
++    "library": "libcrypt.so.1",
++    "package": "Debian libcrypt1 1:4.4.38-1",
++    "sha256": "436788729ab71d794a66954d62e930c723e624587f39beb2f4f86ff1000b1d29",
++    "source_local_image_id": "03ca182dfec80dc6e587c76143e04984df85c7b33b23f73c08a55cc40c939462",
++    "scope": "Private prepared-installation lib directory; original188/98 package files untouched",
++    "deb_url": "https://deb.debian.org/debian/pool/main/libx/libxcrypt/libcrypt1_4.4.38-1_amd64.deb",
++    "deb_sha256": "0ebc144d662e3197982d1bf3a7b8b35ca845e54c68811de0328b1f0d7c67585c"
++  },
++  "limitations": [
++    "Source/resource/runtime lock only; full node/framework evidence in separate receipts",
++    "One FASTA record per candidate; unknown topology is linear, no reconstructed multicontig grouping is invented",
++    "No model/ANI window/identity/coverage/MCMC threshold change; no population sensitivity/specificity certification"
++  ]
++}
+--- /dev/null
++++ b/tests/nextflow/copla_downstream.nf
+@@ -0,0 +1,8 @@
++nextflow.enable.dsl=2
++include { PLASMID_DOWNSTREAM } from '../../subworkflows/plasmid_downstream'
++
++workflow {
++    candidates=Channel.fromList(params.records).map { r -> tuple([id:r.id],file(r.fasta,checkIfExists:true)) }
++    PLASMID_DOWNSTREAM(candidates,Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty())
++    PLASMID_DOWNSTREAM.out.report_events.toList().view { events -> 'COPLA_REPORT_EVENTS '+groovy.json.JsonOutput.toJson(events) }
++}
+--- /dev/null
++++ b/tests/nextflow/copla_native.nf
+@@ -0,0 +1,10 @@
++nextflow.enable.dsl=2
++include { COPLA } from '../../modules/typing/copla'
++
++workflow {
++    COPLA(Channel.of(tuple([id:params.sample_id], file(params.assembly,checkIfExists:true))),
++          Channel.value(file(params.refgraph,checkIfExists:true)),
++          Channel.value(file(params.reflist,checkIfExists:true)),
++          Channel.value(file(params.installation,checkIfExists:true)),
++          Channel.value(file(params.macsyfinder,checkIfExists:true)))
++}
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -29,6 +29,21 @@
+ plain/gzip 是同一生物样本的两种编码，不计两个科学重复。writer observer、
+ 微型 BLAST 边界与完整模型运行分别记录，均不替代分类准确率基准。
+ `tests/run_plasme_native.py` 另覆盖 Conda/容器后端及独立 BioPython 解析。
++
++## COPLA 完整参考节点
++
++`nodes-typing-copla.nf.test` 使用完整参考图、全部参考 FASTA 和官方真实质粒。
++设置绝对路径 `AUTOPLASM_COPLA_INSTALLATION`、`AUTOPLASM_COPLA_MACSYFINDER`、
++`AUTOPLASM_COPLA_GRAPH`、`AUTOPLASM_COPLA_REFLIST`、`AUTOPLASM_COPLA_DATA`；
++最后一个目录含完整官方 `NZ_CP028329.1` 序列的 `Lab26.fna` 和
++`Lab26.fna.gz`。将固定 COPLA Python3 环境加入 PATH，使用 `--profile native`。
++MacSyFinder 保留独立的 Python2 环境，不用 Python3 版本代替。
++
++断言核对官方示例的 PTU-Lab26、完整 DNA/长度、独立候选身份、全部参考的
++评估状态和原始产物。无法形成既定 1,000 bp 窗口的参考明确记作不可评估，
++外部程序失败不能记作无命中。`tests/run_copla_native.py` 另检查同一样本内的
++两条独立官方质粒。CLI observer 和原生 ANI/图函数边界分别记账，不计为
++全库分类或科学准确率通过；当前验收状态见 `docs/tool-audit/status.md`。
+ 
+ ## uv 隔离环境
+ 
+--- /dev/null
++++ b/tests/nf-test/nodes-typing-copla.nf.test
+@@ -0,0 +1,54 @@
++// Complete archived official RS84 reference graph/model and all9894 FASTAs.
++// One official known-PTU plasmid, not a sensitivity/specificity benchmark.
++nextflow_process {
++    name 'P3 real node: COPLA'
++    script '../../modules/typing/copla.nf'
++    process 'COPLA'
++    tag 'P3'
++    tag 'typing'
++    tag 'backend-native'
++
++    test('complete compressed official plasmid is PTU-Lab26') {
++        when {
++            process {
++                """
++                input[0] = [[id:'Lab26'], file("${System.getenv('AUTOPLASM_COPLA_DATA')}/Lab26.fna.gz",checkIfExists:true)]
++                input[1] = file("${System.getenv('AUTOPLASM_COPLA_GRAPH')}",checkIfExists:true)
++                input[2] = file("${System.getenv('AUTOPLASM_COPLA_REFLIST')}",checkIfExists:true)
++                input[3] = file("${System.getenv('AUTOPLASM_COPLA_INSTALLATION')}",checkIfExists:true)
++                input[4] = file("${System.getenv('AUTOPLASM_COPLA_MACSYFINDER')}",checkIfExists:true)
++                """
++            }
++        }
++        then {
++            assert process.success
++            assert process.out.typing.size()==1
++            assert process.out.raw.size()==1
++            assert process.out.typing[0][0].id=='Lab26'
++            def rows=path(process.out.typing[0][1]).text.readLines()
++            assert rows.size()==2
++            assert rows[0]=='contig_id\tlength\ttopology\tentity_scope\tpredicted_ptu\thost_range\tscore\tnotes'
++            def row=rows[1].split('\t',-1)
++            assert row[0]=='NZ_CP028329.1' && row[1]=='49442'
++            assert row[2]=='linear' && row[3]=='candidate_record' && row[4]=='PTU-Lab26'
++            assert Double.isFinite(Double.parseDouble(row[6]))
++            assert Double.parseDouble(row[6])>=0.9 && Double.parseDouble(row[6])<=1
++            def raw=path(process.out.raw[0][1])
++            def manifest=new groovy.json.JsonSlurper().parseText(path("${raw}/entities.json").text)
++            assert manifest.source_patch.applied
++            assert manifest.reference_count==9894
++            assert manifest.reference_graph_vertices==9894
++            assert manifest.runtime_versions.graph_tool.startsWith('2.35')
++            assert manifest.entities.size()==1
++            assert manifest.entities[0].id=='NZ_CP028329.1'
++            def key=manifest.entities[0].key
++            def query=path("${raw}/results/${key}/${key}.fna").text.readLines()
++            def original=new File(System.getenv('AUTOPLASM_COPLA_DATA'),'Lab26.fna').readLines()
++            assert query.findAll{!it.startsWith('>')}.join('')==original.findAll{!it.startsWith('>')}.join('')
++            def assessment=path("${raw}/results/${key}/${key}.fna.ani_evaluation.tsv").text.readLines()
++            assert assessment.size()==9895
++            assert assessment[0]=='reference\tstatus'
++            assert !path("${raw}/databases").exists()
++        }
++    }
++}
+--- /dev/null
++++ b/tests/run_copla_boundaries.py
+@@ -0,0 +1,106 @@
++#!/usr/bin/env python3
++"""Real pinned ANI/graph/HMMER boundaries; not a complete classification benchmark."""
++import argparse
++import ast
++import csv
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import pathlib
++import pickle
++import shutil
++import subprocess
++import sys
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def function(path,name,namespace):
++    tree=ast.parse(path.read_text())
++    node=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name==name)
++    exec(compile(ast.Module(body=[node],type_ignores=[]),str(path),'exec'),namespace)
++    return namespace[name]
++
++
++def main():
++    p=argparse.ArgumentParser(description=__doc__)
++    for n in ['work-dir','installation','macsyfinder']:
++        p.add_argument('--'+n,type=Path,required=True)
++    a=p.parse_args();base=a.work_dir.resolve();base.mkdir(parents=True,exist_ok=False)
++    install=a.installation.resolve();old=install/'bin/copla.py'
++    spec=importlib.util.spec_from_file_location('copla_adapter',ROOT/'bin/run_copla_candidates.py')
++    adapter=importlib.util.module_from_spec(spec);spec.loader.exec_module(adapter)
++    program=base/'fixed';program.mkdir()
++    patch=adapter.prepare_program(install,program,a.macsyfinder,2);assert patch['applied']
++    env={**os.environ,'LD_LIBRARY_PATH':str(install/'lib'),'COPLA_THREADS':'2'}
++    source=install/'test/NZ_CP028167.1.fna';reference=install/'databases/Copla_RS84/NZ_CP015977.1.fna'
++    runs=[]
++    def call(name,command,cwd,case_env=None):
++        d=base/name;d.mkdir(exist_ok=True)
++        r=subprocess.run(command,cwd=cwd,env=case_env or env,capture_output=True,text=True)
++        (d/'stdout.log').write_text(r.stdout);(d/'stderr.log').write_text(r.stderr)
++        return r
++    pair=[]
++    for name,ruby in [('original-pair',install/'bin/ani.rb'),('fixed-pair',program/'bin/ani.rb')]:
++        out=base/(name+'.tsv')
++        command=['ruby',str(ruby),'-1',str(source),'-2',str(reference),'-T',str(out),'-n','80','-w','1000','-s','200','-d','3','-t','1','-q']
++        result=call(name,command,base);assert result.returncode==0 and out.is_file(),result.stderr
++        pair.append(out.read_bytes());runs.append({'case':name,'command':command,'exit':result.returncode,'ANI_table':out.read_text()})
++    assert pair[0]==pair[1] and 99<float(pair[0].split(b'\t')[0])<=100
++    # Actual native ANI row, passed to actual functions and the complete graph.
++    import graph_tool.all as gt
++    with (install/'databases/Copla_RS84/RS84f_sHSBM.pickle').open('rb') as f:graph,state=pickle.load(f)
++    actual=base/'actual-ani.tsv';actual.write_text('query.fna\tNZ_CP015977.1.fna\t'+pair[0].decode())
++    original_graph=graph.copy();q=original_graph.add_vertex();original_graph.vp.AccessionVersion[q]='<Query>'
++    before=function(old,'insert_ani_edges',{'v_qry':q})
++    before(original_graph,str(actual))
++    neighbors=list(q.all_neighbors())
++    assert len(neighbors)==1 and original_graph.vp.AccessionVersion[neighbors[0]]=='NZ_CP015977.1'
++    runs.append({'case':'original-reference-parser','result':'already correct; inactive FastANI function was excluded from defect scope','native_ANI':str(actual)})
++    fixed_graph=graph.copy();q=fixed_graph.add_vertex();fixed_graph.vp.AccessionVersion[q]='<Query>'
++    after=function(program/'bin/copla.py','insert_ani_edges',{'v_qry':q,'pathlib':pathlib})
++    after(fixed_graph,str(actual));neighbors=list(q.all_neighbors())
++    assert len(neighbors)==1 and fixed_graph.vp.AccessionVersion[neighbors[0]]=='NZ_CP015977.1'
++    runs.append({'case':'fixed-reference-parser','edge_reference':'NZ_CP015977.1','native_ANI':str(actual)})
++    # Full archive includes29 references <=1000bp; fixed windows cannot assess them.
++    short=install/'databases/Copla_RS84/NZ_CP019137.1.fna'
++    short_out=base/'short.tsv'
++    r=call('fixed-short',['ruby',str(program/'bin/ani.rb'),'-1',str(source),'-2',str(short),'-T',str(short_out),'-n','1','-w','1000','-s','200','-d','3','-t','1','-q'],base)
++    assert r.returncode==0 and not short_out.exists()
++    assert Path(str(short_out)+'.not_evaluable').read_text()=='no_informative_fragments\tseq2'
++    runs.append({'case':'fixed-short-reference','exit':0,'status':'not_evaluable_no_fragments','scope':'fixed1000bp window, not an evaluated biological negative'})
++    # A direct missing reference already fails while Perl reads its length.
++    # Exercise the actual unchecked Ruby child instead, with valid real DNA
++    # and a PATH which lacks BLAST executables (no simulated command output).
++    isolated=base/'without-blast';isolated.mkdir()
++    (isolated/'ruby').symlink_to(shutil.which('ruby'))
++    perl=shutil.which('perl')
++    for name,root,expected in [('original-worker',install,0),('fixed-worker',program,1)]:
++        d=base/name;d.mkdir(exist_ok=True);query=d/'query.fna';shutil.copyfile(source,query)
++        command=[perl,str(root/'bin/get_ani_identity_job.pl'),str(query),'33305',str(reference)]
++        r=call(name,command,root,{**env,'PATH':str(isolated)})
++        assert (r.returncode==0)==(expected==0)
++        assert not (d/(reference.name+'.tsv')).exists()
++        runs.append({'case':name,'command':command,'exit':r.returncode,'real_missing_BLAST_executables':True})
++    # A missing real HMM database is an error, distinct from a legitimate no-hit.
++    os.environ['COPLA_THREADS']='2';os.environ['PATH']=env['PATH']
++    cwd=Path.cwd();os.chdir(base)
++    try:
++        globals_={'pathlib':pathlib,'subprocess':subprocess,'os':os}
++        before=function(old,'run_mobscan',dict(globals_));after=function(program/'bin/copla.py','run_mobscan',dict(globals_))
++        protein=install/'test/NZ_CP028167.1.faa'
++        assert before(str(protein),'old-mob')=='-'
++        try:after(str(protein),'new-mob')
++        except subprocess.CalledProcessError as error:assert error.returncode!=0
++        else:raise AssertionError('Missing HMM database became a negative result')
++    finally:os.chdir(cwd)
++    runs.extend([{'case':'original-MOB-missing-DB','result':'masked as negative'},
++                 {'case':'fixed-MOB-missing-DB','result':'CalledProcessError'}])
++    receipt={'pass':True,'runs':runs,'source_patch':patch,'source_adapter_sha256':adapter.sha(ROOT/'bin/run_copla_candidates.py'),
++             'scope':'Real pinned ANI pair equivalence and short eligibility; full actual graph function parser; actual missing-BLAST Perl child and missing-HMM controls. No full classification or accuracy claim.'}
++    (base/'run.json').write_text(json.dumps(receipt,indent=2)+'\n');print('PASS real ANI/graph/failure controls',len(runs),flush=True)
++
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/tests/run_copla_native.py
+@@ -0,0 +1,79 @@
++#!/usr/bin/env python3
++"""Run the production COPLA node on fixed complete official independent plasmids."""
++import argparse
++import csv
++import gzip
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++
++ROOT=Path(__file__).resolve().parents[1]
++EXPECTED={'NZ_CP028167.1':'PTU-X4','NZ_CP028329.1':'PTU-Lab26'}
++
++
++def sha(path):
++    h=hashlib.sha256()
++    with path.open('rb') as f:
++        for chunk in iter(lambda:f.read(1024*1024),b''):h.update(chunk)
++    return h.hexdigest()
++
++
++def main():
++    p=argparse.ArgumentParser(description=__doc__)
++    for n in ['work-dir','assembly','installation','refgraph','reflist','macsyfinder','prefix']:
++        p.add_argument('--'+n,type=Path,required=True)
++    p.add_argument('--sample-id',default='two_plasmids')
++    a=p.parse_args();base=a.work_dir.resolve();base.mkdir(parents=True,exist_ok=False)
++    source_files=['modules/typing/copla.nf','bin/run_copla_candidates.py','tests/nextflow/copla_native.nf','tests/run_copla_native.py','envs/copla.yml']
++    sources={n:sha(ROOT/n) for n in source_files};assembly=a.assembly.resolve();input_sha=sha(assembly)
++    params={n:str(getattr(a,n).resolve()) for n in ['assembly','installation','refgraph','reflist','macsyfinder']}
++    params.update(sample_id=a.sample_id,outdir=str(base/'out'))
++    (base/'params.json').write_text(json.dumps(params))
++    config=base/'config'
++    config.write_text("process.executor='local'\nprocess.cpus=2\nprocess.memory='6 GB'\nconda.enabled=false\n"
++                      "docker.enabled=false\nsingularity.enabled=false\npodman.enabled=false\nparams.publish_dir_mode='copy'\n"
++                      "trace.fields='task_id,hash,name,status,exit,workdir'\n")
++    command=[shutil.which('nextflow') or 'nextflow','-C',str(config),'run',str(ROOT/'tests/nextflow/copla_native.nf'),
++             '-params-file',str(base/'params.json'),'-work-dir',str(base/'work'),'-with-trace',str(base/'trace.tsv'),'-ansi-log','false']
++    result=subprocess.run(command,cwd=base,env={**os.environ,'PATH':str(a.prefix.resolve()/'bin')+os.pathsep+os.environ['PATH']},capture_output=True,text=True)
++    (base/'console.log').write_text(result.stdout+result.stderr)
++    with (base/'trace.tsv').open() as f:tasks=list(csv.DictReader(f,delimiter='\t'))
++    assert result.returncode==0 and len(tasks)==1 and tasks[0]['status']=='COMPLETED',result.stdout+result.stderr
++    work=Path(tasks[0]['workdir']);out=base/'out/06_plasmid_typing/copla';raw=out/(a.sample_id+'.copla')
++    with (out/(a.sample_id+'.copla.tsv')).open() as f:rows=list(csv.DictReader(f,delimiter='\t'))
++    manifest=json.loads((raw/'entities.json').read_text())
++    assert manifest['source_patch']['applied'] and manifest['reference_count']==9894
++    assert manifest['runtime_versions']['graph_tool'].startswith('2.35')
++    # Independent parser; neither the producer adapter nor its FASTA reader is reused.
++    script=('from Bio import SeqIO\nimport gzip,json,sys,hashlib\n'
++            'f=gzip.open(sys.argv[1],"rt") if sys.argv[1].lower().endswith(".gz") else open(sys.argv[1])\n'
++            'd=SeqIO.to_dict(SeqIO.parse(f,"fasta"));f.close()\n'
++            'print(json.dumps({k:{"length":len(v.seq),"DNA_sha256":hashlib.sha256(str(v.seq).encode()).hexdigest()} for k,v in d.items()}))\n')
++    independent=subprocess.run([str(a.prefix.resolve()/'bin/python3'),'-c',script,str(assembly)],capture_output=True,text=True)
++    assert independent.returncode==0,independent.stderr
++    truth=json.loads(independent.stdout)
++    assert set(truth)<=set(EXPECTED) and len(rows)==len(truth)==len(manifest['entities'])
++    assert {r['contig_id'] for r in rows}==set(truth)
++    assert {r['id'] for r in manifest['entities']}==set(truth)
++    for row in rows:
++        sid=row['contig_id'];assert row['predicted_ptu']==EXPECTED[sid]
++        assert float(row['score'])>=0.9 and int(row['length'])==truth[sid]['length']
++        entity=next(e for e in manifest['entities'] if e['id']==sid)
++        assert entity['DNA_sha256']==truth[sid]['DNA_sha256']
++        assert row['entity_scope']=='candidate_record' and row['topology']=='linear'
++    assert not (raw/'databases').exists() and not (raw/'reference.pickle').exists()
++    assert (work/'run_copla_candidates.py').read_bytes()==(ROOT/'bin/run_copla_candidates.py').read_bytes()+b'\n'
++    assert sha(assembly)==input_sha and all(sha(ROOT/n)==h for n,h in sources.items())
++    (base/'run.json').write_text(json.dumps({'pass':True,'command':command,'tasks':tasks,'source_sha256':sources,
++         'assembly_sha256':input_sha,'independent_BioPython':truth,'rows':rows,'manifest':manifest,
++         'expected_PTUs':EXPECTED,'expected_source':'Fixed official COPLA test/*.tgz predictions; score>=0.9 per official confidence recommendation',
++         'limitations':['Two official examples, not population sensitivity/specificity or full platform/profile certification',
++                        'No host taxonomy supplied: host-range is not compared to taxonomically annotated official demonstration',
++                        'Complete archive/source/runtime identities are in the separate preparation receipts']},indent=2)+'\n')
++    print('PASS complete COPLA model and9894 references, independently attributed candidates',len(rows),flush=True)
++
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/tests/run_copla_routing.py
+@@ -0,0 +1,85 @@
++#!/usr/bin/env python3
++"""Original downstream workflow, explicit DNA-driven COPLA observer; no classification."""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++from test_copla_candidates import OBSERVER
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++
++
++def main():
++    p=argparse.ArgumentParser(description=__doc__)
++    p.add_argument('--work-dir',type=Path,required=True);p.add_argument('--prefix',type=Path,required=True)
++    a=p.parse_args();base=a.work_dir.resolve();base.mkdir(parents=True,exist_ok=False)
++    source_names=['subworkflows/plasmid_downstream.nf','modules/typing/copla.nf','bin/run_copla_candidates.py',
++                  'tests/nextflow/copla_downstream.nf','tests/run_copla_routing.py','tests/test_copla_candidates.py']
++    sources={n:sha(ROOT/n) for n in source_names};fixture=base/'fixture';fixture.mkdir()
++    first=fixture/'one.fna';first.write_text('>shared\nACGTACGT\n>extra\nTTTTCCCCAAAAGGGG\n')
++    second=fixture/'two.fna';second.write_text('>shared\nTTTTCCCCAAAAGGGG\n')
++    before={str(f):sha(f) for f in [first,second]}
++    config=base/'config';config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='2 GB'\n"
++            "conda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\npodman.enabled=false\n"
++            "params.publish_dir_mode='copy'\ntrace.fields='task_id,hash,name,status,exit,workdir'\n")
++    runs=[]
++    for name in ['disabled','enabled','second-candidate-fails','missing-prediction','external-reference']:
++        case=base/name;case.mkdir();install=case/"observer installation's directory";(install/'bin').mkdir(parents=True)
++        (install/'bin/copla.py').write_text(OBSERVER);(install/'bin/ani.rb').write_text('# observer only\n')
++        for resource in ['Copla_RS84','MOBscan_171004','MacSyFinder_190530/Conjugation','PlasmidFinder_190731','CARD_201015']:
++            (install/'databases'/resource).mkdir(parents=True)
++        ref=install/'databases/Copla_RS84/REF.1.fna';ref.write_text('>REF.1\nACGT\n')
++        reflist=case/'list.fofn';reflist.write_text(str(second if name=='external-reference' else ref)+'\n')
++        graph=case/'graph.pickle';graph.write_text('OBSERVER ONLY: NOT A SCIENTIFIC GRAPH\n')
++        macsy=case/'macsy';(macsy/'bin').mkdir(parents=True);(macsy/'bin/macsyfinder').write_text('# observer only\n')
++        if name=='second-candidate-fails':(install/'bin/fail_second').touch()
++        if name=='missing-prediction':(install/'bin/missing_prediction').touch()
++        positive=name in ['enabled','disabled']
++        records=[{'id':'S1','fasta':str(first)},{'id':'S.2','fasta':str(second)}] if positive else [{'id':'S1','fasta':str(first)}]
++        params={n:[] for n in ['typing_tools','annotation_tools','annotation_optional_tools','plasmid_binning_tools']}
++        params.update(records=records,outdir=str(case/'out'),typing_optional_tools=[] if name=='disabled' else [' copla '],
++                      copla_refgraph=str(graph),copla_reflist=str(reflist),copla_dir=str(install),copla_macsyfinder_dir=str(macsy))
++        (case/'params.json').write_text(json.dumps(params))
++        command=[shutil.which('nextflow') or 'nextflow','-C',str(config),'run',str(ROOT/'tests/nextflow/copla_downstream.nf'),
++                 '-params-file',str(case/'params.json'),'-work-dir',str(case/'work'),'-with-trace',str(case/'trace.tsv'),'-ansi-log','false']
++        result=subprocess.run(command,cwd=case,env={**os.environ,'PATH':str(a.prefix.resolve()/'bin')+os.pathsep+os.environ['PATH']},capture_output=True,text=True)
++        (case/'console.log').write_text(result.stdout+result.stderr)
++        with (case/'trace.tsv').open() as f:tasks=list(csv.DictReader(f,delimiter='\t'))
++        out=case/'out/06_plasmid_typing/copla';events=[]
++        if positive:
++            assert result.returncode==0,result.stdout+result.stderr
++            lines=[line.split('COPLA_REPORT_EVENTS ',1)[1] for line in result.stdout.splitlines() if line.startswith('COPLA_REPORT_EVENTS ')]
++            assert len(lines)==1;events=json.loads(lines[0])
++            if name=='disabled':assert not tasks and not list(out.glob('*')) and events==[]
++            else:
++                assert len(tasks)==2 and all(t['status']=='COMPLETED' for t in tasks)
++                expected={'S1':[('shared','8','PTU-A'),('extra','16','PTU-B')],'S.2':[('shared','16','PTU-B')]}
++                for sid,truth in expected.items():
++                    with (out/(sid+'.copla.tsv')).open() as f:rows=list(csv.DictReader(f,delimiter='\t'))
++                    assert [(r['contig_id'],r['length'],r['predicted_ptu']) for r in rows]==truth
++                    manifest=json.loads((out/(sid+'.copla/entities.json')).read_text());assert len(manifest['entities'])==len(truth)
++                    assert not manifest['source_patch']['applied']
++                assert len(events)==4 and all(e[0]['producer']=='COPLA' and e[0]['kind']=='evidence' for e in events)
++                assert {e[0]['output'] for e in events}=={'typing','raw'}
++                assert sorted(e[0]['evidence'][0]['id'] for e in events)==['S.2','S.2','S1','S1']
++        else:
++            assert result.returncode!=0 and len(tasks)==1 and tasks[0]['status']=='FAILED'
++            assert not list(out.glob('*'))
++            errors={'second-candidate-fails':'failed for candidate extra','missing-prediction':'Missing exact COPLA product','external-reference':'outside the declared installation'}
++            assert errors[name] in (Path(tasks[0]['workdir'])/'.command.err').read_text()
++        assert all(sha(Path(f))==h for f,h in before.items())
++        assert all(sha(ROOT/n)==h for n,h in sources.items())
++        runs.append({'case':name,'command':command,'exit':result.returncode,'tasks':tasks,'events':events,'pass':True})
++        (base/'run.json').write_text(json.dumps({'pass':len(runs)==5,'runs':runs,'source_sha256':sources,
++              'scope':'Explicit DNA-driven compatible COPLA CLI observers through the original downstream workflow; shared IDs with different DNA, exact products, atomic failures and report evidence. No graph/ANI/model inference.'},indent=2)+'\n')
++        print('PASS',name,flush=True)
++
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/tests/test_copla_candidates.py
+@@ -0,0 +1,157 @@
++"""Candidate/output contracts only; the compatible CLI here is an explicit observer."""
++import argparse
++import gzip
++import importlib.util
++import json
++import os
++from pathlib import Path
++import tempfile
++import unittest
++from unittest.mock import patch
++
++ROOT=Path(__file__).resolve().parents[1]
++spec=importlib.util.spec_from_file_location('copla_candidates',ROOT/'bin/run_copla_candidates.py')
++adapter=importlib.util.module_from_spec(spec);spec.loader.exec_module(adapter)
++
++OBSERVER='''import sys,shutil
++from pathlib import Path
++sequence,graph,reflist,output,*flags=sys.argv[1:]
++assert flags[0]=='-t' and flags[1] in ['linear','circular']
++assert Path(graph).is_file() and Path(reflist).is_file()
++text=Path(sequence).read_text();lines=text.splitlines()
++assert sum(line.startswith('>') for line in lines)==1
++dna=''.join(line for line in lines if not line.startswith('>'))
++assert dna in ['ACGTACGT','TTTTCCCCAAAAGGGG']
++if dna=='TTTTCCCCAAAAGGGG' and Path('bin/fail_second').exists():raise SystemExit(7)
++out=Path(output);out.mkdir(parents=True);prefix=out/Path(sequence).name
++shutil.copyfile(sequence,prefix)
++Path(str(prefix)+'.faa').write_text('')
++Path(str(prefix)+'.ani.tsv').write_text('THIS IS A BAIT TABLE, NOT A PTU PREDICTION\\n')
++Path(str(prefix)+'.related_plasmids.tsv').write_text('#AccessionVersion\\tPTU_Ref\\tNote\\n')
++Path(str(prefix)+'.qry_info.tsv').write_text('#Total bp\\tMOB\\tMPF\\tReplicon\\tAMR\\n'+str(len(dna))+'\\t-\\t-\\t-\\t-\\n')
++if not Path('bin/missing_prediction').exists():
++ label='PTU-A' if dna=='ACGTACGT' else 'PTU-B'
++ Path(str(prefix)+'.ptu_prediction.tsv').write_text('#Predicted_PTU\\tHost_Range\\tScore\\tNotes\\n'+label+'\\tI\\t0.9500\\tExplicit DNA-driven observer\\n')
++'''
++
++
++class CandidateContracts(unittest.TestCase):
++    def setUp(self):
++        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
++        self.root=Path(self.temp.name);previous=Path.cwd();os.chdir(self.root)
++        self.addCleanup(os.chdir,previous)
++        self.input=self.root/'candidate input.fna'
++        self.input.write_text('>A\nACGTACGT\n>B\nTTTTCCCCAAAAGGGG\n')
++        self.install=self.root/"installation's directory";(self.install/'bin').mkdir(parents=True)
++        (self.install/'bin/copla.py').write_text(OBSERVER)
++        (self.install/'bin/ani.rb').write_text('# unused, observer only\n')
++        for name in ['Copla_RS84','MOBscan_171004','MacSyFinder_190530/Conjugation','PlasmidFinder_190731','CARD_201015']:
++            (self.install/'databases'/name).mkdir(parents=True)
++        self.reference=self.install/'databases/Copla_RS84/REF.1.fna';self.reference.write_text('>REF.1\nACGT\n')
++        self.list=self.root/'references.fofn';self.list.write_text(str(self.reference)+'\n')
++        self.graph=self.root/'graph.pickle';self.graph.write_text('OBSERVER_FIXTURE_NOT_A_REAL_GRAPH\n')
++        self.macsy=self.root/'macsy';(self.macsy/'bin').mkdir(parents=True)
++        (self.macsy/'bin/macsyfinder').write_text('# unused observer marker\n')
++        self.args=argparse.Namespace(assembly=str(self.input),installation=str(self.install),refgraph=str(self.graph),
++             reflist=str(self.list),macsyfinder=str(self.macsy),threads=1,output='sample.copla.tsv',raw='sample.copla')
++
++    def launch_observer(self):
++        # Only source/format behavior is tested. No graph, ANI or model executes.
++        with patch.object(adapter.shutil,'which',return_value='/explicit-unused-observer-binary'):
++            return adapter.run(self.args)
++
++    def test_independent_DNA_records_never_merge_or_select_bait_table(self):
++        self.assertEqual(self.launch_observer(),0)
++        import csv
++        with Path(self.args.output).open() as f:rows=list(csv.DictReader(f,delimiter='\t'))
++        self.assertEqual([(r['contig_id'],r['length'],r['predicted_ptu']) for r in rows],[('A','8','PTU-A'),('B','16','PTU-B')])
++        manifest=json.loads((Path(self.args.raw)/'entities.json').read_text())
++        self.assertEqual([r['length'] for r in manifest['entities']],[8,16])
++        self.assertFalse(manifest['source_patch']['applied'])
++        self.assertFalse((Path(self.args.raw)/'databases').exists())
++        self.assertEqual(self.input.read_text(),'>A\nACGTACGT\n>B\nTTTTCCCCAAAAGGGG\n')
++
++    def test_second_candidate_failure_does_not_publish_partial_aggregate(self):
++        (self.install/'bin/fail_second').touch()
++        with self.assertRaisesRegex(ValueError,'failed for candidate B'):self.launch_observer()
++        self.assertFalse(Path(self.args.output).exists());self.assertFalse(Path(self.args.raw).exists())
++        self.assertTrue(Path('copla_program/results/candidate_000001/candidate_000001.fna.ptu_prediction.tsv').exists())
++
++    def test_missing_prediction_cannot_fall_back_to_another_table(self):
++        (self.install/'bin/missing_prediction').touch()
++        with self.assertRaisesRegex(ValueError,'Missing exact COPLA product'):self.launch_observer()
++        self.assertFalse(Path(self.args.output).exists())
++
++    def test_duplicate_ID_is_rejected_before_program_execution(self):
++        self.input.write_text('>same\nACGT\n>same\nTTTT\n')
++        with self.assertRaisesRegex(ValueError,'unique candidate IDs'):self.launch_observer()
++        self.assertFalse(Path('copla_program').exists())
++
++    def test_empty_ID_sequence_and_invalid_alphabet_are_rejected(self):
++        for text in ['> \nACGT\n','>A\n','>A\nACGZ\n','ACGT\n>A\nACGT\n']:
++            self.input.write_text(text)
++            with self.subTest(text=text):
++                with self.assertRaises(ValueError):adapter.candidates(self.input)
++
++    def test_gzip_uppercase_and_wrapping_preserve_complete_DNA(self):
++        p=self.input.with_suffix('.fna.GZ');p.write_bytes(gzip.compress(b'>A\nACGT\nACGT\n>B\nTTTTCCCC\nAAAAGGGG\n'))
++        self.assertEqual(adapter.candidates(p),adapter.candidates(self.input))
++
++    def test_corrupt_gzip_is_not_an_empty_candidate_set(self):
++        p=self.input.with_suffix('.fna.gz');p.write_bytes(b'broken gzip')
++        with self.assertRaises(OSError):adapter.candidates(p)
++
++    def test_only_explicit_topology_annotations_enable_circular_mode(self):
++        self.input.write_text('>A circular contig\nACGT\n>B topology=circular\nTTTT\n>C circular=false\nCCCC\n')
++        result=adapter.candidates(self.input)
++        self.assertEqual([r['topology'] for r in result],['linear','circular','linear'])
++        self.assertEqual(result[0]['topology_source'],'unknown_treated_as_linear')
++
++    def test_conflicting_explicit_topologies_are_rejected(self):
++        self.input.write_text('>A topology=circular circular=false\nACGT\n')
++        with self.assertRaisesRegex(ValueError,'Conflicting'):adapter.candidates(self.input)
++
++    def test_external_reference_file_is_not_a_hidden_dependency(self):
++        external=self.root/'OTHER.fna';external.write_text('>OTHER\nACGT\n')
++        self.list.write_text(str(external)+'\n')
++        with self.assertRaisesRegex(ValueError,'outside the declared installation'):adapter.reference_files(self.install,self.list)
++
++    def test_reference_directory_name_is_not_a_release_constraint(self):
++        folder=self.install/"custom reference directory's";folder.mkdir()
++        reference=folder/'REF.1.fna';reference.write_text('>REF.1\nACGT\n')
++        self.list.write_text(str(reference)+'\n')
++        self.assertEqual(adapter.reference_files(self.install,self.list),[reference])
++        self.assertEqual(self.launch_observer(),0)
++        self.assertFalse((Path(self.args.raw)/'reference_sequences').exists())
++
++    def test_missing_empty_duplicate_and_compressed_reference_entries_fail(self):
++        values=['',str(self.reference)+'\n\n',str(self.reference)+'\n'+str(self.reference)+'\n',str(self.reference)+'.gz\n']
++        for value in values:
++            self.list.write_text(value)
++            with self.subTest(value=value):
++                with self.assertRaises(ValueError):adapter.reference_files(self.install,self.list)
++
++    def test_prediction_schema_rows_and_finite_score_are_required(self):
++        p=self.root/'prediction.tsv'
++        for text in ['wrong\n','\t'.join(adapter.PREDICTION)+'\n',
++                     '\t'.join(adapter.PREDICTION)+'\nPTU-X\tI\tnan\tNote\n',
++                     '\t'.join(adapter.PREDICTION)+'\nPTU-X\tI\t1.01\tNote\n',
++                     '\t'.join(adapter.PREDICTION)+'\nPTU-X\tVII\t0.5\tNote\n']:
++            p.write_text(text)
++            with self.subTest(text=text):
++                with self.assertRaises(ValueError):adapter.prediction(p)
++
++    def test_unclassified_result_is_valid_not_a_missing_product(self):
++        p=self.root/'prediction.tsv';p.write_text('\t'.join(adapter.PREDICTION)+'\n-\t-\t1.0000\tComponent has size1\n')
++        self.assertEqual(adapter.prediction(p)['#Predicted_PTU'],'-')
++
++    def test_stale_output_is_rejected(self):
++        Path(self.args.output).touch()
++        with self.assertRaisesRegex(ValueError,'pre-existing'):self.launch_observer()
++
++    def test_nonpositive_threads_are_rejected(self):
++        self.args.threads=0
++        with self.assertRaisesRegex(ValueError,'threads must be positive'):self.launch_observer()
++
++
++if __name__=='__main__':unittest.main()

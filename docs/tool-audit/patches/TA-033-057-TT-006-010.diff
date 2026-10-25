@@ -1,0 +1,827 @@
+--- a/subworkflows/ont.nf
++++ b/subworkflows/ont.nf
+@@ -1,3 +1,4 @@
++include { LONG_READ_HOST_REMOVAL } from './long_read_host_removal'
+ include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+@@ -17,9 +18,6 @@
+ include { NANOPLOT } from '../modules/nf-core/nanoplot/main'
+ include { FILTLONG } from '../modules/nf-core/filtlong/main'
+ include { MULTIQC } from '../modules/nf-core/multiqc/main'
+-include { MINIMAP2_ALIGN as MINIMAP2_ALIGN_HOST } from '../modules/nf-core/minimap2/align/main'
+-include { SAMTOOLS_VIEW as SAMTOOLS_VIEW_HOST } from '../modules/nf-core/samtools/view/main'
+-include { SAMTOOLS_FASTQ as SAMTOOLS_FASTQ_HOST } from '../modules/nf-core/samtools/fastq/main'
+ include { FLYE as METAFLYE } from '../modules/nf-core/flye/main'
+ include { MEDAKA } from '../modules/nf-core/medaka/main'
+ include { QUAST } from '../modules/nf-core/quast/main'
+@@ -61,35 +59,9 @@
+     ch_report_events = ch_report_events.mix(reportEvidence([channels: FILTLONG.out], '01_qc', 'FILTLONG'))
+ 
+     // ---------------- host removal (optional) ----------------
+-    ch_hr = FILTLONG.out.reads.branch { meta, _fq ->
+-        host: meta.host_reference != null
+-        nohost: true
+-    }
+-    ch_host_long = ch_hr.host.map { meta, fq -> tuple(meta + [preset: 'map-ont'], fq, file(meta.host_reference)) }
+-    MINIMAP2_ALIGN_HOST(
+-        ch_host_long.map { meta, fq, _ref -> tuple(meta, fq) },
+-        ch_host_long.map { meta, _fq, ref -> tuple(meta, ref) },
+-        true,  // bam_format
+-        '',    // bam_index_extension
+-        false, // cigar_paf_format
+-        false  // cigar_bam
+-    )
+-    ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_HOST.out], '01_qc', 'MINIMAP2_ALIGN_HOST'))
+-    // Drop the 'preset' helper key (only needed for MINIMAP2_ALIGN_HOST's
+-    // ext.args) so downstream metas match the no-host-removal branch exactly.
+-    ch_host_bam = MINIMAP2_ALIGN_HOST.out.bam
+-        .map { meta, bam -> tuple(meta.findAll { entry -> entry.key != 'preset' }, bam) }
+-    SAMTOOLS_VIEW_HOST(
+-        ch_host_bam.map { meta, bam -> tuple(meta, bam, []) },
+-        [[], [], []], // no reference fasta
+-        [[], []],     // no qname file
+-        [[], []],     // no BED
+-        ''            // no index
+-    )
+-    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_VIEW_HOST.out], '01_qc', 'SAMTOOLS_VIEW_HOST'))
+-    SAMTOOLS_FASTQ_HOST(SAMTOOLS_VIEW_HOST.out.bam, true) // interleaved long reads
+-    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_FASTQ_HOST.out], '01_qc', 'SAMTOOLS_FASTQ_HOST'))
+-    ch_final_long = ch_hr.nohost.mix(SAMTOOLS_FASTQ_HOST.out.interleaved)
++    LONG_READ_HOST_REMOVAL(FILTLONG.out.reads, 'map-ont')
++    ch_final_long = LONG_READ_HOST_REMOVAL.out.reads
++    ch_report_events = ch_report_events.mix(LONG_READ_HOST_REMOVAL.out.report_events)
+ 
+     // ---------------- assembly (02) + optional medaka polishing ----------------
+     METAFLYE(ch_final_long, '--nano-raw')
+--- a/subworkflows/pacbio_hifi.nf
++++ b/subworkflows/pacbio_hifi.nf
+@@ -1,3 +1,4 @@
++include { LONG_READ_HOST_REMOVAL } from './long_read_host_removal'
+ include { reportEvidence; reportSamples } from '../lib/report_events'
+ /*
+  * PacBio HiFi platform subworkflow (platform: pacbio_hifi):
+@@ -10,9 +11,6 @@
+  */
+ include { SAMTOOLS_FASTQ } from '../modules/nf-core/samtools/fastq/main'
+ include { HIFIADAPTERFILT_HIFIADAPTERFILT as HIFIADAPTERFILT } from '../modules/nf-core/hifiadapterfilt/hifiadapterfilt/main'
+-include { MINIMAP2_ALIGN as MINIMAP2_ALIGN_HOST } from '../modules/nf-core/minimap2/align/main'
+-include { SAMTOOLS_VIEW as SAMTOOLS_VIEW_HOST } from '../modules/nf-core/samtools/view/main'
+-include { SAMTOOLS_FASTQ as SAMTOOLS_FASTQ_HOST } from '../modules/nf-core/samtools/fastq/main'
+ include { HIFIASM_META } from '../modules/assembly/hifiasm_meta'
+ include { QUAST } from '../modules/nf-core/quast/main'
+ include { CONTIG_COVERAGE } from './contig_coverage'
+@@ -51,35 +49,9 @@
+     ch_hifi_reads = HIFIADAPTERFILT.out.fastq
+ 
+     // ---------------- host removal (optional) ----------------
+-    ch_hr = ch_hifi_reads.branch { meta, _fq ->
+-        host: meta.host_reference != null
+-        nohost: true
+-    }
+-    ch_host_long = ch_hr.host.map { meta, fq -> tuple(meta + [preset: 'map-hifi'], fq, file(meta.host_reference)) }
+-    MINIMAP2_ALIGN_HOST(
+-        ch_host_long.map { meta, fq, _ref -> tuple(meta, fq) },
+-        ch_host_long.map { meta, _fq, ref -> tuple(meta, ref) },
+-        true,  // bam_format
+-        '',    // bam_index_extension
+-        false, // cigar_paf_format
+-        false  // cigar_bam
+-    )
+-    ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_HOST.out], '01_qc', 'MINIMAP2_ALIGN_HOST'))
+-    // Drop the 'preset' helper key (only needed for MINIMAP2_ALIGN_HOST's
+-    // ext.args) so downstream metas match the no-host-removal branch exactly.
+-    ch_host_bam = MINIMAP2_ALIGN_HOST.out.bam
+-        .map { meta, bam -> tuple(meta.findAll { entry -> entry.key != 'preset' }, bam) }
+-    SAMTOOLS_VIEW_HOST(
+-        ch_host_bam.map { meta, bam -> tuple(meta, bam, []) },
+-        [[], [], []], // no reference fasta
+-        [[], []],     // no qname file
+-        [[], []],     // no BED
+-        ''            // no index
+-    )
+-    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_VIEW_HOST.out], '01_qc', 'SAMTOOLS_VIEW_HOST'))
+-    SAMTOOLS_FASTQ_HOST(SAMTOOLS_VIEW_HOST.out.bam, true) // interleaved long reads
+-    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_FASTQ_HOST.out], '01_qc', 'SAMTOOLS_FASTQ_HOST'))
+-    ch_final_long = ch_hr.nohost.mix(SAMTOOLS_FASTQ_HOST.out.interleaved)
++    LONG_READ_HOST_REMOVAL(ch_hifi_reads, 'map-hifi')
++    ch_final_long = LONG_READ_HOST_REMOVAL.out.reads
++    ch_report_events = ch_report_events.mix(LONG_READ_HOST_REMOVAL.out.report_events)
+ 
+     // ---------------- assembly (02) ----------------
+     HIFIASM_META(ch_final_long)
+--- a/subworkflows/hybrid.nf
++++ b/subworkflows/hybrid.nf
+@@ -1,3 +1,4 @@
++include { LONG_READ_HOST_REMOVAL } from './long_read_host_removal'
+ include { reportEvidence; reportSamples } from '../lib/report_events'
+ /*
+  * Hybrid platform subworkflow (platform: hybrid): short reads
+@@ -20,9 +21,6 @@
+ include { SHORT_READ_MULTIQC_INPUTS } from './short_read_multiqc_inputs'
+ include { BOWTIE2_BUILD as BOWTIE2_BUILD_HOST } from '../modules/nf-core/bowtie2/build/main'
+ include { BOWTIE2_ALIGN as BOWTIE2_ALIGN_HOST } from '../modules/nf-core/bowtie2/align/main'
+-include { MINIMAP2_ALIGN as MINIMAP2_ALIGN_HOST } from '../modules/nf-core/minimap2/align/main'
+-include { SAMTOOLS_VIEW as SAMTOOLS_VIEW_HOST } from '../modules/nf-core/samtools/view/main'
+-include { SAMTOOLS_FASTQ as SAMTOOLS_FASTQ_HOST } from '../modules/nf-core/samtools/fastq/main'
+ include { OPERA_MS } from '../modules/assembly/opera_ms'
+ include { SPADES as HYBRIDSPADES } from '../modules/nf-core/spades/main'
+ include { QUAST } from '../modules/nf-core/quast/main'
+@@ -99,35 +97,9 @@
+     FILTLONG(ch_long_raw.map { meta, fq -> tuple(meta, [], fq) })
+     ch_report_events = ch_report_events.mix(reportEvidence([channels: FILTLONG.out], '01_qc', 'FILTLONG'))
+ 
+-    ch_hr = FILTLONG.out.reads.branch { meta, _fq ->
+-        host: meta.host_reference != null
+-        nohost: true
+-    }
+-    ch_host_long = ch_hr.host.map { meta, fq -> tuple(meta + [preset: 'map-ont'], fq, file(meta.host_reference)) }
+-    MINIMAP2_ALIGN_HOST(
+-        ch_host_long.map { meta, fq, _ref -> tuple(meta, fq) },
+-        ch_host_long.map { meta, _fq, ref -> tuple(meta, ref) },
+-        true,  // bam_format
+-        '',    // bam_index_extension
+-        false, // cigar_paf_format
+-        false  // cigar_bam
+-    )
+-    ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_HOST.out], '01_qc', 'MINIMAP2_ALIGN_HOST'))
+-    // Drop the 'preset' helper key (only needed for MINIMAP2_ALIGN_HOST's
+-    // ext.args) so downstream metas match the no-host-removal branch exactly.
+-    ch_host_bam = MINIMAP2_ALIGN_HOST.out.bam
+-        .map { meta, bam -> tuple(meta.findAll { entry -> entry.key != 'preset' }, bam) }
+-    SAMTOOLS_VIEW_HOST(
+-        ch_host_bam.map { meta, bam -> tuple(meta, bam, []) },
+-        [[], [], []], // no reference fasta
+-        [[], []],     // no qname file
+-        [[], []],     // no BED
+-        ''            // no index
+-    )
+-    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_VIEW_HOST.out], '01_qc', 'SAMTOOLS_VIEW_HOST'))
+-    SAMTOOLS_FASTQ_HOST(SAMTOOLS_VIEW_HOST.out.bam, true) // interleaved long reads
+-    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_FASTQ_HOST.out], '01_qc', 'SAMTOOLS_FASTQ_HOST'))
+-    ch_final_long = ch_hr.nohost.mix(SAMTOOLS_FASTQ_HOST.out.interleaved)
++    LONG_READ_HOST_REMOVAL(FILTLONG.out.reads, 'map-ont')
++    ch_final_long = LONG_READ_HOST_REMOVAL.out.reads
++    ch_report_events = ch_report_events.mix(LONG_READ_HOST_REMOVAL.out.report_events)
+ 
+     // ---------------- hybrid assembly (02) ----------------
+     ch_asm_in = ch_final_short.join(ch_final_long)
+--- a/modules/nf-core/minimap2/align/main.nf
++++ b/modules/nf-core/minimap2/align/main.nf
+@@ -40,6 +40,9 @@
+     def query = bam_input ? "-" : reads
+     def target = reference ?: (bam_input ? error("Error: minimap2/align BAM input mode requires reference") : reads)
+     """
++    # Local audit patch: do not accept a valid downstream BAM if an upstream
++    # mapper/reset/FASTQ command failed after writing some output.
++    set -o pipefail
+     $samtools_reset_fastq \\
+     minimap2 \\
+         ${args} \\
+--- a/tests/mock_e2e/mock_tool.py
++++ b/tests/mock_e2e/mock_tool.py
+@@ -226,10 +226,14 @@
+         fastq(arg('-1')); fastq(arg('-2'))
+         if '--un-conc-gz' in args:
+             target = arg('--un-conc-gz')
+-            with gzip.open(target + '.1.gz', 'wt') as fh:
+-                fh.write(fastq(arg('-1')))
+-            with gzip.open(target + '.2.gz', 'wt') as fh:
+-                fh.write(fastq(arg('-2')))
++            # Bowtie2 2.5.4 wrapper replaces %, otherwise inserts .1/.2
++            # before the final extension (it does not append another .gz).
++            for mate in ['1', '2']:
++                path = Path(target)
++                name = (path.name.replace('%', mate) if '%' in path.name else
++                        path.stem + '.' + mate + path.suffix if path.suffix else path.name + '.' + mate)
++                with gzip.open(path.with_name(name), 'wt') as fh:
++                    fh.write(fastq(arg('-' + mate)))
+         print(json.dumps({'records': json.loads(require(arg('-x') + '.mock.json').read_text()),
+                           'mappers': ['short']}))
+         print('mock bowtie2 alignment stats', file=sys.stderr)
+@@ -244,7 +248,7 @@
+         fasta_ref, reads = positional[0], positional[1]
+         data = fastq(reads)
+         assert arg('-ax') == ('map-hifi' if os.environ['AUTOPLASM_MOCK_PLATFORM'] == 'pacbio_hifi' else 'map-ont')
+-        print(json.dumps({'records': fasta(fasta_ref), 'mappers': ['long'], 'fastq': data}))
++        print(json.dumps({'mock': True, 'unpaired': True, 'records': fasta(fasta_ref), 'mappers': ['long'], 'fastq': data}))
+ elif tool == 'samtools':
+     if args[0] == 'version':
+         print('samtools 1.24')
+@@ -256,6 +260,7 @@
+         bam = next(a for a in args if a.endswith('.bam'))
+         source = json.loads(require(bam).read_text())
+         assert source['mock']
++        assert source.get('unpaired'), 'This observer models unpaired long-read records only'
+         if source.get('format') == 'bam':
+             # uBAM double: the reads live in a fixture FASTQ path
+             data = fastq(source['fastq'])
+@@ -264,13 +269,15 @@
+             data = source['fastq']
+         else:
+             raise ValueError(f'{tool}: unsupported fastq payload: {source}')
+-        if '-1' in args:
+-            # separate mode (basecalling uBAM): unpaired records land in -0
+-            with gzip.open(arg('-0'), 'wt') as fh:
+-                fh.write(data)
+-        else:
+-            # interleave mode: stdout redirect to <prefix>_interleaved.fastq
+-            print(data, end='')
++        # Category 0 is determined by READ1/READ2 flags, not the presence of
++        # -1 or stdout interleaving. Every modeled input is unpaired.
++        assert '-0' in args
++        with gzip.open(arg('-0'), 'wt') as fh:
++            fh.write(data)
++        for flag in ['-1', '-2', '-s']:
++            if flag in args:
++                with gzip.open(arg(flag), 'wt') as fh:
++                    fh.write('')
+     elif args[0] == 'sort':
+         # `samtools sort [args] -T prefix --threads N -o <out> [-]`; input is
+         # stdin when the only positional is '-' (or none, e.g. minimap2 pipe).
+--- a/tests/mock_e2e/run.py
++++ b/tests/mock_e2e/run.py
+@@ -2,6 +2,7 @@
+ """Execute production main.nf with isolated external-tool mocks and real Python steps."""
+ import argparse
+ import csv
++import gzip
+ import hashlib
+ import json
+ import os
+@@ -23,6 +24,39 @@
+ def rows(path):
+     with path.open() as fh:
+         return list(csv.DictReader(fh, delimiter='\t'))
++
++
++def fastq_records(path):
++    with (gzip.open(path, 'rt') if str(path).endswith('.gz') else path.open()) as stream:
++        lines = stream.read().splitlines()
++    assert len(lines) % 4 == 0
++    records = {}
++    for i in range(0, len(lines), 4):
++        assert lines[i].startswith('@') and lines[i + 2].startswith('+')
++        assert len(lines[i + 1]) == len(lines[i + 3])
++        name = lines[i][1:].split()[0]
++        assert name not in records, f'Duplicate read ID: {name}'
++        records[name] = [lines[i + 1], lines[i + 3]]
++    return records
++
++
++def validate_native_long_host_reads(base, platform, assembler):
++    truth = json.loads((base / 'fixture/truth.json').read_text())
++    tool = {'ont': 'flye', 'pacbio_hifi': 'hifiasm_meta', 'hybrid': 'OPERA-MS.pl' if assembler == 'opera_ms' else 'spades.py'}[platform]
++    audits = list((base / 'work').rglob('mock-' + tool + '.json'))
++    assert len(audits) == len(SAMPLES)
++    for audit in audits:
++        argv = json.loads(audit.read_text())['argv']
++        if platform == 'ont': name = argv[argv.index('--nano-raw') + 1]
++        elif platform == 'pacbio_hifi': name = argv[-1]
++        else: name = argv[argv.index('--long-read' if assembler == 'opera_ms' else '--nanopore') + 1]
++        task = next(t for t in rows(base / 'trace.tsv') if str(audit.parent.relative_to(base / 'work')).startswith(t['hash']))
++        sid = task['name'].rsplit(' (', 1)[1][:-1]
++        allowed = set(truth['long_read_expected_after_host_removal'][sid])
++        original = fastq_records(base / 'fixture' / sid / 'long.fastq.gz')
++        expected = {key: value for key, value in original.items() if key in allowed}
++        assert fastq_records(audit.parent / name) == expected, f'{sid}: assembler received wrong IDs/DNA/qualities'
++    return True
+ 
+ 
+ def validate_report(base, platform, empty):
+@@ -80,6 +114,10 @@
+     expected.update({name: 1 for name in ['SHARED_CATALOGUE', 'SHARED_ABUNDANCE_TABLES',
+         'DIVERSITY', 'DIFFERENTIAL_ABUNDANCE', 'REPORT']})
+     expected.update(SAMTOOLS_VIEW_SHARED=6, COVERM_SHARED=6)
++    host_removal = json.loads((base / 'fixture/truth.json').read_text()).get('host_removal', False)
++    if host_removal:
++        expected.update(MINIMAP2_ALIGN_HOST=2, SAMTOOLS_VIEW_HOST=2, SAMTOOLS_FASTQ_HOST=2)
++        if platform == 'hybrid': expected.update(BOWTIE2_BUILD_HOST=2, BOWTIE2_ALIGN_HOST=2)
+     if platform in ['illumina', 'hybrid']:
+         expected.update(BOWTIE2_BUILD_SHARED=1, BOWTIE2_ALIGN_SHARED=6)
+     else:
+@@ -147,17 +185,22 @@
+     assert f'- Platform: `{platform}`' in report
+     profiles = list((out / '07_host_prediction/metaphlan').glob('*.metaphlan.tsv'))
+     assert len(profiles) == 6, 'Host profiles must be unique per sample'
+-    audits = [json.loads(a.read_text())['argv']
++    audits = [(a, json.loads(a.read_text())['argv'])
+               for a in (base / 'work').rglob('mock-metaphlan.json')]
+-    real = [argv for argv in audits if '--input_type' in argv]
++    real = [(audit, argv) for audit, argv in audits if '--input_type' in argv]
+     assert len(real) == 6, f'Expected 6 metaphlan audits, got {len(real)}: {audits}'
+-    for argv in real:
++    for audit, argv in real:
+         # nf-core metaphlan/metaphlan puts flags first; the comma-separated
+         # reads are the token right after `--input_type fastq`.
+         reads = argv[argv.index('--input_type') + 2].split(',')
+         assert len(reads) == (2 if platform in ['illumina', 'hybrid'] else 1)
+         if platform == 'hybrid':
+-            assert all('.clean.fastq.gz' in name for name in reads), 'Hybrid host profile must use short reads'
++            task = next(t for t in rows(base / 'trace.tsv') if str(audit.parent.relative_to(base / 'work')).startswith(t['hash']))
++            sid = task['name'].rsplit(' (', 1)[1][:-1]
++            # Host removal changes filenames. Check the staged paired short
++            # records against the explicit pass-through observer fixture.
++            for mate, name in enumerate(reads, 1):
++                assert fastq_records(audit.parent / name) == fastq_records(base / 'fixture' / sid / f'R{mate}.fastq.gz'), 'Hybrid host profile must use short reads'
+     if platform == 'hybrid' and not empty:
+         for sid in SAMPLES:
+             short = rows(out / f'10_abundance/coverm/{sid}.short.coverm.tsv')
+@@ -167,10 +210,12 @@
+     if not empty:
+         catalog = (out / '09_comparative_genomics/plasmid_catalog_input.fasta').read_text()
+         assert all(f'>{sid}|plasmid_1' in catalog for sid in SAMPLES)
++    if host_removal: validate_native_long_host_reads(base, platform, assembler)
+     return {'status': 'PASS', 'mode': 'mock external tools; real Nextflow and repository R',
+             'tasks': len(trace), 'process_counts': counts, 'empty_plasmids': empty,
+             'platform': platform, 'hybrid_assembler': assembler if platform == 'hybrid' else None,
+-            'long_input': long_input if platform != 'illumina' else None}
++            'long_input': long_input if platform != 'illumina' else None,
++            'native_long_host_retention_checked': host_removal}
+ 
+ 
+ def configure_long_input(fixture, platform, source):
+@@ -187,7 +232,7 @@
+         if kind in ['bam', 'pod5']:
+             for extension in (['bam', 'pod5'] if kind == 'pod5' else ['bam']):
+                 path = fixture / row['sample_id'] / ('reads.mock.' + extension)
+-                path.write_text(json.dumps({'mock': True, 'format': extension, 'fastq': row['long_reads']}))
++                path.write_text(json.dumps({'mock': True, 'unpaired': True, 'format': extension, 'fastq': row['long_reads']}))
+                 row[extension] = str(path)
+     with (fixture / 'samples.tsv').open('w') as fh:
+         writer = csv.DictWriter(fh, fieldnames=fields, delimiter='\t', lineterminator='\n')
+@@ -203,14 +248,19 @@
+     parser.add_argument('--platform', choices=['illumina', 'ont', 'pacbio_hifi', 'hybrid', 'assembly'], default='illumina')
+     parser.add_argument('--hybrid-assembler', choices=['opera_ms', 'hybridspades'], default='opera_ms')
+     parser.add_argument('--long-input', choices=['fastq', 'bam', 'pod5', 'mixed'], default='fastq')
++    parser.add_argument('--with-host-removal', action='store_true', help='Exercise real long-read host removal on two distinct references')
++    parser.add_argument('--host-minimap-prefix', type=Path)
++    parser.add_argument('--host-samtools-prefix', type=Path)
+     args = parser.parse_args()
+     if args.platform == 'illumina' and args.long_input != 'fastq':
+         parser.error('Illumina does not accept a long-read source')
+     if args.platform == 'pacbio_hifi' and args.long_input == 'pod5':
+         parser.error('PacBio HiFi does not accept POD5')
++    if args.with_host_removal and (args.platform not in ['ont', 'pacbio_hifi', 'hybrid'] or not args.host_minimap_prefix or not args.host_samtools_prefix):
++        parser.error('Host-retention test requires a long-read platform and both native runtime prefixes')
+     base = Path(args.outdir).resolve()
+     base.mkdir(parents=True, exist_ok=False)
+-    fixture = generate(base / 'fixture')
++    fixture = generate(base / 'fixture', host_removal=args.with_host_removal)
+     # Existing publication is deliberately untrusted input for the report.
+     stale = base / 'out/04_plasmid_detection/consensus'
+     stale.mkdir(parents=True)
+@@ -244,6 +294,17 @@
+ docker.enabled = false
+ singularity.enabled = false
+ ''')
++    if args.with_host_removal:
++        mini = args.host_minimap_prefix.resolve() / 'bin'
++        sam = args.host_samtools_prefix.resolve() / 'bin'
++        minimap_version = subprocess.run([str(mini / 'minimap2'), '--version'], text=True, capture_output=True, check=True).stdout
++        samtools_version = subprocess.run([str(sam / 'samtools'), '--version'], text=True, capture_output=True, check=True).stdout
++        assert minimap_version.strip() == '2.30-r1287' and samtools_version.startswith('samtools 1.24\n')
++        (base / 'native-host-environment.json').write_text(json.dumps({'minimap2': minimap_version, 'samtools': samtools_version,
++            'scope': 'native long-host mapping/filter/FASTQ only; other tools including short-read host chain are explicit observers'}, indent=2) + '\n')
++        with (base / 'test.config').open('a') as stream:
++            stream.write("process {\n" + f"withName: '.*:MINIMAP2_ALIGN_HOST' {{ beforeScript = 'export PATH=\"{mini}:$PATH\"' }}\n"
++                         + f"withName: '.*:SAMTOOLS_VIEW_HOST|.*:SAMTOOLS_FASTQ_HOST' {{ beforeScript = 'export PATH=\"{sam}:$PATH\"' }}\n}}\n")
+     executable = shutil.which(args.nextflow)
+     if not executable:
+         raise RuntimeError(f'Nextflow unavailable: {args.nextflow}')
+--- a/tests/mock_e2e/generate.py
++++ b/tests/mock_e2e/generate.py
+@@ -10,7 +10,7 @@
+ SAMPLES = ['A__1.v1', 'A.2', 'A-3', 'B__1.v1', 'B.2', 'B-3']
+ 
+ 
+-def generate(destination):
++def generate(destination, host_removal=False):
+     root = Path(destination).resolve()
+     root.mkdir(parents=True, exist_ok=True)
+     rng = random.Random(20261016)
+@@ -19,6 +19,7 @@
+     fasta = ''.join(f'>{name}\n{seq}\n' for name, seq in sequences.items())
+     (root / 'reference.fasta').write_text(fasta)
+     rows = []
++    retained_long_reads = {}
+     for index, sid in enumerate(SAMPLES):
+         sample = root / sid
+         sample.mkdir(exist_ok=True)
+@@ -43,14 +44,24 @@
+                 fh.write(''.join(reads[mate]).encode())
+         with gzip.GzipFile(filename=str(sample / 'long.fastq.gz'), mode='wb', mtime=0) as fh:
+             fh.write(''.join(long_reads).encode())
++        host_name = ['chromosome_1', 'plasmid_1'][index] if host_removal and index < 2 else None
++        host_reference = ''
++        if host_name:
++            path = sample / 'host_reference.fasta'
++            path.write_text('>' + host_name + '\n' + sequences[host_name] + '\n')
++            host_reference = str(path)
++        retained_long_reads[sid] = [read.splitlines()[0][1:] for read in long_reads
++                                   if host_name is None or not read.startswith('@' + sid + '_' + host_name + '_long')]
+         rows.append([sid, 'A' if index < 3 else 'B', str(sample / 'R1.fastq.gz'),
+-                     str(sample / 'R2.fastq.gz'), str(sample / 'long.fastq.gz'), str(sample / 'assembly.fasta')])
++                     str(sample / 'R2.fastq.gz'), str(sample / 'long.fastq.gz'), str(sample / 'assembly.fasta'), host_reference])
+     with (root / 'samples.tsv').open('w') as fh:
+         writer = csv.writer(fh, delimiter='\t', lineterminator='\n')
+-        writer.writerow(['sample_id', 'group', 'read1', 'read2', 'long_reads', 'assembly'])
++        writer.writerow(['sample_id', 'group', 'read1', 'read2', 'long_reads', 'assembly', 'host_reference'])
+         writer.writerows(rows)
+     (root / 'truth.json').write_text(json.dumps({'seed': 20261016, 'samples': SAMPLES,
+         'synthetic_sequences': True, 'plasmid': 'plasmid_1', 'chromosome': 'chromosome_1',
++        'long_read_expected_after_host_removal': retained_long_reads,
++        'host_removal': host_removal,
+         'note': 'Random DNA is not expected to be classified as a plasmid by real geNomad.'}, indent=2) + '\n')
+     return root
+ 
+--- a/README.md
++++ b/README.md
+@@ -153,6 +153,10 @@
+ - 组装器选择：`--short_read_assembler megahit|metaspades`、
+   `--hybrid_assembler opera_ms|hybridspades`。
+ - 宿主去除：样本表 `host_reference` 列或全局 `--host_reference`。
++  ONT、HiFi 和 hybrid 的长读段保留 SAMtools 的未配对输出
++  `<id>.host_removed_other.fastq.gz`；若全部被过滤，流程明确报错，
++  不再继续空输入组装。hybrid 不自动切换为仅短读段组装。
++  旧宿主去除运行可能丢失未匹配宿主的长读段，需从该步骤在新目录重跑。
+ - 跨样本门控：`--min_diversity_samples 3`、`--min_group_replicates 3`、
+   `--network_min_samples 20`。这些是运行 / 脚本门槛，不是功效保证；DESeq2
+   脚本目前另有写死的每组 ≥3 条件，不读取 `min_group_replicates`。
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -404,3 +404,15 @@
+ mock_e2e新增assembly平台并核对报告JSON/HTML/Markdown、实际trace producer与板块状态；注入旧样本和空network目录，不能把目录存在当完成证据。5平台正例+空质粒共788连接任务仍是明确外部CLI替身+实际R/Python，不升级真实模型认证；TT-001旧的按文件名给mock覆盖度/计数局限继续开放。实际共享定量55任务、结构6任务和MAG32任务回归另记。
+ 
+ 方法文字只能说明已记录的输出；process报告版本可能是静态声明，不足以证明所有实际运行版本。完整CLI/数据库/模型身份仍是TA-016开放项，不能把默认参数、启用工具列表或文件夹当作完整方法学证据。历史结构/共享运行中TA-015未验证的限制只对应各自scope，本批报告专用suite补上本轮完成链及发布/缓存证据。
++
++### 长读段宿主去除与测试替身（TA-033/057、TT-006/010）
++
++`tests/run_long_read_host_removal.py --work-dir <fresh-dir> --minimap-prefix <2.30-prefix> --samtools-prefix <1.24-prefix> --before-dir <frozen-before>` 需要 Nextflow26.10 与原生工具；固定版本 Minimap2 自带排序 SAMtools1.23.1，过滤/FASTQ 使用1.24。before-dir 是修复批次保留的三平台及旧 mapper 源码，不自动取当前 HEAD。
++
++八个受控场景共53条trace（修复前31、修复后22），验证旧三平台均错误消费 stdout、修复后 map-ont/map-hifi 精确保留未匹配宿主的正反向 reads/DNA/非恒定质量值、不同宿主参考/无参考样本归属、全被过滤时明确 QC 失败。故障包装器实际调用原生 mapper 后故意退出7：旧模块被 sort 的0掩盖，现原失败码向下传播、无后续消费者或BAM发布。该故障是注入的退出码，不声称原生 mapper 自发崩溃。
++
++`python3 -m unittest discover -s tests -p 'test_mock_*py' -v` 包含6个替身方法：SAMtools仅支持显式标记的未配对fixture，遵循 -0 并拒绝未建模的配对输入；Bowtie2遵循最后扩展名前插入 .1/.2、%替换和无扩展名命名。它仍然是短读段全部传递的接口 observer，不模拟宿主分类。宿主profile来源按实际暂存的配对reads/DNA/质量验证，不再只匹配clean文件名。
++
++`tests/mock_e2e/run.py` 的 `--with-host-removal --host-minimap-prefix <2.30-prefix> --host-samtools-prefix <1.24-prefix> --long-input mixed` 让两样本使用不同宿主参考，另外四样本走无参考分支；ONT/HiFi/hybrid(OPERA)共496任务中仅18个宿主长读工具任务为原生，其余外部CLI为observer，R/Python真实执行。再验ONT全无参考144任务。FASTQ/BAM/POD5（HiFi不含POD5）输入为明确fixture，末端组装器输入逐记录核对，不是实际组装/检测效果验证。HybridSPAdes额外尝试因observer环境缺真实SPAdes计划解析依赖失败，保留原日志且不计通过；本批不认证该完整分支。共享定量三模式55原生任务另验。
++
++未配对长读宿主过滤消费 `<id>.host_removed_other.fastq.gz`；全被过滤时终止，hybrid不自动改为短读单独组装。版本、阈值和预设保持不变。未进行镜像、远端执行器、nf-test框架或科学灵敏度/特异度基准；TT-001计数oracle问题仍开放。
+--- a/conf/nfcore_upstream.config
++++ b/conf/nfcore_upstream.config
+@@ -20,7 +20,7 @@
+  *   - Bowtie2 index directories (build outputs) are intermediate-only and
+  *     are not published.
+  *   - Host-removal unmapped reads are now <id>.host.unmapped_{1,2}.fastq.gz
+- *     (bowtie2) and <id>.host_removed_interleaved.fastq (minimap2 chain).
++ *     (bowtie2) and <id>.host_removed_other.fastq.gz (unpaired minimap2 chain).
+  */
+ process {
+ 
+--- /dev/null
++++ b/subworkflows/long_read_host_removal.nf
+@@ -0,0 +1,44 @@
++/* Long reads have neither READ1 nor READ2 SAM flags. samtools fastq -0
++ * therefore owns their output even when stdout interleaving is requested.
++ */
++include { reportEvidence } from '../lib/report_events'
++include { MINIMAP2_ALIGN as MINIMAP2_ALIGN_HOST } from '../modules/nf-core/minimap2/align/main'
++include { SAMTOOLS_VIEW as SAMTOOLS_VIEW_HOST } from '../modules/nf-core/samtools/view/main'
++include { SAMTOOLS_FASTQ as SAMTOOLS_FASTQ_HOST } from '../modules/nf-core/samtools/fastq/main'
++
++workflow LONG_READ_HOST_REMOVAL {
++    take:
++    ch_reads // tuple(meta, fastq); meta.host_reference may be null
++    preset   // map-ont or map-hifi
++
++    main:
++    ch_report_events = Channel.empty()
++    ch_branches = ch_reads.branch { meta, reads ->
++        host: meta.host_reference != null
++        nohost: true
++    }
++    ch_host = ch_branches.host.map { meta, reads ->
++        tuple(meta + [preset: preset], reads, file(meta.host_reference, checkIfExists: true))
++    }
++    MINIMAP2_ALIGN_HOST(ch_host.map { meta, reads, reference -> tuple(meta, reads) },
++                        ch_host.map { meta, reads, reference -> tuple(meta, reference) },
++                        true, '', false, false)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_HOST.out], '01_qc', 'MINIMAP2_ALIGN_HOST'))
++    ch_bam = MINIMAP2_ALIGN_HOST.out.bam.map { meta, bam ->
++        tuple(meta.findAll { entry -> entry.key != 'preset' }, bam, [])
++    }
++    SAMTOOLS_VIEW_HOST(ch_bam, [[], [], []], [[], []], [[], []], '')
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_VIEW_HOST.out], '01_qc', 'SAMTOOLS_VIEW_HOST'))
++    SAMTOOLS_FASTQ_HOST(SAMTOOLS_VIEW_HOST.out.bam, false)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_FASTQ_HOST.out], '01_qc', 'SAMTOOLS_FASTQ_HOST'))
++    ch_retained = SAMTOOLS_FASTQ_HOST.out.other.map { meta, reads ->
++        def firstByte = new java.util.zip.GZIPInputStream(java.nio.file.Files.newInputStream(reads))
++            .withCloseable { stream -> stream.read() }
++        if (firstByte < 0) error "No non-host long reads remain for sample ${meta.id}; assembly cannot proceed"
++        tuple(meta, reads)
++    }
++
++    emit:
++    reads = ch_branches.nohost.mix(ch_retained)
++    report_events = ch_report_events
++}
+--- /dev/null
++++ b/tests/run_long_read_host_removal.py
+@@ -0,0 +1,136 @@
++#!/usr/bin/env python3
++"""Real mapper/SAMtools retention oracle and actual frozen-caller counterexample.
++
++Synthetic exact reads have distinct host references and independently specified
++origin/quality. This verifies wiring, not wet-lab host removal sensitivity.
++"""
++import argparse
++import csv
++import gzip
++import hashlib
++import json
++import os
++from pathlib import Path
++import random
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def frozen_workflow(directory, platform, before):
++    source = (before / f'subworkflows/{platform}.nf').read_text()
++    start = source.index('    ch_hr = ')
++    end = source.index('\n', source.index('    ch_final_long = ', start))
++    fragment = source[start:end].replace('FILTLONG.out.reads', 'ch_reads').replace('ch_hifi_reads', 'ch_reads')
++    includes = [f"include {{ reportEvidence }} from '{ROOT}/lib/report_events'",
++                f"include {{ MINIMAP2_ALIGN as MINIMAP2_ALIGN_HOST }} from '{before}/modules/nf-core/minimap2/align/main'",
++                f"include {{ SAMTOOLS_VIEW as SAMTOOLS_VIEW_HOST }} from '{ROOT}/modules/nf-core/samtools/view/main'",
++                f"include {{ SAMTOOLS_FASTQ as SAMTOOLS_FASTQ_HOST }} from '{ROOT}/modules/nf-core/samtools/fastq/main'"]
++    module = directory / 'frozen_host.nf'
++    module.write_text('\n'.join(includes) + '\nworkflow LONG_READ_HOST_REMOVAL {\n    take:\n    ch_reads\n    preset\n    main:\n    ch_report_events = Channel.empty()\n' + fragment + '\n    emit:\n    reads = ch_final_long\n    report_events = ch_report_events\n}\n')
++    workflow = directory / 'probe.nf'
++    workflow.write_text((ROOT / 'tests/nextflow/long_read_host_removal.nf').read_text().replace("'../../subworkflows/long_read_host_removal'", repr(str(module.with_suffix('')))))
++    return workflow
++
++
++def run(base, minimap, samtools, before):
++    fixture = base / 'fixtures'
++    fixture.mkdir()
++    rng = random.Random(33020261022)
++    sequences = {name: ''.join(rng.choices('ACGT', k=20000)) for name in ['A', 'B', 'P']}
++    rc = lambda dna: dna.translate(str.maketrans('ACGT','TGCA'))[::-1]
++    for name in ['A','B']:
++        (fixture / f'host {name}.fasta').write_text('>host_' + name + '\n' + sequences[name] + '\n')
++    reads = {'hostA': sequences['A'][1000:3000], 'hostA_reverse':rc(sequences['A'][5000:7000]),
++             'hostB': sequences['B'][2000:4000], 'nonhost':sequences['P'][3000:5000],
++             'nonhost_reverse':rc(sequences['P'][7000:9000])}
++    expected = {}
++    for sid in ['A','B','C','Z']:
++        records = {sid+'_'+name:[dna,''.join(chr(53+(j+i)%31) for j in range(len(dna)))] for i,(name,dna) in enumerate(reads.items())}
++        expected[sid] = records if sid == 'C' else {name:val for name,val in records.items() if not name.startswith(sid+'_host'+sid)}
++        if sid == 'Z':
++            records = {f'Z_{i}':[sequences['A'][1000+i*250:3000+i*250], 'I'*2000] for i in range(5)}
++            expected[sid] = {}
++        with gzip.open(fixture / f'{sid} input.fastq.gz','wt') as stream:
++            stream.write(''.join('@'+name+'\n'+dna+'\n+\n'+quality+'\n' for name,(dna,quality) in records.items()))
++    (base / 'origin-oracle.json').write_text(json.dumps({'expected':expected,'note':'exact, explicitly synthetic independent source/quality oracle; A and B have different host references, C bypasses'},indent=2)+'\n')
++    hashes = {p.name:sha(p) for p in fixture.iterdir()}
++    shim = base / 'fault-bin'
++    shim.mkdir()
++    binary = shim / 'minimap2'
++    binary.write_text('#!/usr/bin/env python3\nimport subprocess,sys\nargs=sys.argv[1:]\nresult=subprocess.run(['+repr(str(minimap/'bin/minimap2'))+']+args)\nif args==["--version"]:raise SystemExit(result.returncode)\nprint("deliberate-post-mapping-failure",file=sys.stderr)\nraise SystemExit(result.returncode or 7)\n')
++    binary.chmod(0o755)
++    sources=['subworkflows/long_read_host_removal.nf','modules/nf-core/minimap2/align/main.nf',
++             'modules/nf-core/samtools/view/main.nf','modules/nf-core/samtools/fastq/main.nf',
++             'tests/run_long_read_host_removal.py','tests/nextflow/long_read_host_removal.nf']
++    source_hashes={n:sha(ROOT/n) for n in sources}
++    cases=[('before-'+name, 'map-hifi' if name=='pacbio_hifi' else 'map-ont',name,'mixed',False) for name in ['ont','pacbio_hifi','hybrid']]
++    cases += [('before-fault','map-ont','ont','fault',True),('ont','map-ont',None,'mixed',False),
++              ('hifi','map-hifi',None,'mixed',False),('depleted','map-ont',None,'depleted',False),('failed-mapper','map-ont',None,'fault',True)]
++    runs=[]
++    for name,preset,old_platform,kind,fault in cases:
++        p=base/name;p.mkdir()
++        workflow=frozen_workflow(p,old_platform,before) if old_platform else ROOT/'tests/nextflow/long_read_host_removal.nf'
++        config=p/'native.config'
++        mapper_path=str(shim)+':'+str(minimap/'bin') if fault else str(minimap/'bin')
++        config.write_text(f"params.outdir='{p}/out'\nparams.publish_dir_mode='copy'\nincludeConfig '{ROOT}/conf/nfcore_upstream.config'\n"
++            "process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nprocess.maxForks=1\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n"
++            "process {\n"+f"withName:'MINIMAP2_ALIGN_HOST' {{ beforeScript='export PATH=\"{mapper_path}:$PATH\"' }}\n"
++            +f"withName:'SAMTOOLS_VIEW_HOST|SAMTOOLS_FASTQ_HOST' {{ beforeScript='export PATH=\"{samtools}/bin:$PATH\"' }}\n}}\n"
++            "trace.fields='task_id,hash,name,status,exit,workdir'\n")
++        params={'fixture_dir':str(fixture),'fixture_case':'mixed' if kind=='mixed' else 'single','preset':preset}
++        (p/'params.json').write_text(json.dumps(params))
++        cmd=[shutil.which('nextflow') or 'nextflow','-C',str(config),'run',str(workflow),'-params-file',str(p/'params.json'),
++             '-work-dir',str(p/'work'),'-with-trace',str(p/'trace.tsv'),'-ansi-log','false']
++        result=subprocess.run(cmd,text=True,capture_output=True)
++        (p/'stdout.log').write_text(result.stdout);(p/'stderr.log').write_text(result.stderr)
++        tasks=list(csv.DictReader((p/'trace.tsv').open(),delimiter='\t')) if (p/'trace.tsv').exists() else []
++        if old_platform:
++            assert result.returncode==0,result.stdout+result.stderr
++            if fault:
++                assert next(t for t in tasks if 'MINIMAP2_ALIGN_HOST' in t['name'])['exit']=='0'
++                assert 'deliberate-post-mapping-failure' in ''.join(q.read_text() for q in (p/'work').rglob('.command.err'))
++            else:
++                observed={json.loads(q.read_text())['meta']['id']:json.loads(q.read_text()) for q in (p/'work').rglob('*.observed.json')}
++                assert not observed['A']['records'] and not observed['B']['records']
++                assert observed['C']['records']==expected['C']
++        elif kind=='mixed':
++            assert result.returncode==0,result.stdout+result.stderr
++            assert len(tasks)==9 and all(t['status']=='COMPLETED' and t['exit']=='0' for t in tasks)
++            observed={json.loads(q.read_text())['meta']['id']:json.loads(q.read_text()) for q in (p/'work').rglob('*.observed.json')}
++            assert set(observed)=={'A','B','C'}
++            for sid in observed:
++                assert observed[sid]['records']==expected[sid],(sid,observed[sid]['records'].keys(),expected[sid].keys())
++                assert observed[sid]['meta']['group']=='preserved_group' and 'preset' not in observed[sid]['meta']
++        else:
++            assert result.returncode!=0
++            assert not any('OBSERVE_LONG_READS' in t['name'] for t in tasks)
++            if fault:
++                assert next(t for t in tasks if 'MINIMAP2_ALIGN_HOST' in t['name'])['exit']=='7'
++                assert not list((p/'out').rglob('*.bam'))
++            else: assert 'No non-host long reads remain for sample Z' in result.stdout+result.stderr
++        assert hashes=={q.name:sha(q) for q in fixture.iterdir()}
++        assert source_hashes=={n:sha(ROOT/n) for n in sources}
++        runs.append({'case':name,'command':cmd,'exit':result.returncode,'tasks':tasks,'old_caller_fragment':old_platform,
++                     'checks':'known read IDs/DNA/quality retained, metadata/bypass preserved; category0 not stdout; fully depleted explicit QC failure; upstream pipeline failure not masked'})
++        (base/'run.json').write_text(json.dumps({'runs':runs,'expected_cases':len(cases),'pass':len(runs)==len(cases),'source_sha256':source_hashes,'fixture_sha256':hashes,
++            'limitations':['before harness is an exact frozen caller host-removal fragment with upstream read channel renamed, not a full old platform run',
++                           'real minimap2/SAMtools on independent synthetic exact reads; not wet-lab host-removal performance',
++                           'fault wrapper delegates real mapper then deliberately exits7; tests shell failure propagation, not a claim that the native mapper crashed',
++                           'local native only; image/nf-test/full biological platform certification separate']},indent=2)+'\n')
++        print('PASS',name,len(tasks),flush=True)
++
++
++if __name__=='__main__':
++    parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir',required=True,type=Path)
++    parser.add_argument('--minimap-prefix',required=True,type=Path)
++    parser.add_argument('--samtools-prefix',required=True,type=Path)
++    parser.add_argument('--before-dir',required=True,type=Path)
++    args=parser.parse_args();base=args.work_dir.resolve();base.mkdir(parents=True,exist_ok=True)
++    run(base,args.minimap_prefix.resolve(),args.samtools_prefix.resolve(),args.before_dir.resolve())
+--- /dev/null
++++ b/tests/nextflow/long_read_host_removal.nf
+@@ -0,0 +1,42 @@
++nextflow.enable.dsl=2
++include { LONG_READ_HOST_REMOVAL } from '../../subworkflows/long_read_host_removal'
++
++// Read-only downstream observer, not an assembler or a host classifier.
++process OBSERVE_LONG_READS {
++    input:
++    tuple val(meta), path(reads)
++    output:
++    path "${meta.id}.observed.json"
++    script:
++    def encodedMeta = groovy.json.JsonOutput.toJson(meta).bytes.encodeBase64().toString()
++    """
++    python3 - '${encodedMeta}' ${reads} <<'PY'
++import base64,gzip,json,sys
++from pathlib import Path
++meta=json.loads(base64.b64decode(sys.argv[1]))
++path=Path(sys.argv[2])
++with (gzip.open(path,'rt') if path.suffix.lower()=='.gz' else path.open()) as handle:
++    lines=handle.read().splitlines()
++assert len(lines)%4==0
++records={}
++for i in range(0,len(lines),4):
++    assert lines[i].startswith('@') and lines[i+2]=='+'
++    assert len(lines[i+1])==len(lines[i+3])
++    name=lines[i][1:].split()[0]
++    assert name not in records
++    records[name]=[lines[i+1],lines[i+3]]
++Path(meta['id']+'.observed.json').write_text(json.dumps({'meta':meta,'records':records}))
++PY
++    """
++}
++
++workflow {
++    ids = params.fixture_case == 'mixed' ? ['A', 'B', 'C'] : ['Z']
++    reads = Channel.fromList(ids).map { sid ->
++        def reference = sid == 'C' ? null : "${params.fixture_dir}/host ${sid == 'B' ? 'B' : 'A'}.fasta"
++        tuple([id:sid, group:'preserved_group', host_reference:reference],
++              file("${params.fixture_dir}/${sid} input.fastq.gz", checkIfExists:true))
++    }
++    LONG_READ_HOST_REMOVAL(reads, params.preset)
++    OBSERVE_LONG_READS(LONG_READ_HOST_REMOVAL.out.reads)
++}
+--- /dev/null
++++ b/tests/test_mock_samtools_fastq.py
+@@ -0,0 +1,61 @@
++"""The unpaired fixture double must respect -0 in every output mode."""
++import gzip
++import json
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++MOCK = ROOT / 'tests/mock_e2e/mock_tool.py'
++
++
++class MockSamtoolsFastqTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.base = Path(self.temp.name)
++        self.data = '@unpaired\nACGT\n+\n!~#%\n'
++        (self.base / 'input.fastq').write_text(self.data)
++        self.script = self.base / 'samtools'
++        self.script.write_bytes(MOCK.read_bytes())
++
++    def tearDown(self):
++        self.temp.cleanup()
++
++    def invoke(self, separate=False, unpaired=True):
++        bam = self.base / 'input.bam'
++        bam.write_text(json.dumps({'mock': True, 'format': 'bam', 'unpaired': unpaired,
++                                   'fastq': str(self.base / 'input.fastq')}))
++        args = ['fastq', '-0', 'other.fastq.gz', str(bam)]
++        if separate: args += ['-1', 'one.fastq.gz', '-2', 'two.fastq.gz', '-s', 'single.fastq.gz']
++        env = os.environ.copy(); env['AUTOPLASM_MOCK_FIXTURE'] = str(self.base)
++        return subprocess.run(['python3', str(self.script), *args], cwd=self.base, env=env, capture_output=True, text=True)
++
++    def test_interleaving_does_not_move_category_zero_to_stdout(self):
++        result = self.invoke()
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual(result.stdout, '')
++        self.assertTrue((self.base / 'other.fastq.gz').is_file())
++        with gzip.open(self.base / 'other.fastq.gz', 'rt') as stream:
++            self.assertEqual(stream.read(), self.data)
++
++    def test_separate_outputs_keep_category_zero_and_empty_pair_files(self):
++        result = self.invoke(separate=True)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual(result.stdout, '')
++        for name in ['one', 'two', 'single']:
++            self.assertTrue((self.base / (name + '.fastq.gz')).is_file())
++            with gzip.open(self.base / (name + '.fastq.gz'), 'rt') as stream:
++                self.assertEqual(stream.read(), '')
++        with gzip.open(self.base / 'other.fastq.gz', 'rt') as stream:
++            self.assertEqual(stream.read(), self.data)
++
++    def test_unmodeled_paired_input_is_rejected_instead_of_fabricated(self):
++        result = self.invoke(unpaired=False)
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('unpaired long-read records only', result.stderr)
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- /dev/null
++++ b/tests/test_mock_bowtie_unaligned.py
+@@ -0,0 +1,50 @@
++"""Check double naming against fixed Bowtie2 wrapper and native output controls.
++
++All reads are intentionally passed through by this observer; no mapping inference.
++"""
++import gzip
++import json
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++MOCK = ROOT / 'tests/mock_e2e/mock_tool.py'
++
++
++class MockBowtieUnalignedTests(unittest.TestCase):
++    def check_names(self, template, expected):
++        with tempfile.TemporaryDirectory() as directory:
++            base = Path(directory)
++            (base / 'bowtie2').write_bytes(MOCK.read_bytes())
++            (base / 'index.mock.json').write_text(json.dumps({'reference': 'ACGT'}))
++            reads = ['@r/1\nACGT\n+\n!~#%\n', '@r/2\nTGCA\n+\n$%&*\n']
++            for mate, data in enumerate(reads, 1):
++                (base / f'R{mate}.fastq').write_text(data)
++            env = os.environ.copy(); env['AUTOPLASM_MOCK_FIXTURE'] = str(base)
++            result = subprocess.run(['python3', str(base / 'bowtie2'), '-x', 'index',
++                '-1', 'R1.fastq', '-2', 'R2.fastq', '--un-conc-gz', template],
++                cwd=base, env=env, capture_output=True, text=True)
++            self.assertEqual(result.returncode, 0, result.stderr)
++            outputs = sorted(p.name for p in base.iterdir()
++                             if p.name not in {'bowtie2', 'index.mock.json', 'R1.fastq', 'R2.fastq', 'mock-bowtie2.json'})
++            self.assertEqual(outputs, sorted(expected))
++            for name, data in zip(expected, reads):
++                with gzip.open(base / name, 'rt') as stream:
++                    self.assertEqual(stream.read(), data)
++
++    def test_final_extension(self):
++        self.check_names('sample.unmapped.fastq.gz',
++                         ['sample.unmapped.fastq.1.gz', 'sample.unmapped.fastq.2.gz'])
++
++    def test_placeholder(self):
++        self.check_names('sample.%.fastq.gz', ['sample.1.fastq.gz', 'sample.2.fastq.gz'])
++
++    def test_no_extension(self):
++        self.check_names('unmapped', ['unmapped.1', 'unmapped.2'])
++
++
++if __name__ == '__main__':
++    unittest.main()

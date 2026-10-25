@@ -1,0 +1,16 @@
+{
+  "run_id": "20261023-gtdb-inputs",
+  "receipt": "results/tool-audit/20261023-gtdb-input/receipt.json",
+  "receipt_sha256": "b8db63bb4b6317e1031ac09d82b945987dc0bc3b8b5db08749d8ac93b13b6c9c",
+  "contract": "docs/tool-audit/contracts/gtdb-inputs.md",
+  "official_commit": "f17decef1f9d9cf5b4d31fd21f5c9d32d813abdc",
+  "native57packages70Python_blobs": true,
+  "TA-031": "ready/open; no full taxonomy",
+  "TA-076": "bounded verified; user standardANI choice",
+  "limits": [
+    "TA076 fixed bounded parser/config contract; TA031 actual r232 taxonomy still open",
+    "10interface scenarios12trace include explicit model/reference-name observers and old loss/failure controls; no taxonomy classifier completed",
+    "User approved standard2.7.2 ANI pre-screening; not independently certified biological performance",
+    "Whole M0-M4/TETRA failed scientific threshold/AWS real execution remain unfinished"
+  ]
+}

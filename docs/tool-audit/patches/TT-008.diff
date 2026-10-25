@@ -1,0 +1,142 @@
+diff --git i/subworkflows/host_linking.nf w/subworkflows/host_linking.nf
+index 5e802ba..d1baa42 100644
+--- i/subworkflows/host_linking.nf
++++ w/subworkflows/host_linking.nf
+@@ -51,10 +51,10 @@ workflow HOST_LINKING {
+         if (params.host_linking_methods.contains('sequence')) {
+             ch_seq_in = ch_plasmids
+                 .map { meta, contigs -> tuple(meta, [contigs]) }
+-                .join(ch_mag_bins, remainder: true)
++                .join(ch_mag_bins, remainder: true, failOnDuplicate: true)
+                 .filter { meta, payload, bins -> payload != null }
+                 .map { meta, payload, bins -> tuple(meta, [payload[0], bins ?: []]) }
+-                .join(ch_taxonomy, remainder: true)
++                .join(ch_taxonomy, remainder: true, failOnDuplicate: true)
+                 .filter { meta, payload, tax -> payload != null }
+                 .map { meta, payload, tax -> tuple(meta, payload[0], payload[1], tax ?: []) }
+             LINK_SEQUENCE(ch_seq_in)
+diff --git i/tests/nextflow/link_sequence_optional.nf w/tests/nextflow/link_sequence_optional.nf
+index d24d390..f0ffe58 100644
+--- i/tests/nextflow/link_sequence_optional.nf
++++ w/tests/nextflow/link_sequence_optional.nf
+@@ -20,10 +20,12 @@ workflow {
+     ch_longread_bam = Channel.empty()
+     ch_plasmid_abundance = Channel.empty()
+     ch_host_profile = Channel.empty()
+-    ch_mag_bins = params.omit_mag ? Channel.empty() : Channel.fromList(['S1', 'S3'].collect { id ->
++    def magIds = params.duplicate_mag_keys ? ['S1', 'S1', 'S3'] : ['S1', 'S3']
++    def taxonomyIds = params.duplicate_taxonomy_keys ? ['S1', 'S1', 'S4'] : ['S1', 'S4']
++    ch_mag_bins = params.omit_mag ? Channel.empty() : Channel.fromList(magIds.collect { id ->
+         tuple([id: id], file("${root}/${id}.metabat2_bins", checkIfExists: true))
+     })
+-    ch_taxonomy = params.omit_taxonomy ? Channel.empty() : Channel.fromList(['S1', 'S4'].collect { id ->
++    ch_taxonomy = params.omit_taxonomy ? Channel.empty() : Channel.fromList(taxonomyIds.collect { id ->
+         tuple([id: id], file("${root}/${id}.taxonomy.tsv", checkIfExists: true))
+     })
+     HOST_LINKING(ch_plasmids, ch_assembly, ch_longread_bam, ch_plasmid_abundance,
+diff --git i/tests/nextflow/nextflow.config w/tests/nextflow/nextflow.config
+index b7a14ae..205d9d0 100644
+--- i/tests/nextflow/nextflow.config
++++ w/tests/nextflow/nextflow.config
+@@ -37,6 +37,8 @@ params.omit_mag = false
+ params.omit_taxonomy = false
+ params.empty_plasmids = false
+ params.duplicate_keys = false
++params.duplicate_mag_keys = false
++params.duplicate_taxonomy_keys = false
+ params.include_fastp_json = false
+ params.extra_alias_tests = false
+ params.sample_id = 'S1'
+diff --git i/tests/run_module_regressions.py w/tests/run_module_regressions.py
+index 87a0bca..0f74b8d 100644
+--- i/tests/run_module_regressions.py
++++ w/tests/run_module_regressions.py
+@@ -102,9 +102,18 @@ def run_nf(base, harness, fixture_dir, out_dir, work_dir, trace_path,
+         print(result.stdout, end="")
+     if result.stderr:
+         print(result.stderr, end="", file=sys.stderr)
++    if not expect_success and result.returncode == 0:
++        raise RegressionFailure("Expected Nextflow failure, but workflow exited successfully")
+     return result
+ 
+ 
++def assert_duplicate_join_failure(result):
++    assert_true(result.returncode != 0, "duplicate-key workflow exited successfully")
++    assert_true(re.search(r"Detected join operation duplicate emission on (?:left|right) channel -- offending element:",
++                          result.stdout + result.stderr, re.IGNORECASE) is not None,
++                "workflow failed without the intended duplicate-key join diagnostic")
++
++
+ def trace_rows(path):
+     if not path.exists() or path.stat().st_size == 0:
+         return []
+@@ -315,13 +324,11 @@ def suite_sequence_optional(base):
+             s2 = (table_dir / "S2.sequence_links.tsv").read_text()
+             assert_true("sequence_similarity" in s1 and "sequence_similarity" not in s2,
+                         "present MAG and absent MAG did not take distinct expected branches")
+-    duplicate_trace = base / "trace-duplicate-keys.trace"
+-    duplicate = run_nf(base, "link_sequence_optional.nf", fixture, base / "out-duplicate-keys",
+-                       base / "work-duplicate-keys", duplicate_trace,
+-                       {"duplicate_keys": True}, expect_success=False)
+-    duplicate_text = (duplicate.stdout + duplicate.stderr).lower()
+-    assert_true("duplicate" in duplicate_text or "same key" in duplicate_text,
+-                "duplicate sample key was silently accepted by the outer joins")
++    for key in ("duplicate_keys", "duplicate_mag_keys", "duplicate_taxonomy_keys"):
++        duplicate = run_nf(base, "link_sequence_optional.nf", fixture, base / f"out-{key}",
++                           base / f"work-{key}", base / f"trace-{key}.trace",
++                           {key: True}, expect_success=False)
++        assert_duplicate_join_failure(duplicate)
+     print("sequence-optional: left-side plasmid filtering, absent MAG/taxonomy, and empty input passed")
+ 
+ 
+diff --git 1/tests/test_module_regression_oracles.py 2/tests/test_module_regression_oracles.py
+new file mode 100644
+index 0000000..f392780
+--- /dev/null
++++ 2/tests/test_module_regression_oracles.py
+@@ -0,0 +1,45 @@
++"""Adversarial exit-status checks for the Nextflow regression runner."""
++import importlib.util
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++from unittest.mock import patch
++
++spec = importlib.util.spec_from_file_location('regressions', Path(__file__).with_name('run_module_regressions.py'))
++runner = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(runner)
++
++
++class NextflowExitOracleTests(unittest.TestCase):
++    def invoke(self, returncode, expect_success):
++        with tempfile.TemporaryDirectory() as directory:
++            base = Path(directory)
++            result = subprocess.CompletedProcess(['nextflow'], returncode,
++                stdout='work-duplicate-keys: duplicate sample key was rejected\n', stderr='')
++            with patch.object(runner.subprocess, 'run', return_value=result):
++                return runner.run_nf(base, 'unused.nf', base/'fixture', base/'out',
++                                     base/'work', base/'trace.tsv', expect_success=expect_success)
++
++    def test_negative_case_rejects_success_even_with_expected_words(self):
++        with self.assertRaises(runner.RegressionFailure):
++            self.invoke(0, False)
++
++    def test_negative_case_returns_failure_for_diagnostic_checks(self):
++        self.assertEqual(self.invoke(1, False).returncode, 1)
++
++    def test_unrelated_failure_with_duplicate_path_is_rejected(self):
++        result = subprocess.CompletedProcess([], 1, stdout='work-duplicate-keys: missing input', stderr='')
++        with self.assertRaises(runner.RegressionFailure):
++            runner.assert_duplicate_join_failure(result)
++
++    def test_real_join_diagnostic_is_accepted_on_either_side(self):
++        for side in ('left', 'right'):
++            with self.subTest(side=side):
++                result = subprocess.CompletedProcess([], 1, stdout='', stderr=
++                    f'Detected join operation duplicate emission on {side} channel -- offending element: key=[id:S1]')
++                runner.assert_duplicate_join_failure(result)
++
++
++if __name__ == '__main__':
++    unittest.main()

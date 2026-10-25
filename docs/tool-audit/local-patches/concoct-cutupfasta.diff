@@ -1,0 +1,31 @@
+--- a/modules/nf-core/concoct/cutupfasta/main.nf
++++ b/modules/nf-core/concoct/cutupfasta/main.nf
+@@ -23,15 +23,25 @@
+     def args = task.ext.args ?: ''
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     def bedfile = bed ? "-b ${prefix}.bed" : ""
++    def compressed = fasta.name.toLowerCase().endsWith('.gz')
++    def input_fasta = compressed ? '.concoct_input/assembly.fna' : fasta
++    def checked_cut = file("${moduleDir}/../../../../bin/run_concoct_cut_checked.py").text
+     if ("${fasta}" == "${prefix}.fasta") {
+         error("Input and output names are the same, set prefix in module configuration to disambiguate!")
+     }
+     """
+-    cut_up_fasta.py \\
+-        ${fasta} \\
++    if ${compressed}; then
++        mkdir -p .concoct_input
++        gzip -cd -- ${fasta} > .concoct_input/assembly.fna
++    fi
++
++    python - \\
++        ${input_fasta} \\
+         ${args} \\
+         ${bedfile} \\
+-        > ${prefix}.fasta
++        > ${prefix}.fasta <<'CONCOCT_CUT_PY'
++${checked_cut}
++CONCOCT_CUT_PY
+ 
+     """
+ 

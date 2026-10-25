@@ -1,0 +1,1753 @@
+--- a/subworkflows/cross_sample.nf
++++ b/subworkflows/cross_sample.nf
+@@ -3,7 +3,6 @@
+  * differential abundance (11), FastSpar co-occurrence network (12), and the
+  * final report. Sample-count gates are set by the nextflow.config defaults.
+  */
+-include { MERGE_ABUNDANCE; MERGE_ABUNDANCE as MERGE_ABUNDANCE_PLASMID } from '../modules/cross_sample/merge_abundance'
+ include { DIVERSITY } from '../modules/cross_sample/diversity'
+ include { DIFFERENTIAL_ABUNDANCE } from '../modules/cross_sample/differential'
+ include { DESEQ2 } from '../modules/cross_sample/deseq2'
+@@ -13,8 +12,8 @@
+ 
+ workflow CROSS_SAMPLE {
+     take:
+-    ch_contig_tables    // tuple(meta, coverm tsv); empty on assembly platform
+-    ch_plasmid_tables   // tuple(meta, coverm tsv); empty on assembly platform
++    ch_contig_tables    // path(shared contig long table); empty on assembly platform
++    ch_plasmid_tables   // path(shared plasmid long table); empty on assembly platform
+     ch_plasmids         // tuple(meta, fasta) — report/catalog trigger
+     ch_done             // channel of trigger items from all optional branches
+     n_samples           // val: number of samples in the samplesheet
+@@ -25,30 +24,10 @@
+     ch_stats_done = Channel.empty()
+ 
+     if (params.platform != 'assembly') {
+-        ch_contig_inputs = ch_contig_tables.toList().map { entries ->
+-            tuple(entries.collect { entry -> entry[0].id }, entries.collect { entry -> entry[1] })
+-        }
+-        ch_plasmid_inputs = ch_plasmid_tables.toList().map { entries ->
+-            tuple(entries.collect { entry -> entry[0].id }, entries.collect { entry -> entry[1] })
+-        }
+-
+-        // merged contig coverage (diversity / differential input)
+-        MERGE_ABUNDANCE(
+-            ch_contig_inputs,
+-            'contig_abundance',
+-            'contig_id'
+-        )
+-        ch_contig_merged = MERGE_ABUNDANCE.out.table
+-        ch_stats_done = ch_stats_done.mix(ch_contig_merged)
+-
+-        // merged plasmid abundance (DESeq2 / network input; plasmid_id column)
+-        MERGE_ABUNDANCE_PLASMID(
+-            ch_plasmid_inputs,
+-            'plasmid_abundance',
+-            'plasmid_id'
+-        )
+-        ch_plasmid_merged = MERGE_ABUNDANCE_PLASMID.out.table
+-        ch_stats_done = ch_stats_done.mix(ch_plasmid_merged)
++        // Tables already contain all samples on the same sequence reference.
++        ch_contig_merged = ch_contig_tables
++        ch_plasmid_merged = ch_plasmid_tables
++        ch_stats_done = ch_stats_done.mix(ch_contig_merged, ch_plasmid_merged)
+ 
+         if (params.run_diversity && n_samples >= params.min_diversity_samples) {
+             DIVERSITY(ch_contig_merged, ch_metadata)
+--- a/subworkflows/illumina.nf
++++ b/subworkflows/illumina.nf
+@@ -22,6 +22,7 @@
+ include { PLASMID_DETECTION } from './plasmid_detection'
+ include { PLASMID_DOWNSTREAM } from './plasmid_downstream'
+ include { PLASMID_ABUNDANCE } from './plasmid_abundance'
++include { SHARED_QUANTIFICATION } from './shared_quantification'
+ include { HOST_PREDICTION } from './host_prediction'
+ include { MAG_HOST } from './mag_host'
+ include { HOST_LINKING } from './host_linking'
+@@ -108,9 +109,14 @@
+     MAG_HOST(ch_assembly, CONTIG_COVERAGE.out.bam, CONTIG_COVERAGE.out.table)
+ 
+     // ---------------- host-plasmid linking (07) ----------------
++    // All samples remap to one competitive nucleotide reference for statistics.
++    // Include zero-candidate samples; local coverage remains for MAG/linking.
++    SHARED_QUANTIFICATION(ch_assembly, PLASMID_DETECTION.out.plasmid_contigs,
++                          ch_final_reads, Channel.empty(), 'short', ch_samples.count())
++
+     HOST_LINKING(
+         ch_plasmids, ch_assembly, Channel.empty(),
+-        PLASMID_ABUNDANCE.out.short_abundance, HOST_PREDICTION.out.host_profile,
++        SHARED_QUANTIFICATION.out.plasmids, HOST_PREDICTION.out.host_profile,
+         MAG_HOST.out.mag_bins, MAG_HOST.out.taxonomy, false
+     )
+ 
+@@ -133,9 +139,10 @@
+ 
+     emit:
+     plasmids       = ch_plasmids
+-    contig_tables  = CONTIG_COVERAGE.out.table
+-    plasmid_tables = PLASMID_ABUNDANCE.out.short_abundance
+-    done = PLASMID_DETECTION.out.consensus.map { meta, f -> f }
++    contig_tables  = SHARED_QUANTIFICATION.out.contigs
++    plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
++    done = SHARED_QUANTIFICATION.out.states.mix(SHARED_QUANTIFICATION.out.method, SHARED_QUANTIFICATION.out.catalogue)
++        .mix(PLASMID_DETECTION.out.consensus.map { meta, f -> f })
+         .mix(PLASMID_DETECTION.out.structure.map { meta, f -> f })
+         .mix(CONTIG_COVERAGE.out.table.map { meta, f -> f })
+         .mix(PLASMID_ABUNDANCE.out.short_abundance.map { meta, f -> f })
+--- a/subworkflows/ont.nf
++++ b/subworkflows/ont.nf
+@@ -26,6 +26,7 @@
+ include { PLASMID_DETECTION } from './plasmid_detection'
+ include { PLASMID_DOWNSTREAM } from './plasmid_downstream'
+ include { PLASMID_ABUNDANCE } from './plasmid_abundance'
++include { SHARED_QUANTIFICATION } from './shared_quantification'
+ include { HOST_PREDICTION } from './host_prediction'
+ include { MAG_HOST } from './mag_host'
+ include { HOST_LINKING } from './host_linking'
+@@ -111,9 +112,14 @@
+     // ---------------- host prediction / MAG / linking ----------------
+     HOST_PREDICTION(Channel.empty(), ch_final_long, ch_plasmids, false, false)
+     MAG_HOST(ch_assembly, CONTIG_COVERAGE.out.bam, CONTIG_COVERAGE.out.table)
++    // All samples remap to one competitive nucleotide reference for statistics.
++    // Include zero-candidate samples; local coverage remains for MAG/linking.
++    SHARED_QUANTIFICATION(ch_assembly, PLASMID_DETECTION.out.plasmid_contigs,
++                          Channel.empty(), ch_final_long, 'map-ont', ch_samples.count())
++
+     HOST_LINKING(
+         ch_plasmids, ch_assembly, CONTIG_COVERAGE.out.long_bam,
+-        PLASMID_ABUNDANCE.out.long_abundance, HOST_PREDICTION.out.host_profile,
++        SHARED_QUANTIFICATION.out.plasmids, HOST_PREDICTION.out.host_profile,
+         MAG_HOST.out.mag_bins, MAG_HOST.out.taxonomy, true
+     )
+ 
+@@ -132,9 +138,10 @@
+ 
+     emit:
+     plasmids       = ch_plasmids
+-    contig_tables  = CONTIG_COVERAGE.out.table
+-    plasmid_tables = PLASMID_ABUNDANCE.out.long_abundance
+-    done = PLASMID_DETECTION.out.consensus.map { meta, f -> f }
++    contig_tables  = SHARED_QUANTIFICATION.out.contigs
++    plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
++    done = SHARED_QUANTIFICATION.out.states.mix(SHARED_QUANTIFICATION.out.method, SHARED_QUANTIFICATION.out.catalogue)
++        .mix(PLASMID_DETECTION.out.consensus.map { meta, f -> f })
+         .mix(PLASMID_DETECTION.out.structure.map { meta, f -> f })
+         .mix(CONTIG_COVERAGE.out.table.map { meta, f -> f })
+         .mix(PLASMID_ABUNDANCE.out.long_abundance.map { meta, f -> f })
+--- a/subworkflows/pacbio_hifi.nf
++++ b/subworkflows/pacbio_hifi.nf
+@@ -18,6 +18,7 @@
+ include { PLASMID_DETECTION } from './plasmid_detection'
+ include { PLASMID_DOWNSTREAM } from './plasmid_downstream'
+ include { PLASMID_ABUNDANCE } from './plasmid_abundance'
++include { SHARED_QUANTIFICATION } from './shared_quantification'
+ include { HOST_PREDICTION } from './host_prediction'
+ include { MAG_HOST } from './mag_host'
+ include { HOST_LINKING } from './host_linking'
+@@ -97,9 +98,14 @@
+ 
+     HOST_PREDICTION(Channel.empty(), ch_final_long, ch_plasmids, false, false)
+     MAG_HOST(ch_assembly, CONTIG_COVERAGE.out.bam, CONTIG_COVERAGE.out.table)
++    // All samples remap to one competitive nucleotide reference for statistics.
++    // Include zero-candidate samples; local coverage remains for MAG/linking.
++    SHARED_QUANTIFICATION(ch_assembly, PLASMID_DETECTION.out.plasmid_contigs,
++                          Channel.empty(), ch_final_long, 'map-hifi', ch_samples.count())
++
+     HOST_LINKING(
+         ch_plasmids, ch_assembly, CONTIG_COVERAGE.out.long_bam,
+-        PLASMID_ABUNDANCE.out.long_abundance, HOST_PREDICTION.out.host_profile,
++        SHARED_QUANTIFICATION.out.plasmids, HOST_PREDICTION.out.host_profile,
+         MAG_HOST.out.mag_bins, MAG_HOST.out.taxonomy, true
+     )
+ 
+@@ -107,9 +113,10 @@
+ 
+     emit:
+     plasmids       = ch_plasmids
+-    contig_tables  = CONTIG_COVERAGE.out.table
+-    plasmid_tables = PLASMID_ABUNDANCE.out.long_abundance
+-    done = PLASMID_DETECTION.out.consensus.map { meta, f -> f }
++    contig_tables  = SHARED_QUANTIFICATION.out.contigs
++    plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
++    done = SHARED_QUANTIFICATION.out.states.mix(SHARED_QUANTIFICATION.out.method, SHARED_QUANTIFICATION.out.catalogue)
++        .mix(PLASMID_DETECTION.out.consensus.map { meta, f -> f })
+         .mix(PLASMID_DETECTION.out.structure.map { meta, f -> f })
+         .mix(CONTIG_COVERAGE.out.table.map { meta, f -> f })
+         .mix(PLASMID_ABUNDANCE.out.long_abundance.map { meta, f -> f })
+--- a/subworkflows/hybrid.nf
++++ b/subworkflows/hybrid.nf
+@@ -29,6 +29,7 @@
+ include { PLASMID_DETECTION } from './plasmid_detection'
+ include { PLASMID_DOWNSTREAM } from './plasmid_downstream'
+ include { PLASMID_ABUNDANCE } from './plasmid_abundance'
++include { SHARED_QUANTIFICATION } from './shared_quantification'
+ include { HOST_PREDICTION } from './host_prediction'
+ include { MAG_HOST } from './mag_host'
+ include { HOST_LINKING } from './host_linking'
+@@ -147,9 +148,14 @@
+     // ---------------- host prediction / MAG / linking ----------------
+     HOST_PREDICTION(ch_final_short, Channel.empty(), ch_plasmids, false, false)
+     MAG_HOST(ch_assembly, CONTIG_COVERAGE.out.bam, CONTIG_COVERAGE.out.table)
++    // All samples remap to one competitive nucleotide reference for statistics.
++    // Include zero-candidate samples; local coverage remains for MAG/linking.
++    SHARED_QUANTIFICATION(ch_assembly, PLASMID_DETECTION.out.plasmid_contigs,
++                          ch_final_short, ch_final_long, 'short', ch_samples.count())
++
+     HOST_LINKING(
+         ch_plasmids, ch_assembly, CONTIG_COVERAGE.out.long_bam,
+-        PLASMID_ABUNDANCE.out.short_abundance, HOST_PREDICTION.out.host_profile,
++        SHARED_QUANTIFICATION.out.plasmids, HOST_PREDICTION.out.host_profile,
+         MAG_HOST.out.mag_bins, MAG_HOST.out.taxonomy, true
+     )
+ 
+@@ -178,10 +184,11 @@
+ 
+     emit:
+     plasmids       = ch_plasmids
+-    contig_tables  = CONTIG_COVERAGE.out.table
+-    // Cross-sample statistics use the short-read abundance chain for hybrid
+-    plasmid_tables = PLASMID_ABUNDANCE.out.short_abundance
+-    done = PLASMID_DETECTION.out.consensus.map { meta, f -> f }
++    contig_tables  = SHARED_QUANTIFICATION.out.contigs
++    // Shared quantification uses only short reads for hybrid statistics
++    plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
++    done = SHARED_QUANTIFICATION.out.states.mix(SHARED_QUANTIFICATION.out.method, SHARED_QUANTIFICATION.out.catalogue)
++        .mix(PLASMID_DETECTION.out.consensus.map { meta, f -> f })
+         .mix(PLASMID_DETECTION.out.structure.map { meta, f -> f })
+         .mix(CONTIG_COVERAGE.out.table.map { meta, f -> f })
+         .mix(PLASMID_ABUNDANCE.out.short_abundance.map { meta, f -> f })
+--- a/bin/deseq2_plasmid.R
++++ b/bin/deseq2_plasmid.R
+@@ -68,20 +68,19 @@
+   abundance$raw_count[!is.na(abundance$raw_count) & abundance$raw_count == "NA"] <- NA
+ }
+ 
+-use_raw_counts <- "raw_count" %in% names(abundance) && any(nzchar(abundance$raw_count))
+-value_column <- if (use_raw_counts) "raw_count" else "coverage"
++value_column <- "raw_count"
+ if (!value_column %in% names(abundance)) {
+   stop(paste(abundance_path, ": missing selected numeric column", value_column))
+ }
+ abundance$value <- suppressWarnings(as.numeric(abundance[[value_column]]))
+-bad <- which(!is.finite(abundance$value) | abundance$value < 0)
++bad <- which(!is.finite(abundance$value) | abundance$value < 0 |
++             abundance$value != floor(abundance$value) | abundance$value > .Machine$integer.max)
+ if (length(bad)) {
+   i <- bad[1L]
+-  stop(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=%s value='%s'; expected finite nonnegative measurement",
++  stop(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=%s value='%s'; expected finite nonnegative integer raw count within DESeq2 range; coverage is not a count",
+                abundance_path, i + 1L, abundance$sample_id[i], abundance$plasmid_id[i],
+                value_column, abundance[[value_column]][i]))
+ }
+-abundance$value <- round(abundance$value)
+ 
+ counts <- xtabs(value ~ plasmid_id + sample_id, data = abundance)
+ metadata <- metadata[!is.na(metadata$group) & nzchar(metadata$group), c("sample_id", "group")]
+@@ -123,7 +122,7 @@
+ dds <- dds[keep, ]
+ dds <- DESeq(dds, quiet = TRUE, sfType = sf_type)
+ 
+-cov_warn <- if (use_raw_counts) "" else "Rounded coverage used as count proxy"
++cov_warn <- ""
+ groups <- levels(metadata$group)
+ all_results <- list()
+ comparison_index <- 1
+--- a/bin/network_prepare.R
++++ b/bin/network_prepare.R
+@@ -3,9 +3,8 @@
+ #
+ # Converts the merged plasmid abundance table into FastSpar's OTU-table
+ # layout (rows = contigs, columns = samples, first header cell ``#OTU ID``).
+-# CoverM does not emit raw counts, so rounded coverage is used as the count
+-# proxy (same convention as bin/deseq2_plasmid.R); a stderr warning notes
+-# this because FastSpar expects integer absolute counts.
++# Require measured integer raw counts (shared quantification uses CoverM count).
++# Coverage is not a substitute for absolute read counts.
+ #
+ # FastSpar input best practices (phanta pipeline, bhattlab/phanta; scwatts/
+ # fastspar issue #1): prevalence-filter contigs before the SparCC run
+@@ -94,27 +93,19 @@
+   cid <- rep("", nrow(ab))
+ }
+ raw <- if ("raw_count" %in% names(ab)) as.character(ab$raw_count) else rep("", nrow(ab))
+-cov <- if ("coverage" %in% names(ab)) as.character(ab$coverage) else rep("", nrow(ab))
+ raw[is.na(raw) | raw == "NA"] <- ""
+-cov[is.na(cov) | cov == "NA"] <- ""
+-if (any(!nzchar(raw) & nzchar(cov))) {
+-  cat("warning: rounding coverage to counts; FastSpar expects integer counts\n",
+-      file = stderr())
+-}
+ if (!"sample_id" %in% names(ab) || !any(c("contig_id", "plasmid_id") %in% names(ab)))
+   die(paste0(opts$abundance, ": missing sample_id or feature ID column"))
+-if (!any(c("raw_count", "coverage") %in% names(ab)))
+-  die(paste0(opts$abundance, ": missing raw_count or coverage column"))
+-value <- ifelse(nzchar(raw), raw, cov)
++if (!"raw_count" %in% names(ab))
++  die(paste0(opts$abundance, ": missing raw_count column; coverage is not a count"))
++value <- raw
+ num <- suppressWarnings(as.numeric(value))
+-bad <- which(!is.finite(num) | num < 0)
++bad <- which(!is.finite(num) | num < 0 | num != floor(num))
+ if (length(bad)) {
+   i <- bad[1L]
+-  field <- if (nzchar(raw[i])) "raw_count" else "coverage"
+-  die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=%s value='%s'; expected finite nonnegative measurement",
+-              opts$abundance, i + 1L, ab$sample_id[i], cid[i], field, value[i]))
++  die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=raw_count value='%s'; expected finite nonnegative integer raw count; coverage is not a count",
++              opts$abundance, i + 1L, ab$sample_id[i], cid[i], value[i]))
+ }
+-num <- round(num)
+ 
+ mat_dt <- data.table(contig = cid, sample = as.character(ab$sample_id),
+                      value = num)
+@@ -147,7 +138,7 @@
+ }
+ 
+ # Prevalence filter (phanta convention): keep contigs detected
+-# (rounded value > 0) in >= ceil(min_prevalence * n_samples) samples.
++# (raw count > 0) in >= ceil(min_prevalence * n_samples) samples.
+ n_filtered <- 0L
+ if (nrow(wide) > 0 && min_prev > 0 && length(kept_samples) > 0) {
+   detected <- vapply(kept_samples, function(s) {
+--- a/bin/merge_abundance.R
++++ b/bin/merge_abundance.R
+@@ -98,6 +98,9 @@
+     die(paste0(path, ": missing Mean coverage column"))
+   tpm_col <- Find(function(f) endsWith(tolower(f), "tpm"), fields)
+   rpkm_col <- Find(function(f) endsWith(tolower(f), "rpkm"), fields)
++  count_cols <- fields[tolower(fields) == "count" | endsWith(tolower(fields), "read count")]
++  if (length(count_cols) > 1L) die(paste0(path, ": ambiguous Count columns"))
++  count_col <- if (length(count_cols)) count_cols[1L] else NULL
+   if (nrow(dt) == 0)
+     return(list(rows = data.table(), seen = seen_features))
+   rows <- list()
+@@ -120,13 +123,20 @@
+     if (length(numeric_coverage) != 1L || !is.finite(numeric_coverage) || numeric_coverage < 0)
+       die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=coverage value='%s'; expected finite nonnegative measurement",
+                   path, line_number, sample, feature, coverage))
++    raw_count <- get_col(count_col)
++    if (!is.null(count_col)) {
++      numeric_count <- suppressWarnings(as.numeric(raw_count))
++      if (!is.finite(numeric_count) || numeric_count < 0 || numeric_count != floor(numeric_count))
++        die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=raw_count value='%s'; expected finite nonnegative integer count",
++                    path, line_number, sample, feature, raw_count))
++    }
+     rows[[length(rows) + 1]] <- data.table(
+       feature = feature,
+       sample_id = sample,
+       rpkm = get_col(rpkm_col),
+       tpm = get_col(tpm_col),
+       coverage = coverage,
+-      raw_count = "",
++      raw_count = raw_count,
+       mapper = "")
+   }
+   list(rows = if (length(rows)) rbindlist(rows) else data.table(), seen = seen_features)
+--- a/README.md
++++ b/README.md
+@@ -32,16 +32,18 @@
+ 当前最关键的结论边界：
+ 
+ 1. 默认只有 geNomad，不能表述为默认多工具交叉验证；共识规则分数不是校准概率。
+-2. MMseqs2 catalog 尚未接回定量；各样本回贴自身候选后合并，不能直接视为
+-   统一质粒目录上的可比矩阵。DIVERSITY 与内部差异分支实际读取 **contig 表**。
+-3. 本项目 CoverM 配置只请求 mean/TPM/RPKM，`raw_count` 留空；DESeq2 与网络
+-   的 coverage 取整回退只是代理，不能当作原始 read/fragment 计数验收。
++2. 跨样本统计和共丰度关联使用统一核酸参考重映射；完整序列及反向互补去重，
++   不同序列保持分开。这是序列特征目录，不是质粒家族目录。DIVERSITY 与内部
++   差异分支读取共享 **contig 表**；MMseqs2 比较目录保持独立。
++3. 共享定量保留 MAPQ≥10 的主要比对，CoverM 同时生成 mean/TPM/RPKM/count。
++   `raw_count` 是 read 比对数，双端两条 mate 分别计数；DESeq2 与网络拒绝缺失
++   或小数计数，不再将 coverage 取整。该输入契约不替代研究设计与模型适配验证。
+ 4. 末端反向重复（ITR）只记录结构证据，单独出现时拓扑为未知；header/DTR
+    支持的环状候选仍需独立证据复核，宿主预测和共现连线也不能直接视为确证。
+ 5. mock / 单元回归支持工程行为，不证明真实数据库下的分类性能或生物学结论。
+ 
+-建议先补齐 **统一 catalog 回贴与计数 → 研究设计及统计模型 → 结构 / MAG / 宿主
+-证据复核 → 真实数据验收及报告溯源**，再进行可发表的跨样本推断。
++进行可发表的跨样本推断前，仍需完善研究设计、统计模型、结构 / MAG / 宿主
++证据复核、真实数据验收及报告溯源。
+ 
+ ## 快速开始
+ 
+@@ -95,7 +97,7 @@
+ | 07 | `07_host_prediction/` | MetaPhlAn 群落 profile（reads 路径默认）；Kraken2（仅 illumina 可选）；PlasmidHostFinder（assembly 显式启用）；MAG 与宿主-质粒关联默认关 |
+ | 08 | `08_annotation/` | 默认 Bakta + AMRFinderPlus + ISEScan + IntegronFinder；可选 Prodigal、ABRICATE、RGI/CARD、eggNOG-mapper、MOB-suite |
+ | 09 | `09_comparative_genomics/` | 默认 MMseqs2 跨样本聚类（identity 0.95 / target coverage 0.8）；可选 BLASTn、MUMmer、clinker；catalog 未反馈至定量 |
+-| 10 | `10_abundance/` | reads 回贴各样本共识候选 → CoverM；hybrid 分 `short/` 与 `long/`；assembly 跳过 |
++| 10 | `10_abundance/` | 保留各样本候选的本地丰度；另建全部组装序列的共享参考并重映射，向统计及共丰度关联提供统一特征/计数；hybrid 统计只用短读段；assembly 跳过 |
+ | 11 | `11_diversity/` | 默认 contig 多样性（≥3 样本）与内部 contig 差异分析；可选 plasmid 表 DESeq2（默认关） |
+ | 12 | `12_network/` | FastSpar 相关 / 协方差矩阵（默认关，≥20 样本）；当前未接 bootstrap / p 值步骤 |
+ | — | `tables/` | 合并的 contig/plasmid 丰度长表 |
+@@ -114,7 +116,10 @@
+ 
+ `sample_id` 必须全表唯一，并符合 `[A-Za-z0-9][A-Za-z0-9_.-]*`。点号、连字符和双下划线均可保留，例如 `A__B.v1`；空值、空白、斜线和其他字符会在流程启动时按样本表行号报错。此约束用于保证输出文件名和 shell 参数具有唯一、明确的样本身份。
+ 
+-丰度合并由流程按每个 CoverM 文件的元数据显式传入样本 ID。独立调用
++共享定量按元数据传入每份 CoverM 表的样本 ID，并核对完整样本×特征集合，
++缺测量报错，实际零值和全局空参考分别记录在 `tables/sample_states.tsv`。
++来源对应见 `10_abundance/shared_reference/catalogue/sources.tsv`；共丰度关联
++使用共享序列 ID，其他按样本的结构/宿主证据仍保留原 ID。独立调用
+ `bin/merge_abundance.R` 时也应使用与 `--tables` 顺序对应的 `--sample-ids`；
+ 为兼容旧调用保留的文件名推断无法无歧义处理点号和后缀相似的样本名。
+ 
+@@ -299,10 +304,17 @@
+ - 差异丰度"内部效应量法"为 Welch t 检验 + Hedges' g + BH 校正，默认按
+   `--min-prevalence 0.1` 过滤低流行度 contig；它不是 MaAsLin2 或 ANCOM-BC 的
+   实现，也未建模配对 / 批次。DESeq2 当前为 `~ group`。
+-- CoverM 支持 `count`，但本项目 `conf/nfcore_upstream.config` 只请求
+-  `mean tpm rpkm`，合并表的 `raw_count` 为空；DESeq2 / FastSpar 回退到
+-  coverage 取整代理。要作计数推断，需先提供可追溯的计数及 read/fragment 分配
+-  规则，并验证模型适配性。参见 [CoverM 官方能力](https://github.com/wwood/CoverM)
++- 共享定量使用全部样本组装序列竞争参考，完整 DNA/反向互补一致才去重；
++  不折叠相近序列、片段或环状起点旋转，不能解释为家族丰度。参考中任一来源被
++  共识判为质粒的序列进入质粒子表，逐来源判断保留在 `sources.tsv`。
++  排除未比对、secondary、supplementary 和未知 MAPQ=255，仅保留 MAPQ≥10；
++  Bowtie2 并列最佳匹配可能 MAPQ=1，不能只过滤 MAPQ=0。该阈值是明确的
++  分配策略，不能保证唯一生物学来源，也会损失相近参考共享区域的计数。
++  CoverM 在同一过滤 BAM 上计算 mean/TPM/RPKM/count，末端排除为0；计数为
++  read 比对数，双端 mate 分开，不称为 fragment 数。hybrid 跨样本只用短读段，
++  不混合长短读计数。DESeq2 / FastSpar 严格要求非负整数 `raw_count`，缺失不会
++  回退 coverage。旧统计和共丰度结果需在新目录重新计算，不能与旧本地 ID 表混用。
++  本地 MAG/链接用覆盖度路径及其原参数另行保留。参见 [CoverM 固定版本能力](https://github.com/wwood/CoverM/tree/v0.7.0)
+   与 [DESeq2 官方输入说明](https://www.bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html)。
+ - 多样性当前基于 contig coverage；Bray–Curtis 默认未做 TSS，脚本虽支持
+   `--beta-normalization tss`，流程模块尚未传入。全零样本对的 NaN 被转为 0
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -382,3 +382,15 @@
+ 依赖 Nextflow、R/data.table/Biostrings；两份参考的下载 URL、accession、完整文件/核酸 SHA256、长度与 GenBank 拓扑见 `tests/structure-reference.lock.json`。SCP1 NC_003903.1 的线性拓扑另有原始实验研究支持（PMID1847368）。原脚本对其输出 true/itr1000，修复后保留 itr1000 而拓扑 unknown；不从 ITR 反推线性。pUTI89 原始 FASTA 无闭环证据时保持 unknown；另一个明确依据独立 GenBank 注释添加 header 的输入才应产生 header 候选。人工 DTR/ITR 和空结果仅为规则/格式对照。
+ 
+ 原 PLASMID_STRUCTURE 五任务、原 REPORT 一任务核对 ID/长度/重复/候选数量，报告不把 ITR-only 计为环状。runner 在生产者完成后显式准备全新报告目录，不能据此关闭生产 publishDir 屏障问题 TA-015。13 项结构单元方法、3 项报告方法、54 项 R smoke 和原检测路由26任务另验；分类器为 observer，不是分类器/图或 reads/完整平台/nf-test 框架/镜像或科学性能认证。
++
++### 统一核酸参考与重映射（TA-010/011/012）
++
++新目录按全长核酸或反向互补精确去重，保留 SHA256 序列 ID、来源表、逐样本候选状态；不做 ANI/家族或环状旋转聚类。生产四个 reads 平台均提供全部样本的组装及原始共识输出（含空候选），统计与 co_abundance 使用共享表；本地覆盖度保留给 MAG/局部链接。hybrid 统计只用短读段。
++
++公开入口 `tests/run_shared_quantification.py`：参数 `--work-dir`、`--references`（structure-reference.lock.json 的两个原始 FASTA）、`--bowtie-prefix`（2.5.4）、`--coverm-prefix`（0.7.0）、`--minimap-prefix`（2.30/SAMtools1.23.1）、`--python-prefix`（3.12），以及 `--modes short map-ont map-hifi`。实际原节点和 CROSS_SAMPLE/HOST_LINKING 消费者共19+18+18任务验证同名异序列、同序列改名/反向互补、无本地候选仍测量、显式零样本、计数/覆盖度、独立 Bray-Curtis 与已明确控制宿主profile的r=1。reads 是固定真实 DNA 上按源序列唯一性预选坐标的明确模拟输入；不是湿实验数据或性能基准。
++
++`tests/run_shared_quantification_edges.py` 的参数为 `--work-dir`、`--reference`（锁定pUTI89 FASTA）、`--bowtie-prefix`、`--coverm-prefix`、`--python-prefix`。真实 mapper 的三边界场景：完整近似序列仅在读段区域外改一个碱基，所有等价读段应被低MAPQ过滤；全局空参考只运行目录和汇总两个任务且保留4样本状态；故意少一个样本测量必须失败且无最终统计表发布。最初 MAPQ≥1 测试实际发现 Bowtie2 ties=1，保留该失败证据，最终策略为 MAPQ≥10/排除未知255与非主要比对。
++
++Python目录/测量15方法（同时使用3.12验证）、原始计数4方法、既有identity7/numeric6/merge5方法及R smoke54断言覆盖接口；不把方法数当作独立生物学案例数。`mock_e2e/run.py` 同步新共享任务数、DNA对应特征ID及独立指定的mock计数，hybrid统计断言短读数值。其计数依然是明确observer按文件名给出的控制值，TT-001旧oracle局限保留；原生独立映射数据补证不等于该mock已变成真实模型。
++
++DESeq2固定部署1.42的完整正例/零计数环境尚未执行（本机模型1.52），TA-011不能据此称部署正例通过；图/reads拓扑、FastSpar模型、完整真实平台、镜像/nf-test及报告发布屏障TA-015不由本批认证。全零网络过滤后的eligibility TA-038、单特征alpha TA-014及剩余metadata边界继续未决。
+--- a/nextflow.config
++++ b/nextflow.config
+@@ -147,6 +147,7 @@
+ 
+ // Domain configs for vendored nf-core modules (publishDir, ext.args, ext.prefix)
+ includeConfig 'conf/nfcore_upstream.config'
++includeConfig 'conf/shared_quantification.config'
+ includeConfig 'conf/nfcore_qc_assembly.config'
+ includeConfig 'conf/nfcore_detection.config'
+ includeConfig 'conf/nfcore_downstream.config'
+--- a/tests/test_statistics_identity.py
++++ b/tests/test_statistics_identity.py
+@@ -81,15 +81,19 @@
+         self.assertEqual(observed, {(feature, sid): values[i][j]
+                                     for i, feature in enumerate(features) for j, sid in enumerate(ids)})
+ 
+-    def test_network_missing_count_token_still_uses_existing_coverage_fallback(self):
++    def test_network_missing_count_token_is_not_replaced_by_coverage(self):
+         folder = self.root / "missing-count"
+         folder.mkdir()
+         ab = folder / "ab.tsv"
+         ab.write_text("sample_id\tcontig_id\traw_count\tcoverage\n"
+                       "S1\tp1\tNA\t12\nS2\tp1\t13\t99\n")
+         output = folder / "matrix.tsv"
+-        self.run_script("network_prepare.R", "--abundance", ab, "--out", output)
+-        self.assertEqual(self.rows(output), [{"#OTU ID": "p1", "S1": "12", "S2": "13"}])
++        result = subprocess.run(["Rscript", str(ROOT / "bin/network_prepare.R"),
++                                 "--abundance", str(ab), "--out", str(output)],
++                                text=True, capture_output=True)
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn("coverage is not a count", result.stderr)
++        self.assertFalse(output.exists())
+ 
+     def test_internal_differential_is_invariant_to_sample_and_feature_renaming(self):
+         values = [[1, 2, 4, 8, 11, 14], [3, 7, 4, 2, 3, 8], [9, 4, 6, 1, 5, 3]]
+--- a/tests/r_mock/run_r_mock_tests.sh
++++ b/tests/r_mock/run_r_mock_tests.sh
+@@ -28,13 +28,13 @@
+ SAMPLES="S1 S2 S3 S4 S5 S6"
+ 
+ # ---------- shared mock inputs ----------
+-# CoverM-style per-sample tables (Contig / Length / Count Mean / RPKM / TPM)
++# Controlled CoverM-style tables; Count is specified separately from coverage.
+ i=0
+ for s in $SAMPLES; do
+   i=$((i + 1))
+-  { printf 'Contig\tLength\tCount Mean\tRPKM\tTPM\n'
+-    printf 'plasmid_1\t5000\t%s\t%s\t%s\n' "$((10 * i))" "$((20 + i))" "$((30 + i))"
+-    printf 'chrom_1\t50000\t%s\t%s\t%s\n' "$((100 - i))" "$((50 + i))" "$((60 + i))"
++  { printf 'Contig\tLength\tCount Mean\tRPKM\tTPM\tRead Count\n'
++    printf 'plasmid_1\t5000\t%s\t%s\t%s\t%s\n' "$((10 * i))" "$((20 + i))" "$((30 + i))" "$((13 * i))"
++    printf 'chrom_1\t50000\t%s\t%s\t%s\t%s\n' "$((100 - i))" "$((50 + i))" "$((60 + i))" "$((200 - i))"
+   } > "${s}.coverm.tsv"
+ done
+ # Metadata: two groups of three
+--- a/tests/mock_e2e/mock_tool.py
++++ b/tests/mock_e2e/mock_tool.py
+@@ -19,6 +19,11 @@
+ 
+ args = sys.argv[1:]
+ tool = Path(sys.argv[0]).name
++if tool == 'perl':
++    # Production OPERA-MS explicitly uses perl -S. This dispatcher is an
++    # interpreter/CLI observer only, not Perl or OPERA-MS execution evidence.
++    assert args[:2] == ['-S', 'OPERA-MS.pl'], args
++    tool, args = 'OPERA-MS.pl', args[2:]
+ 
+ 
+ def arg(flag):
+@@ -289,7 +294,7 @@
+         # view either copies a payload BAM (`-f 4` host filtering) or collects
+         # the aligner's stdout pipe (host-removal bowtie2 chain, input '-').
+         tokens = positionals(args[1:], ('--threads', '-@', '-o', '-f', '-F', '-q', '-L', '--qname-file',
+-                                        '--output-unselected', '--reference'))
++                                        '--output-unselected', '--reference', '-e'))
+         data = sys.stdin.read() if not tokens or tokens[-1] == '-' else require(tokens[-1]).read_text()
+         write(arg('-o'), data)
+     elif args[0] == 'index':
+@@ -308,10 +313,18 @@
+         output = arg('--output-file')
+         samples = json.loads((fixture / 'truth.json').read_text())['samples']
+         index = next(i for i, sid in enumerate(samples) if output.startswith(sid + '.'))
+-        rows = ['Contig\tMOCK Mean\tMOCK TPM\tMOCK RPKM']
+-        for name in records:
+-            value = (10 + 2 * index if name == 'plasmid_1' else 30 - index) * scale
+-            rows.append(f'{name}\t{value}\t{value * 100}\t{value * 10}')
++        counted = 'count' in args
++        rows = ['Contig\tMOCK Mean\tMOCK TPM\tMOCK RPKM' + ('\tMOCK Read Count' if counted else '')]
++        original = fasta(fixture / 'reference.fasta')
++        for name, dna in records.items():
++            # Shared reference IDs derive from complete DNA, not local labels.
++            labels = [label for label, sequence in original.items()
++                      if dna in [sequence, sequence.translate(str.maketrans('ACGT', 'TGCA'))[::-1]]]
++            assert len(labels) == 1
++            value = (10 + 2 * index if labels[0] == 'plasmid_1' else 30 - index) * scale
++            # Explicit mock count oracle, deliberately different from coverage.
++            count = (13 + 3 * index if labels[0] == 'plasmid_1' else 80 - index) * scale
++            rows.append(f'{name}\t{value}\t{value * 100}\t{value * 10}' + (f'\t{count}' if counted else ''))
+         write(output, '\n'.join(rows) + '\n')
+ elif tool == 'plasmidfinder.py':
+     # nf-core plasmidfinder: `plasmidfinder.py --legacy -i <fasta> -o ./ -x`;
+--- a/tests/mock_e2e/run.py
++++ b/tests/mock_e2e/run.py
+@@ -2,6 +2,7 @@
+ """Execute production main.nf with isolated external-tool mocks and real Python steps."""
+ import argparse
+ import csv
++import hashlib
+ import json
+ import os
+ import shutil
+@@ -16,7 +17,7 @@
+             'bowtie2-build', 'bowtie2', 'samtools', 'coverm', 'plasmidfinder.py', 'mob_typer',
+             'bakta', 'amrfinder', 'isescan.py', 'integron_finder', 'metaphlan', 'mmseqs',
+             'NanoPlot', 'filtlong', 'hifiadapterfilt.sh', 'flye', 'hifiasm', 'hifiasm_meta',
+-            'minimap2', 'OPERA-MS.pl', 'spades.py', 'dorado', 'pigz']
++            'minimap2', 'OPERA-MS.pl', 'spades.py', 'dorado', 'pigz', 'perl']
+ 
+ 
+ def rows(path):
+@@ -33,10 +34,14 @@
+         name = row['name'].split(' (')[0].split(':')[-1]
+         counts[name] = counts.get(name, 0) + 1
+     expected = {name: 6 for name in ['QUAST', 'GENOMAD', 'PLASMID_CONSENSUS',
+-        'PLASMID_STRUCTURE', 'SAMTOOLS_MERGE', 'COVERM_CONTIG', 'METAPHLAN',
+-        'SAMTOOLS_INDEX']}
+-    expected.update({name: 1 for name in ['MERGE_ABUNDANCE',
+-        'MERGE_ABUNDANCE_PLASMID', 'DIVERSITY', 'DIFFERENTIAL_ABUNDANCE', 'REPORT']})
++        'PLASMID_STRUCTURE', 'SAMTOOLS_MERGE', 'COVERM_CONTIG', 'METAPHLAN']}
++    expected.update({name: 1 for name in ['SHARED_CATALOGUE', 'SHARED_ABUNDANCE_TABLES',
++        'DIVERSITY', 'DIFFERENTIAL_ABUNDANCE', 'REPORT']})
++    expected.update(SAMTOOLS_VIEW_SHARED=6, COVERM_SHARED=6)
++    if platform in ['illumina', 'hybrid']:
++        expected.update(BOWTIE2_BUILD_SHARED=1, BOWTIE2_ALIGN_SHARED=6)
++    else:
++        expected['MINIMAP2_ALIGN_SHARED'] = 6
+     if platform in ['illumina', 'hybrid']:
+         expected.update({name: 6 for name in ['FASTP', 'FASTQC', 'FASTQC_CLEAN',
+                                              'BOWTIE2_BUILD_COVERAGE', 'BOWTIE2_ALIGN_COVERAGE']})
+@@ -69,12 +74,22 @@
+     plasmids = rows(out / 'tables/plasmid_abundance.tsv')
+     assert len(contigs) == 12 and {r['sample_id'] for r in contigs} == set(SAMPLES)
+     assert len(plasmids) == (0 if empty else 6)
++    sequences = {}
++    for line in (base / 'fixture/reference.fasta').read_text().splitlines():
++        if line.startswith('>'):
++            key = line[1:].split()[0]; sequences[key] = ''
++        else:
++            sequences[key] += line.strip()
++    labels = {'seq_' + hashlib.sha256(min(dna, dna.translate(str.maketrans('ACGT', 'TGCA'))[::-1]).encode()).hexdigest(): label
++              for label, dna in sequences.items()}
++    assert {row['contig_id'] for row in contigs} == set(labels)
+     for row in contigs + plasmids:
+         index = SAMPLES.index(row['sample_id'])
+-        feature = row.get('contig_id', row.get('plasmid_id'))
+-        scale = (3 if platform == 'hybrid' else 1 if platform == 'illumina' else 2) if 'contig_id' in row else (
+-            1 if platform in ['illumina', 'hybrid'] else 2)
++        feature = labels[row.get('contig_id', row.get('plasmid_id'))]
++        scale = 1 if platform in ['illumina', 'hybrid'] else 2
+         assert float(row['coverage']) == (10 + index * 2 if feature == 'plasmid_1' else 30 - index) * scale
++        assert int(row['raw_count']) == (13 + 3 * index if feature == 'plasmid_1' else 80 - index) * scale
++        assert row['count_unit'] == 'primary_read_alignment'
+     for sid in SAMPLES:
+         consensus = rows(out / f'04_plasmid_detection/consensus/{sid}.plasmid_consensus.tsv')
+         assert len(consensus) == (0 if empty else 1), f'{sid}: unexpected consensus count'
+--- a/subworkflows/host_linking.nf
++++ b/subworkflows/host_linking.nf
+@@ -8,7 +8,6 @@
+  * host prediction, needs --hotspot_home/--hotspot_db/--hotspot_models).
+  */
+ include { LINK_COABUNDANCE } from '../modules/linking/coabundance'
+-include { MERGE_ABUNDANCE as MERGE_ABUNDANCE_FOR_LINK } from '../modules/cross_sample/merge_abundance'
+ include { LINK_SEQUENCE } from '../modules/linking/sequence'
+ include { LINK_LONGREAD } from '../modules/linking/longread'
+ include { LINK_HOTSPOT } from '../modules/linking/hotspot'
+@@ -18,7 +17,7 @@
+     ch_plasmids          // tuple(meta, fasta)
+     ch_assembly          // tuple(meta, fasta)
+     ch_longread_bam      // tuple(meta, long-read-only bam)
+-    ch_plasmid_abundance // tuple(meta, coverm tsv)
++    ch_plasmid_abundance // path(shared-reference plasmid long table)
+     ch_host_profile      // tuple(meta, metaphlan tsv); may be empty
+     ch_mag_bins          // tuple(meta, dir); may be empty
+     ch_taxonomy          // tuple(meta, tsv); may be empty
+@@ -33,20 +32,12 @@
+                 'CRISPR host-plasmid linking is not implemented; remove crispr from host_linking_optional_methods'
+             )
+         }
+-        // co_abundance: cross-sample over collected per-sample tables
++        // co_abundance: shared sequence features, all measured samples retained
+         if (selectedTools(params.host_linking_methods).contains('co_abundance')) {
+-            ch_abundance_input = ch_plasmid_abundance.toList().map { entries ->
+-                tuple(entries.collect { entry -> entry[0].id }, entries.collect { entry -> entry[1] })
+-            }
+             ch_profile_input = ch_host_profile.toList().map { entries ->
+                 tuple(entries.collect { entry -> entry[0].id }, entries.collect { entry -> entry[1] })
+             }
+-            MERGE_ABUNDANCE_FOR_LINK(
+-                ch_abundance_input,
+-                'coabundance_plasmid_abundance',
+-                'plasmid_id'
+-            )
+-            LINK_COABUNDANCE(MERGE_ABUNDANCE_FOR_LINK.out.table, ch_profile_input)
++            LINK_COABUNDANCE(ch_plasmid_abundance, ch_profile_input)
+             ch_links = ch_links.mix(LINK_COABUNDANCE.out.links)
+         }
+         // sequence similarity: needs MAG bins
+--- /dev/null
++++ b/bin/build_shared_catalogue.py
+@@ -0,0 +1,159 @@
++#!/usr/bin/env python3
++"""Build a sequence-specific, strand-invariant nucleotide catalogue.
++
++Only complete sequence identity (including reverse complement) is collapsed.
++This is not ANI clustering, plasmid family inference or circular rotation
++normalization. SQLite keeps the full collection off the Python heap.
++"""
++import argparse
++from contextlib import closing
++import csv
++import gzip
++import hashlib
++import json
++from pathlib import Path
++import shutil
++import sqlite3
++import tempfile
++
++ALPHABET = frozenset('ACGTRYSWKMBDHVN')
++COMPLEMENT = str.maketrans('ACGTRYSWKMBDHVN', 'TGCAYRSWMKVHDBN')
++
++
++def records(path):
++    """Empty FASTA is a valid zero-record input; empty records are invalid."""
++    name, pieces, seen = None, [], set()
++    with (gzip.open(path, 'rt') if path.suffix.lower() == '.gz' else path.open()) as stream:
++        for line_number, raw in enumerate(stream, 1):
++            line = raw.strip()
++            if not line:
++                continue
++            if line.startswith('>'):
++                if name is not None:
++                    if not pieces:
++                        raise ValueError(f'{path}: empty sequence {name}')
++                    yield name, ''.join(pieces)
++                fields = line[1:].split()
++                if not fields or fields[0] in seen:
++                    raise ValueError(f'{path}:{line_number}: empty or duplicate FASTA ID')
++                name, pieces = fields[0], []
++                seen.add(name)
++            else:
++                if name is None:
++                    raise ValueError(f'{path}:{line_number}: sequence before header')
++                dna = line.upper()
++                if set(dna) - ALPHABET:
++                    raise ValueError(f'{path}:{line_number}: invalid IUPAC DNA in {name}')
++                pieces.append(dna)
++    if name is not None:
++        if not pieces:
++            raise ValueError(f'{path}: empty sequence {name}')
++        yield name, ''.join(pieces)
++
++
++def canonical(dna):
++    reverse = dna.translate(COMPLEMENT)[::-1]
++    return (dna, '+') if dna <= reverse else (reverse, '-')
++
++
++def digest(dna):
++    return hashlib.sha256(dna.encode('ascii')).hexdigest()
++
++
++def file_digest(path):
++    checksum = hashlib.sha256()
++    with path.open('rb') as stream:
++        for block in iter(lambda: stream.read(1024 * 1024), b''):
++            checksum.update(block)
++    return checksum.hexdigest()
++
++
++def write_tsv(path, fields, rows):
++    with path.open('w') as stream:
++        writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
++        writer.writerow(fields)
++        writer.writerows(rows)
++
++
++def build(sample_ids, assemblies, plasmids, output, expected_samples=None):
++    if not sample_ids or len(sample_ids) != len(assemblies) or len(sample_ids) != len(plasmids):
++        raise ValueError('sample IDs, assemblies and plasmids must have the same nonzero length')
++    if len(set(sample_ids)) != len(sample_ids) or any(not sid or any(c in sid for c in '\t\r\n') for sid in sample_ids):
++        raise ValueError('sample IDs must be nonempty, unique TSV values')
++    if expected_samples is not None and len(sample_ids) != expected_samples:
++        raise ValueError('shared catalogue: missing/unexpected assembly sample')
++    if output.exists():
++        raise ValueError(f'refusing to overwrite catalogue: {output}')
++    output.parent.mkdir(parents=True, exist_ok=True)
++    stage = Path(tempfile.mkdtemp(prefix='.' + output.name + '-', dir=output.parent))
++    try:
++        with closing(sqlite3.connect(stage / 'working.sqlite')) as db:
++            db.executescript('''
++                CREATE TABLE refs (feature_id TEXT PRIMARY KEY, dna TEXT NOT NULL, length_bp INTEGER NOT NULL);
++                CREATE TABLE sources (sample_id TEXT, contig_id TEXT, feature_id TEXT, orientation TEXT,
++                                      is_plasmid INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(sample_id, contig_id));
++                CREATE INDEX source_feature ON sources(feature_id);
++            ''')
++            sample_rows, input_files = [], []
++            for sid, assembly, candidate in sorted(zip(sample_ids, assemblies, plasmids)):
++                input_files.append({'sample_id': sid, 'assembly_sha256': file_digest(assembly),
++                                    'plasmids_sha256': file_digest(candidate)})
++                n_assembly = n_plasmid = 0
++                for cid, dna in records(assembly):
++                    seq, orientation = canonical(dna)
++                    fid = 'seq_' + digest(seq)
++                    existing = db.execute('SELECT dna FROM refs WHERE feature_id=?', (fid,)).fetchone()
++                    if existing is not None and existing[0] != seq:
++                        raise ValueError('sequence hash collision')
++                    db.execute('INSERT OR IGNORE INTO refs VALUES (?, ?, ?)', (fid, seq, len(seq)))
++                    db.execute('INSERT INTO sources(sample_id, contig_id, feature_id, orientation) VALUES (?, ?, ?, ?)', (sid, cid, fid, orientation))
++                    n_assembly += 1
++                for cid, dna in records(candidate):
++                    source = db.execute('SELECT feature_id FROM sources WHERE sample_id=? AND contig_id=?', (sid, cid)).fetchone()
++                    if source is None:
++                        raise ValueError(f'{sid}: candidate {cid} is absent from its assembly')
++                    seq, _ = canonical(dna)
++                    if source[0] != 'seq_' + digest(seq):
++                        raise ValueError(f'{sid}: candidate {cid} sequence differs from its assembly')
++                    db.execute('UPDATE sources SET is_plasmid=1 WHERE sample_id=? AND contig_id=?', (sid, cid))
++                    n_plasmid += 1
++                sample_rows.append([sid, n_assembly, n_plasmid, 'no_assembly_records' if not n_assembly else ('no_candidate_records' if not n_plasmid else 'candidates_present')])
++                db.commit()
++            n_features = db.execute('SELECT count(*) FROM refs').fetchone()[0]
++            with (stage / 'reference.fasta').open('w') as stream:
++                for fid, dna in db.execute('SELECT feature_id, dna FROM refs ORDER BY feature_id'):
++                    stream.write('>' + fid + '\n')
++                    for start in range(0, len(dna), 80):
++                        stream.write(dna[start:start + 80] + '\n')
++            write_tsv(stage / 'features.tsv', ['feature_id', 'length_bp', 'is_plasmid', 'sequence_sha256', 'source_count', 'plasmid_source_count'],
++                      ([fid, length, int(n_plasmid > 0), fid[4:], n_sources, n_plasmid] for fid, length, n_sources, n_plasmid in db.execute('''
++                        SELECT r.feature_id, r.length_bp, count(*), sum(s.is_plasmid)
++                        FROM refs r JOIN sources s USING(feature_id) GROUP BY r.feature_id ORDER BY r.feature_id''')))
++            write_tsv(stage / 'sources.tsv', ['sample_id', 'contig_id', 'feature_id', 'orientation', 'is_plasmid_in_source'],
++                      db.execute('SELECT sample_id, contig_id, feature_id, orientation, is_plasmid FROM sources ORDER BY sample_id, contig_id'))
++            write_tsv(stage / 'samples.tsv', ['sample_id', 'assembly_records', 'plasmid_records', 'status'], sample_rows)
++        (stage / 'working.sqlite').unlink()
++        manifest = {'schema_version': 1, 'identity': 'complete nucleotide identity modulo reverse complement; uppercase IUPAC DNA',
++                    'plasmid_membership': 'candidate in at least one source sample; source-specific calls retained',
++                    'features': n_features, 'samples': len(sample_ids), 'inputs': input_files,
++                    'files_sha256': {name: file_digest(stage / name) for name in ['reference.fasta', 'features.tsv', 'sources.tsv', 'samples.tsv']},
++                    'limitations': ['not ANI/plasmid family clustering or circular rotation normalization', 'different fragments or near homologues remain separate competitive references']}
++        (stage / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
++        stage.rename(output)
++    except BaseException:
++        shutil.rmtree(stage)
++        raise
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--sample-ids', nargs='+', required=True)
++    parser.add_argument('--assemblies', nargs='+', type=Path, required=True)
++    parser.add_argument('--plasmids', nargs='+', type=Path, required=True)
++    parser.add_argument('--out-dir', type=Path, required=True)
++    parser.add_argument('--expected-samples', type=int)
++    args = parser.parse_args()
++    try:
++        build(args.sample_ids, args.assemblies, args.plasmids, args.out_dir, args.expected_samples)
++    except (ValueError, OSError, sqlite3.Error) as error:
++        parser.exit(2, str(error) + '\n')
+--- /dev/null
++++ b/bin/collect_shared_abundance.py
+@@ -0,0 +1,110 @@
++#!/usr/bin/env python3
++"""Validate complete shared-reference CoverM tables and retain real read counts.
++
++Input BAMs must contain only primary mapped alignments with known MAPQ >= 10.
++Count unit: read alignment; paired mates count separately, never fragments.
++"""
++import argparse
++import csv
++from decimal import Decimal, InvalidOperation
++import json
++from pathlib import Path
++import shutil
++import tempfile
++
++
++def read_rows(path):
++    with path.open() as stream:
++        reader = csv.DictReader(stream, delimiter='\t')
++        if not reader.fieldnames or len(set(reader.fieldnames)) != len(reader.fieldnames):
++            raise ValueError(f'{path}: missing or duplicate TSV header')
++        return reader.fieldnames, list(reader)
++
++
++def number(text, location, integer=False):
++    try:
++        value = Decimal(text)
++    except (InvalidOperation, TypeError):
++        raise ValueError(f'{location}: invalid measurement {text!r}') from None
++    if not value.is_finite() or value < 0 or (integer and value != value.to_integral_value()):
++        raise ValueError(f'{location}: expected finite nonnegative ' + ('integer count' if integer else 'measurement'))
++    return str(int(value)) if integer else text
++
++
++def collect(catalogue, sample_ids, tables, mapper, output):
++    _, features = read_rows(catalogue / 'features.tsv')
++    _, samples = read_rows(catalogue / 'samples.tsv')
++    expected = [r['sample_id'] for r in samples]
++    if len(expected) != len(set(expected)) or len(sample_ids) != len(set(sample_ids)) or len(sample_ids) != len(tables):
++        raise ValueError('duplicate samples or table/sample count mismatch')
++    if len(features) != len({r['feature_id'] for r in features}):
++        raise ValueError('duplicate catalogue feature')
++    if (features and set(expected) != set(sample_ids)) or (not features and tables):
++        raise ValueError('missing/unexpected sample measurement; only a globally empty catalogue may skip mapping')
++    if output.exists():
++        raise ValueError(f'refusing to overwrite {output}')
++    output.parent.mkdir(parents=True, exist_ok=True)
++    stage = Path(tempfile.mkdtemp(prefix='.' + output.name + '-', dir=output.parent))
++    try:
++        measured = dict(zip(sample_ids, tables))
++        states = []
++        with (stage / 'contig_abundance.tsv').open('w') as all_stream, (stage / 'plasmid_abundance.tsv').open('w') as plasmid_stream:
++            writers = [csv.writer(s, delimiter='\t', lineterminator='\n') for s in [all_stream, plasmid_stream]]
++            common = ['sample_id', 'rpkm', 'tpm', 'coverage', 'raw_count', 'mapper', 'count_unit']
++            writers[0].writerow(['contig_id'] + common)
++            writers[1].writerow(['plasmid_id'] + common)
++            for sample in expected:
++                values = {}
++                if features:
++                    fields, rows = read_rows(measured[sample])
++                    columns = {}
++                    for key, suffix in [('coverage', ' Mean'), ('rpkm', ' RPKM'), ('tpm', ' TPM'), ('raw_count', ' Read Count')]:
++                        matches = [f for f in fields[1:] if f.endswith(suffix)]
++                        if len(matches) != 1:
++                            raise ValueError(f'{measured[sample]}: expected exactly one {suffix.strip()} column')
++                        columns[key] = matches[0]
++                    for line, row in enumerate(rows, 2):
++                        fid = row[fields[0]]
++                        if fid in values:
++                            raise ValueError(f'{sample}: duplicate feature {fid}')
++                        values[fid] = {key: number(row[col], f'{sample}:{line}:{fid}:{key}', key == 'raw_count') for key, col in columns.items()}
++                    if set(values) != {r['feature_id'] for r in features}:
++                        raise ValueError(f'{sample}: measured features differ from shared reference')
++                total = 0
++                for feature in features:
++                    fid = feature['feature_id']
++                    val = values[fid]
++                    total += int(val['raw_count'])
++                    row = [fid, sample, val['rpkm'], val['tpm'], val['coverage'], val['raw_count'], mapper, 'primary_read_alignment']
++                    writers[0].writerow(row)
++                    if feature['is_plasmid'] == '1':
++                        writers[1].writerow(row)
++                states.append([sample, len(features), total, 'empty_catalogue' if not features else ('measured_zero' if total == 0 else 'measured')])
++        with (stage / 'sample_states.tsv').open('w') as stream:
++            writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
++            writer.writerow(['sample_id', 'reference_features', 'eligible_read_alignments', 'quantification_status'])
++            writer.writerows(states)
++        (stage / 'method.json').write_text(json.dumps({'mapper': mapper, 'count_unit': 'primary_read_alignment',
++            'paired_end': 'each eligible mate counts separately; not fragment counts',
++            'alignment_filter': 'exclude unmapped, secondary and supplementary; MAPQ >= 10 and != 255',
++            'ambiguity': 'MAPQ below 10 excluded (Bowtie2 ties may have MAPQ 1); MAPQ is aligner confidence, not proof of unique biological origin',
++            'coverage': 'CoverM mean/TPM/RPKM/count over the same filtered BAM; end exclusion 0',
++            'reference': 'all samples compete against one assembly-sequence catalogue; plasmid subset by source union'}, indent=2) + '\n')
++        stage.rename(output)
++    except BaseException:
++        shutil.rmtree(stage)
++        raise
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--catalogue', type=Path, required=True)
++    parser.add_argument('--sample-ids', nargs='*', default=[])
++    parser.add_argument('--tables', nargs='*', type=Path, default=[])
++    parser.add_argument('--mapper', required=True)
++    parser.add_argument('--out-dir', type=Path, required=True)
++    args = parser.parse_args()
++    try:
++        collect(args.catalogue, args.sample_ids, args.tables, args.mapper, args.out_dir)
++    except (ValueError, OSError, KeyError) as error:
++        parser.exit(2, str(error) + '\n')
+--- /dev/null
++++ b/modules/cross_sample/shared_catalogue.nf
+@@ -0,0 +1,27 @@
++/* Sequence identity only: complete DNA or reverse complement, not families. */
++process SHARED_CATALOGUE {
++    tag 'shared_nucleotide_reference'
++    label 'process_single'
++    conda "${moduleDir}/../../envs/catalogue.yml"
++    container 'python:3.12-slim'
++
++    publishDir "${params.outdir}/10_abundance/shared_reference", mode: params.publish_dir_mode
++
++    input:
++    tuple val(sample_ids), path(assemblies, stageAs: 'assemblies??/*'), path(plasmids, stageAs: 'plasmids??/*')
++    val expected_samples
++
++    output:
++    path 'catalogue', emit: catalogue
++
++    script:
++    def quoted = { values -> (values instanceof List ? values : [values])
++        .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ') }
++    """
++    python3 "${moduleDir}/../../bin/build_shared_catalogue.py" \\
++        --sample-ids ${quoted.call(sample_ids)} \\
++        --assemblies ${quoted.call(assemblies)} \\
++        --plasmids ${quoted.call(plasmids)} \\
++        --out-dir catalogue --expected-samples ${expected_samples}
++    """
++}
+--- /dev/null
++++ b/modules/cross_sample/shared_abundance.nf
+@@ -0,0 +1,28 @@
++process SHARED_ABUNDANCE_TABLES {
++    tag 'shared_reference_measurements'
++    label 'process_single'
++    conda "${moduleDir}/../../envs/catalogue.yml"
++    container 'python:3.12-slim'
++    publishDir "${params.outdir}/tables", mode: params.publish_dir_mode,
++        saveAs: { filename -> filename.tokenize('/').last() }
++
++    input:
++    path catalogue
++    tuple val(sample_ids), path(tables, stageAs: 'measurements??/*')
++    val mapper
++
++    output:
++    path 'quantification/contig_abundance.tsv', emit: contigs
++    path 'quantification/plasmid_abundance.tsv', emit: plasmids
++    path 'quantification/sample_states.tsv', emit: states
++    path 'quantification/method.json', emit: method
++
++    script:
++    def quoted = { values -> (values instanceof List ? values : [values])
++        .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ') }
++    """
++    python3 "${moduleDir}/../../bin/collect_shared_abundance.py" \\
++        --catalogue ${catalogue} --sample-ids ${quoted.call(sample_ids)} \\
++        --tables ${quoted.call(tables)} --mapper '${mapper}' --out-dir quantification
++    """
++}
+--- /dev/null
++++ b/subworkflows/shared_quantification.nf
+@@ -0,0 +1,65 @@
++/* Cross-sample measurements: one DNA reference, one read technology per sample.
++ * Local per-sample coverage remains separate for MAG and host linking.
++ */
++include { SHARED_CATALOGUE } from '../modules/cross_sample/shared_catalogue'
++include { SHARED_ABUNDANCE_TABLES } from '../modules/cross_sample/shared_abundance'
++include { BOWTIE2_BUILD as BOWTIE2_BUILD_SHARED } from '../modules/nf-core/bowtie2/build/main'
++include { BOWTIE2_ALIGN as BOWTIE2_ALIGN_SHARED } from '../modules/nf-core/bowtie2/align/main'
++include { MINIMAP2_ALIGN as MINIMAP2_ALIGN_SHARED } from '../modules/nf-core/minimap2/align/main'
++include { SAMTOOLS_VIEW as SAMTOOLS_VIEW_SHARED } from '../modules/nf-core/samtools/view/main'
++include { COVERM_CONTIG as COVERM_SHARED } from '../modules/nf-core/coverm/contig/main'
++
++workflow SHARED_QUANTIFICATION {
++    take:
++    ch_assemblies   // tuple(meta, fasta); exactly one per expected sample
++    ch_plasmids     // tuple(meta, candidate fasta), including empty results
++    ch_short_reads  // tuple(meta, r1, r2); used for Illumina AND hybrid
++    ch_long_reads   // tuple(meta, reads); used only for long-only platforms
++    read_mode      // short, map-ont or map-hifi
++    n_samples
++
++    main:
++    if (!(read_mode in ['short', 'map-ont', 'map-hifi'])) {
++        error "Unsupported shared-reference read mode: ${read_mode}"
++    }
++    ch_sources = ch_assemblies.map { meta, f -> tuple(meta.id, meta, f) }
++        .join(ch_plasmids.map { meta, f -> tuple(meta.id, meta, f) }, failOnDuplicate: true, failOnMismatch: true)
++        .toList().map { entries ->
++            entries = entries.sort { it[0] }
++            entries.each { entry -> if (entry[1] != entry[3]) error "Shared catalogue metadata mismatch: ${entry[0]}" }
++            tuple(entries.collect { it[0] }, entries.collect { it[2] }, entries.collect { it[4] })
++        }
++    SHARED_CATALOGUE(ch_sources, n_samples)
++    ch_catalogue = SHARED_CATALOGUE.out.catalogue.first()
++    ch_reference = ch_catalogue.filter { dir -> dir.resolve('reference.fasta').size() > 0 }
++        .map { dir -> tuple([id: 'shared_reference'], dir.resolve('reference.fasta')) }.first()
++    ch_mapped = Channel.empty()
++    if (read_mode == 'short') {
++        BOWTIE2_BUILD_SHARED(ch_reference)
++        BOWTIE2_ALIGN_SHARED(
++            ch_short_reads.map { meta, r1, r2 -> tuple(meta, [r1, r2]) },
++            BOWTIE2_BUILD_SHARED.out.index.first(), ch_reference, false, true
++        )
++        ch_mapped = BOWTIE2_ALIGN_SHARED.out.bam
++    } else {
++        MINIMAP2_ALIGN_SHARED(
++            ch_long_reads.map { meta, reads -> tuple(meta + [preset: read_mode], reads) },
++            ch_reference, true, '', false, false
++        )
++        ch_mapped = MINIMAP2_ALIGN_SHARED.out.bam
++    }
++    SAMTOOLS_VIEW_SHARED(ch_mapped.map { meta, bam -> tuple(meta, bam, []) },
++                         [[], [], []], [[], []], [[], []], '')
++    COVERM_SHARED(SAMTOOLS_VIEW_SHARED.out.bam, [[], []], true, false, false)
++    ch_tables = COVERM_SHARED.out.coverage.toList().map { entries ->
++        tuple(entries.collect { it[0].id }, entries.collect { it[1] })
++    }
++    SHARED_ABUNDANCE_TABLES(ch_catalogue, ch_tables, read_mode == 'short' ? 'bowtie2' : 'minimap2')
++
++    emit:
++    contigs = SHARED_ABUNDANCE_TABLES.out.contigs
++    plasmids = SHARED_ABUNDANCE_TABLES.out.plasmids
++    states = SHARED_ABUNDANCE_TABLES.out.states
++    method = SHARED_ABUNDANCE_TABLES.out.method
++    catalogue = ch_catalogue
++}
+--- /dev/null
++++ b/conf/shared_quantification.config
+@@ -0,0 +1,20 @@
++/* Separate from local sample coverage: cross-sample method policy. */
++process {
++    withName: 'BOWTIE2_ALIGN_SHARED' {
++        ext.prefix = { "${meta.id}.shared" }
++    }
++    withName: 'MINIMAP2_ALIGN_SHARED' {
++        ext.prefix = { "${meta.id}.shared" }
++        ext.args = { "-ax ${meta.preset}" }
++    }
++    withName: 'SAMTOOLS_VIEW_SHARED' {
++        ext.prefix = { "${meta.id}.shared.eligible" }
++        ext.args = "-b -F 2308 -q 10 -e 'mapq != 255'"
++    }
++    withName: 'COVERM_SHARED' {
++        ext.prefix = { "${meta.id}.shared.coverm" }
++        ext.suffix = '.tsv'
++        ext.args = '--methods mean tpm rpkm count --min-covered-fraction 0 --contig-end-exclusion 0 --exclude-supplementary'
++        publishDir = [path: { "${params.outdir}/10_abundance/shared_reference/coverm" }, mode: params.publish_dir_mode ?: 'copy']
++    }
++}
+--- /dev/null
++++ b/envs/catalogue.yml
+@@ -0,0 +1,5 @@
++name: autoplasm-catalogue
++channels:
++  - conda-forge
++dependencies:
++  - python=3.12
+--- /dev/null
++++ b/tests/test_shared_catalogue.py
+@@ -0,0 +1,118 @@
++"""Independent expected sequence identity, provenance and invalid-source checks."""
++import csv
++import gzip
++import hashlib
++import importlib.util
++import json
++from pathlib import Path
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++spec = importlib.util.spec_from_file_location('catalogue', ROOT / 'bin/build_shared_catalogue.py')
++catalogue = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(catalogue)
++
++
++class SharedCatalogueTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.base = Path(self.temp.name)
++
++    def tearDown(self):
++        self.temp.cleanup()
++
++    def source(self, name, text, zipped=False):
++        path = self.base / name
++        if zipped:
++            with gzip.open(path, 'wt') as stream:
++                stream.write(text)
++        else:
++            path.write_text(text)
++        return path
++
++    def table(self, directory, name):
++        with (directory / name).open() as stream:
++            return list(csv.DictReader(stream, delimiter='\t'))
++
++    def test_different_sequences_with_same_local_id_stay_separate(self):
++        a = self.source('a.fa', '>NODE_1\nAACCGT\n')
++        b = self.source('b.fa', '>NODE_1\nACGATT\n')
++        out = self.base / 'out'
++        catalogue.build(['001', '1'], [a, b], [a, b], out)
++        expected = {'seq_' + hashlib.sha256(s.encode()).hexdigest() for s in ['AACCGT', 'AATCGT']}
++        self.assertEqual({r['feature_id'] for r in self.table(out, 'features.tsv')}, expected)
++        self.assertEqual({r['sample_id'] for r in self.table(out, 'samples.tsv')}, {'001', '1'})
++
++    def test_same_sequence_renamed_or_reverse_complement_collapses(self):
++        a = self.source('same.fa', '>old\naaccgt\n')
++        b = self.source('reverse.fa', '>new description\nACGGTT\n')
++        empty = self.source('empty.fa', '')
++        out = self.base / 'out'
++        catalogue.build(['A', 'B'], [a, b], [a, empty], out)
++        rows = self.table(out, 'features.tsv')
++        self.assertEqual(len(rows), 1)
++        self.assertEqual((rows[0]['source_count'], rows[0]['plasmid_source_count'], rows[0]['is_plasmid']), ('2', '1', '1'))
++        self.assertEqual([r['orientation'] for r in self.table(out, 'sources.tsv')], ['+', '-'])
++        self.assertEqual(self.table(out, 'samples.tsv')[1]['status'], 'no_candidate_records')
++
++    def test_order_and_gzip_preserve_reference_and_provenance(self):
++        a = self.source('same.fa', '>old\nAACCGT\n')
++        b = self.source('same.fa.GZ', '>new\nACGGTT\n', zipped=True)
++        out1, out2 = self.base / 'one', self.base / 'two'
++        catalogue.build(['A', 'B'], [a, b], [a, b], out1)
++        catalogue.build(['B', 'A'], [b, a], [b, a], out2)
++        for name in ['reference.fasta', 'features.tsv', 'sources.tsv', 'samples.tsv', 'manifest.json']:
++            self.assertEqual((out1 / name).read_bytes(), (out2 / name).read_bytes())
++
++    def test_empty_catalogue_retains_expected_sample_states(self):
++        empty = self.source('empty.fa', '')
++        out = self.base / 'out'
++        catalogue.build(['NA', 'S2'], [empty, empty], [empty, empty], out)
++        self.assertEqual((out / 'reference.fasta').read_text(), '')
++        self.assertEqual(self.table(out, 'features.tsv'), [])
++        self.assertEqual([r['sample_id'] for r in self.table(out, 'samples.tsv')], ['NA', 'S2'])
++        self.assertTrue(all(r['status'] == 'no_assembly_records' for r in self.table(out, 'samples.tsv')))
++        self.assertEqual(json.loads((out / 'manifest.json').read_text())['features'], 0)
++
++    def test_unknown_and_changed_candidates_fail_without_partial_catalogue(self):
++        a = self.source('a.fa', '>known\nAACCGT\n')
++        for text in ['>absent\nAACCGT\n', '>known\nAAAAAA\n']:
++            with self.subTest(text=text):
++                b = self.source('bad.fa', text)
++                out = self.base / 'out'
++                with self.assertRaisesRegex(ValueError, 'absent|differs'):
++                    catalogue.build(['S'], [a], [b], out)
++                self.assertFalse(out.exists())
++                self.assertEqual(list(self.base.glob('.out-*')), [])
++
++    def test_malformed_assembly_is_not_silently_empty(self):
++        for text in ['AACGT\n', '>x\n', '>x\nACGT\n>x\nACGT\n', '>x\nACZ\n', '>\nACGT\n']:
++            with self.subTest(text=text):
++                a = self.source('bad.fa', text)
++                with self.assertRaises(ValueError):
++                    catalogue.build(['S'], [a], [a], self.base / 'out')
++                self.assertFalse((self.base / 'out').exists())
++
++    def test_sample_length_duplicate_and_existing_output_guards(self):
++        a = self.source('a.fa', '>x\nACGT\n')
++        for ids, assemblies, plasmids in [(['S'], [], [a]), (['S', 'S'], [a, a], [a, a]), (['bad\tid'], [a], [a]), ([], [], [])]:
++            with self.assertRaises(ValueError):
++                catalogue.build(ids, assemblies, plasmids, self.base / 'out')
++        catalogue.build(['S'], [a], [a], self.base / 'out')
++        with self.assertRaisesRegex(ValueError, 'overwrite'):
++            catalogue.build(['S'], [a], [a], self.base / 'out')
++        with self.assertRaisesRegex(ValueError, 'missing/unexpected'):
++            catalogue.build(['S'], [a], [a], self.base / 'missing', expected_samples=2)
++
++    def test_partial_and_ambiguous_dna_are_not_family_clusters(self):
++        a = self.source('a.fa', '>full\nAACCGT\n>fragment\nAACC\n>ambiguous\nAACNGT\n')
++        empty = self.source('empty.fa', '')
++        out = self.base / 'out'
++        catalogue.build(['S'], [a], [empty], out)
++        self.assertEqual(len(self.table(out, 'features.tsv')), 3)
++        self.assertTrue(all(r['is_plasmid'] == '0' for r in self.table(out, 'features.tsv')))
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- /dev/null
++++ b/tests/test_shared_abundance.py
+@@ -0,0 +1,110 @@
++"""Shared reference table completeness, count units and failure propagation."""
++import csv
++import importlib.util
++import json
++from pathlib import Path
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++spec = importlib.util.spec_from_file_location('shared_abundance', ROOT / 'bin/collect_shared_abundance.py')
++module = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(module)
++
++
++class SharedAbundanceTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.base = Path(self.temp.name)
++        self.catalogue = self.base / 'catalogue'
++        self.catalogue.mkdir()
++        (self.catalogue / 'features.tsv').write_text('feature_id\tis_plasmid\nF1\t1\nF2\t0\n')
++        (self.catalogue / 'samples.tsv').write_text('sample_id\n001\n1\n')
++        self.out = self.base / 'out'
++
++    def tearDown(self):
++        self.temp.cleanup()
++
++    def coverm(self, name, count='7', second='0', extra=''):
++        path = self.base / name
++        path.write_text('Contig\tinput Mean\tinput RPKM\tinput TPM\tinput Read Count' + extra + '\n'
++                        + 'F1\t0.125\t400\t1000000\t' + count + '\nF2\t0\t0\t0\t' + second + '\n')
++        return path
++
++    def read(self, name):
++        with (self.out / name).open() as stream:
++            return list(csv.DictReader(stream, delimiter='\t'))
++
++    def test_counts_are_not_rounded_coverage_and_samples_remain_distinct(self):
++        a, b = self.coverm('a.tsv'), self.coverm('b.tsv', count='0')
++        module.collect(self.catalogue, ['1', '001'], [b, a], 'bowtie2', self.out)
++        rows = self.read('contig_abundance.tsv')
++        self.assertEqual([(r['sample_id'], r['contig_id'], r['raw_count']) for r in rows], [('001', 'F1', '7'), ('001', 'F2', '0'), ('1', 'F1', '0'), ('1', 'F2', '0')])
++        self.assertEqual([r['plasmid_id'] for r in self.read('plasmid_abundance.tsv')], ['F1', 'F1'])
++        self.assertTrue(all(r['count_unit'] == 'primary_read_alignment' for r in rows))
++        self.assertEqual(self.read('sample_states.tsv')[1]['quantification_status'], 'measured_zero')
++        self.assertIn('not fragment counts', json.loads((self.out / 'method.json').read_text())['paired_end'])
++
++    def test_missing_or_duplicate_sample_is_an_error_not_zero(self):
++        a = self.coverm('a.tsv')
++        for ids, tables in [(['001'], [a]), (['001', '001'], [a, a]), (['001', 'extra'], [a, a]), (['001', '1'], [a]), ([], [])]:
++            with self.subTest(ids=ids):
++                with self.assertRaises(ValueError):
++                    module.collect(self.catalogue, ids, tables, 'bowtie2', self.out)
++                self.assertFalse(self.out.exists())
++
++    def test_invalid_counts_are_not_replaced_by_coverage(self):
++        for value in ['0.4', '-1', 'NaN', 'Inf', '', 'NA', 'broken']:
++            with self.subTest(value=value):
++                a = self.coverm('a.tsv', count=value)
++                with self.assertRaises(ValueError):
++                    module.collect(self.catalogue, ['001', '1'], [a, a], 'bowtie2', self.out)
++                self.assertFalse(self.out.exists())
++                self.assertFalse(list(self.base.glob('.out-*')))
++
++    def test_missing_or_ambiguous_count_columns_fail(self):
++        a = self.coverm('a.tsv')
++        for header in ['input Other', 'input Read Count\tsecond Read Count']:
++            a.write_text(a.read_text().replace('input Read Count', header))
++            with self.assertRaises(ValueError):
++                module.collect(self.catalogue, ['001', '1'], [a, a], 'bowtie2', self.out)
++            a = self.coverm('a.tsv')
++
++    def test_missing_extra_duplicate_and_unknown_features_fail(self):
++        for change in ['missing', 'extra', 'duplicate', 'renamed']:
++            with self.subTest(change=change):
++                a = self.coverm('a.tsv')
++                lines = a.read_text().splitlines(True)
++                if change == 'missing':
++                    lines = lines[:-1]
++                elif change == 'extra':
++                    lines.append('F3\t0\t0\t0\t0\n')
++                elif change == 'duplicate':
++                    lines.append(lines[-1])
++                else:
++                    lines[1] = lines[1].replace('F1', 'unknown')
++                a.write_text(''.join(lines))
++                with self.assertRaises(ValueError):
++                    module.collect(self.catalogue, ['001', '1'], [a, a], 'bowtie2', self.out)
++                self.assertFalse(self.out.exists())
++
++    def test_invalid_noncount_metrics_fail_before_publish(self):
++        for value in ['NaN', '-0.1', 'garbage', '']:
++            a = self.coverm('a.tsv')
++            a.write_text(a.read_text().replace('0.125', value))
++            with self.assertRaises(ValueError):
++                module.collect(self.catalogue, ['001', '1'], [a, a], 'bowtie2', self.out)
++            self.assertFalse(self.out.exists())
++
++    def test_globally_empty_catalogue_records_all_expected_samples(self):
++        (self.catalogue / 'features.tsv').write_text('feature_id\tis_plasmid\n')
++        module.collect(self.catalogue, [], [], 'minimap2', self.out)
++        self.assertEqual(self.read('contig_abundance.tsv'), [])
++        self.assertEqual(self.read('plasmid_abundance.tsv'), [])
++        states = self.read('sample_states.tsv')
++        self.assertEqual([r['sample_id'] for r in states], ['001', '1'])
++        self.assertTrue(all(r['quantification_status'] == 'empty_catalogue' for r in states))
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- /dev/null
++++ b/tests/test_raw_count_contract.py
+@@ -0,0 +1,68 @@
++"""Measured read counts must survive merging and never fall back to coverage."""
++import csv
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++class RawCountContractTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.base = Path(self.temp.name)
++
++    def tearDown(self):
++        self.temp.cleanup()
++
++    def run_r(self, script, *args):
++        return subprocess.run(['Rscript', str(ROOT / 'bin' / script), *map(str, args)], text=True, capture_output=True)
++
++    def test_merge_preserves_count_independently_of_fractional_coverage(self):
++        path, out = self.base / 'coverm.tsv', self.base / 'out.tsv'
++        path.write_text('Contig\tA Mean\tA Read Count\np1\t0.125\t7\n')
++        result = self.run_r('merge_abundance.R', '--tables', path, '--sample-ids', '001', '--out', out)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        with out.open() as stream:
++            row = next(csv.DictReader(stream, delimiter='\t'))
++        self.assertEqual((row['coverage'], row['raw_count'], row['sample_id']), ('0.125', '7', '001'))
++
++    def test_merge_rejects_invalid_count_even_when_coverage_valid(self):
++        for count in ['', 'garbage', '-1', 'NaN', 'Inf', '1.5']:
++            with self.subTest(count=count):
++                path, out = self.base / 'coverm.tsv', self.base / 'out.tsv'
++                path.write_text('Contig\tA Mean\tA Read Count\np1\t12\t' + count + '\n')
++                result = self.run_r('merge_abundance.R', '--tables', path, '--sample-ids', 'S', '--out', out)
++                self.assertNotEqual(result.returncode, 0)
++                self.assertIn('field=raw_count', result.stderr)
++                self.assertFalse(out.exists())
++
++    def test_statistics_reject_missing_or_fractional_counts_without_coverage_proxy(self):
++        metadata = self.base / 'meta.tsv'
++        metadata.write_text('sample_id\tgroup\nS\tA\n')
++        for script in ['network_prepare.R', 'deseq2_plasmid.R']:
++            for count in [None, '', 'NA', '0.5']:
++                with self.subTest(script=script, count=count):
++                    path, out = self.base / 'ab.tsv', self.base / 'out.tsv'
++                    header = 'sample_id\tplasmid_id\tcoverage' + ('\traw_count' if count is not None else '')
++                    row = 'S\tp1\t12' + ('\t' + count if count is not None else '')
++                    path.write_text(header + '\n' + row + '\n')
++                    args = ['--abundance', path]
++                    args += ['--out', out] if script.startswith('network') else ['--metadata', metadata, '--output', out]
++                    result = self.run_r(script, *args)
++                    self.assertNotEqual(result.returncode, 0)
++                    self.assertIn('raw_count', result.stderr)
++                    self.assertFalse(out.exists())
++
++    def test_network_uses_raw_count_without_rounding_coverage(self):
++        path, out = self.base / 'ab.tsv', self.base / 'out.tsv'
++        path.write_text('sample_id\tplasmid_id\tcoverage\traw_count\nS1\tp1\t0.1\t7\nS2\tp1\t99.9\t9\n')
++        result = self.run_r('network_prepare.R', '--abundance', path, '--out', out)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        with out.open() as stream:
++            self.assertEqual(next(csv.DictReader(stream, delimiter='\t')), {'#OTU ID': 'p1', 'S1': '7', 'S2': '9'})
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- /dev/null
++++ b/tests/run_shared_quantification.py
+@@ -0,0 +1,201 @@
++#!/usr/bin/env python3
++"""Native reference remapping on locked real DNA with explicit simulated reads.
++
++Independent oracle: exact source sequences, predeclared coordinates and read
++names. No classifier/assembly inference, wet-lab or abundance accuracy benchmark.
++"""
++import argparse
++import csv
++import hashlib
++import json
++import math
++import os
++from pathlib import Path
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def rc(dna):
++    return dna.translate(str.maketrans('ACGT', 'TGCA'))[::-1]
++
++
++def seq(path):
++    return ''.join(path.read_text().splitlines()[1:]).upper()
++
++
++def digest(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def table(path):
++    with path.open() as stream:
++        return list(csv.DictReader(stream, delimiter='\t'))
++
++
++def run(base, references, bowtie, coverm, minimap, python_prefix, modes):
++    lock = json.loads((ROOT / 'tests/structure-reference.lock.json').read_text())
++    dna = {}
++    for ref in lock['references']:
++        p = references / (ref['accession'] + '.fasta')
++        assert digest(p) == ref['files']['fasta']
++        dna[ref['accession']] = seq(p)
++    sequences = {'A': dna['NC_007941.1'], 'B': dna['NC_003903.1'], 'C': rc(dna['NC_007941.1']), 'D': ''}
++    # Exact whole-sequence/RC oracle independently computes two reference IDs.
++    feature = {sid: 'seq_' + hashlib.sha256(min(s, rc(s)).encode()).hexdigest() for sid, s in sequences.items() if s}
++    fixture = base / 'fixtures'
++    fixture.mkdir()
++    coordinates = {}
++    for sid, source in sequences.items():
++        folder = fixture / sid
++        folder.mkdir()
++        cid = 'renamed' if sid == 'C' else 'NODE_1'
++        fasta = '>' + cid + '\n' + source + '\n' if source else ''
++        (folder / 'assembly.fasta').write_text(fasta)
++        (folder / 'plasmids.fasta').write_text(fasta if sid in ['A', 'B'] else '')
++        (folder / (sid + '.metaphlan.tsv')).write_text('clade_name\trelative_abundance\ns__controlled_host\t' + ('10' if sid in ['A', 'C'] else '0') + '\n')
++        short = [[], []]
++        long_reads = []
++        # Select from a fixed coordinate grid using reference DNA only. Some
++        # real references contain repeats; reject those coordinates before any
++        # mapper executes rather than changing truth to match its output.
++        starts = []
++        lower = 100000 if sid == 'B' else 15000
++        for start in range(lower, (len(source) - 2000) if source else lower + 14000, 700):
++            reads = [source[start:start + 150], rc(source[start + 350:start + 500]), source[start:start + 2000]]
++            if not source or all(sum(s.count(read) + s.count(rc(read)) for s in dna.values()) == 1 for read in reads):
++                starts.append(start)
++            if len(starts) == 20:
++                break
++        assert len(starts) == 20
++        coordinates[sid] = starts
++        for i, start in enumerate(starts):
++            one = source[start:start + 150] if source else 'N' * 150
++            two = rc(source[start + 350:start + 500]) if source else 'N' * 150
++            long_seq = source[start:start + 2000] if source else 'N' * 2000
++            # Exact full-read origin is independently unique across both DNA
++            # references. Inference output never defines expected counts.
++            if source:
++                for read in [one, two, long_seq]:
++                    assert sum(s.count(read) + s.count(rc(read)) for s in dna.values()) == 1
++            for mate, read in enumerate([one, two]):
++                short[mate].append(f'@{sid}_{i}/{mate + 1}\n{read}\n+\n' + 'I' * len(read) + '\n')
++            long_reads.append(f'@{sid}_{i}\n{long_seq}\n+\n' + 'I' * len(long_seq) + '\n')
++        for mate in [1, 2]:
++            (folder / f'R{mate}.fastq').write_text(''.join(short[mate - 1]))
++        (folder / 'long.fastq').write_text(''.join(long_reads))
++    (base / 'coordinate-oracle.json').write_text(json.dumps({'source_accessions': {'A': 'NC_007941.1', 'B': 'NC_003903.1', 'C': 'reverse complement NC_007941.1', 'D': 'explicit unmapped Ns'}, 'zero_based_starts': coordinates, 'short': '150bp mates at start and start+350, reverse second mate', 'long': '2000bp at start', 'count_unit': 'primary_read_alignment'}, indent=2) + '\n')
++    (fixture / 'samples.tsv').write_text('sample_id\tgroup\nA\tgroup1\nB\tgroup1\nC\tgroup2\nD\tgroup2\n')
++    sources = ['bin/build_shared_catalogue.py', 'bin/collect_shared_abundance.py', 'modules/cross_sample/shared_catalogue.nf',
++               'modules/cross_sample/shared_abundance.nf', 'subworkflows/shared_quantification.nf', 'conf/shared_quantification.config',
++               'tests/nextflow/shared_quantification.nf', 'tests/run_shared_quantification.py', 'subworkflows/cross_sample.nf',
++               'bin/diversity.R', 'bin/differential_abundance.R', 'bin/generate_report.R', 'subworkflows/host_linking.nf', 'bin/coabundance_link.R']
++    hashes = {n: digest(ROOT / n) for n in sources}
++    fixture_hashes = {str(p.relative_to(fixture)): digest(p) for p in fixture.rglob('*') if p.is_file()}
++    runs = []
++    for mode in modes:
++        p = base / mode
++        p.mkdir()
++        out = p / 'out'
++        config = p / 'native.config'
++        config.write_text(f"includeConfig '{ROOT}/conf/shared_quantification.config'\n"
++            "process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nprocess.maxForks=1\n"
++            "conda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\nparams.publish_dir_mode='copy'\n"
++            "process {\n" + f"withName: 'COVERM_SHARED' {{ beforeScript = 'export PATH=\"{coverm}/bin:$PATH\"' }}\n"
++            + f"withName: 'SHARED_CATALOGUE|SHARED_ABUNDANCE_TABLES' {{ beforeScript = 'export PATH=\"{python_prefix}/bin:$PATH\"' }}\n"
++            + f"withName: 'MINIMAP2_ALIGN_SHARED' {{ beforeScript = 'export PATH=\"{minimap}/bin:$PATH\"' }}\n"
++            + f"withName: 'SAMTOOLS_VIEW_SHARED' {{ beforeScript = 'export PATH=\"{coverm}/bin:$PATH\"' }}\n"
++            + "}\n")
++        params = {'outdir': str(out), 'fixture_dir': str(fixture), 'read_mode': mode,
++                  'samplesheet': str(fixture / 'samples.tsv'), 'run_cross_sample': True,
++                  'platform': 'illumina' if mode == 'short' else ('ont' if mode == 'map-ont' else 'pacbio_hifi'),
++                  'run_diversity': True, 'min_diversity_samples': 3, 'run_differential_internal': True,
++                  'min_group_replicates': 3, 'run_differential_deseq2': False, 'run_network': False,
++                  'project_name': 'shared_reference_real_DNA_simulated_reads', 'host_plasmid_linking': True,
++                  'host_linking_methods': ['co_abundance'], 'host_linking_optional_methods': [],
++                  'link_correlation_method': 'pearson', 'link_min_correlation': 0.9}
++        (p / 'params.json').write_text(json.dumps(params))
++        command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(ROOT / 'tests/nextflow/shared_quantification.nf'),
++                   '-params-file', str(p / 'params.json'), '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
++        env = os.environ.copy()
++        env['PATH'] = str(bowtie / 'bin') + ':' + str(minimap / 'bin') + ':' + str(ROOT / 'bin') + ':' + env['PATH']
++        result = subprocess.run(command, text=True, capture_output=True, env=env)
++        (p / 'stdout.log').write_text(result.stdout)
++        (p / 'stderr.log').write_text(result.stderr)
++        assert result.returncode == 0, result.stdout + result.stderr
++        tasks = table(p / 'trace.tsv')
++        assert len(tasks) == (19 if mode == 'short' else 18), len(tasks)
++        assert all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks)
++        catalogue = out / '10_abundance/shared_reference/catalogue'
++        features = table(catalogue / 'features.tsv')
++        assert {r['feature_id'] for r in features} == set(feature.values())
++        assert sorted(r['source_count'] for r in features) == ['1', '2']
++        assert all(r['is_plasmid'] == '1' for r in features)
++        for name in ['contig_abundance.tsv', 'plasmid_abundance.tsv']:
++            rows = table(out / 'tables' / name)
++            assert len(rows) == 8, rows
++            observed = {(r['sample_id'], r['contig_id' if name.startswith('contig') else 'plasmid_id']): r for r in rows}
++            for sid, source in sequences.items():
++                for row in features:
++                    fid = row['feature_id']
++                    expected = (40 if mode == 'short' else 20) if fid == feature.get(sid) else 0
++                    val = observed[(sid, fid)]
++                    assert int(val['raw_count']) == expected, (mode, sid, fid, val, expected)
++                    expected_mean = expected * (150 if mode == 'short' else 2000) / int(row['length_bp'])
++                    assert math.isclose(float(val['coverage']), expected_mean, rel_tol=1e-5, abs_tol=1e-7)
++                    assert val['count_unit'] == 'primary_read_alignment'
++        states = table(out / 'tables/sample_states.tsv')
++        assert {r['sample_id'] for r in states} == set(sequences)
++        assert next(r for r in states if r['sample_id'] == 'D')['quantification_status'] == 'measured_zero'
++        metrics = table(out / '11_diversity/diversity_metrics.tsv')
++        assert {r['sample_id'] for r in metrics} == set(sequences)
++        beta = table(out / '11_diversity/bray_curtis_matrix.tsv')
++        # Independent TSS Bray-Curtis truth: A and C share DNA; B differs
++        # despite the same original NODE_1 name. D is a measured zero sample.
++        for row in beta:
++            sid = row[next(iter(row))]
++            for other in sequences:
++                expected_distance = 0 if sid == other or {sid, other} == {'A', 'C'} else 1
++                assert math.isclose(float(row[other]), expected_distance, abs_tol=1e-6), (sid, other, row)
++        assert (out / 'report/report.md').exists()
++        links = table(out / '07_host_prediction/coabundance_links.tsv')
++        assert len(links) == 1, links
++        assert links[0]['plasmid_id'] == feature['A'] and links[0]['sample_id'] == 'A,B,C,D'
++        assert float(links[0]['score']) == 1.0
++        # Check actual retained BAMs independently of CoverM counts.
++        for task in [t for t in tasks if 'SAMTOOLS_VIEW_SHARED' in t['name']]:
++            work = Path(task['workdir']) if task.get('workdir') else None
++            # Trace default omits workdir; resolve by task hash.
++            if work is None:
++                prefix, suffix = task['hash'].split('/')
++                work = next((p / 'work' / prefix).glob(suffix + '*'))
++            bam = next(work.glob('*.shared.eligible.bam'))
++            sid = bam.name.split('.')[0]
++            mapped = subprocess.run([str(bowtie / 'bin/samtools'), 'view', str(bam)], capture_output=True, text=True, check=True).stdout.splitlines()
++            assert len(mapped) == (0 if sid == 'D' else (40 if mode == 'short' else 20))
++            assert all(line.split('\t')[2] == feature[sid] and not (int(line.split('\t')[1]) & 2308) and 10 <= int(line.split('\t')[4]) < 255 for line in mapped)
++        runs.append({'mode': mode, 'command': command, 'exit': result.returncode, 'tasks': tasks, 'checks': 'two exact/RC references, colliding local IDs, C no own candidates still measured, D true zero, full sample-feature rectangle, raw counts/coverage and retained BAM oracle'})
++        receipt = {'pass': True, 'runs': runs, 'source_sha256': hashes, 'fixture_sha256': fixture_hashes,
++                   'limitations': ['locked real reference DNA with explicit in-silico reads and controlled host profiles, not wet-lab abundance/biological accuracy',
++                                   'actual shared quantification plus CROSS_SAMPLE diversity/internal replication guard/report; platform calls changed but full platform/classifier execution not certified',
++                                   'near-homologue ambiguity/globally empty cases are recorded separately; not image/nf-test/full platform/scientific accuracy certification']}
++        assert hashes == {n: digest(ROOT / n) for n in sources}
++        assert fixture_hashes == {str(q.relative_to(fixture)): digest(q) for q in fixture.rglob('*') if q.is_file()}
++        (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++        print('PASS', mode, len(tasks), 'actual tasks', flush=True)
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True)
++    parser.add_argument('--references', required=True)
++    parser.add_argument('--bowtie-prefix', required=True)
++    parser.add_argument('--coverm-prefix', required=True)
++    parser.add_argument('--minimap-prefix', required=True)
++    parser.add_argument('--python-prefix', required=True)
++    parser.add_argument('--modes', nargs='+', default=['short'], choices=['short', 'map-ont', 'map-hifi'])
++    args = parser.parse_args()
++    base = Path(args.work_dir).resolve()
++    base.mkdir(parents=True, exist_ok=True)
++    run(base, Path(args.references).resolve(), Path(args.bowtie_prefix).resolve(), Path(args.coverm_prefix).resolve(), Path(args.minimap_prefix).resolve(), Path(args.python_prefix).resolve(), args.modes)
+--- /dev/null
++++ b/tests/run_shared_quantification_edges.py
+@@ -0,0 +1,108 @@
++#!/usr/bin/env python3
++"""Actual mapping boundary cases: tie ambiguity, empty reference, missing sample.
++
++Two deliberately near-identical reference variants share every read interval.
++They are controlled variants of locked pUTI89 DNA, not biological truth labels.
++"""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def rows(path):
++    with path.open() as stream:
++        return list(csv.DictReader(stream, delimiter='\t'))
++
++
++def run(base, reference, bowtie, coverm, python_prefix):
++    lock = json.loads((ROOT / 'tests/structure-reference.lock.json').read_text())['references'][1]
++    assert hashlib.sha256(reference.read_bytes()).hexdigest() == lock['files']['fasta']
++    dna = ''.join(reference.read_text().splitlines()[1:])
++    variant = dna[:90000] + ('A' if dna[90000] != 'A' else 'C') + dna[90001:]
++    complement = str.maketrans('ACGT', 'TGCA')
++    rc = lambda seq: seq.translate(complement)[::-1]
++    runs = []
++    sources = ['bin/build_shared_catalogue.py', 'bin/collect_shared_abundance.py', 'subworkflows/shared_quantification.nf',
++               'modules/cross_sample/shared_catalogue.nf', 'modules/cross_sample/shared_abundance.nf', 'conf/shared_quantification.config',
++               'tests/nextflow/shared_quantification_edges.nf', 'tests/run_shared_quantification_edges.py']
++    hashes = {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in sources}
++    for case in ['ambiguous', 'empty', 'missing_sample']:
++        p = base / case
++        p.mkdir()
++        fixture = p / 'fixtures'
++        fixture.mkdir()
++        for sid, seq in {'A': dna, 'B': variant, 'C': rc(dna), 'D': ''}.items():
++            f = fixture / sid
++            f.mkdir()
++            text = '>NODE_1\n' + seq + '\n' if seq and case != 'empty' else ''
++            (f / 'assembly.fasta').write_text(text)
++            (f / 'plasmids.fasta').write_text(text if sid in ['A', 'B'] else '')
++            for mate in [1, 2]:
++                parts = []
++                for i in range(20):
++                    start = 15000 + i * 700
++                    read = dna[start:start + 150] if mate == 1 else rc(dna[start + 350:start + 500])
++                    # Both catalogue variants match these reads exactly.
++                    assert (read in dna or rc(read) in dna) and (read in variant or rc(read) in variant)
++                    if sid == 'D':
++                        read = 'N' * 150
++                    parts.append(f'@{sid}_{i}/{mate}\n{read}\n+\n' + 'I' * 150 + '\n')
++                (f / f'R{mate}.fastq').write_text(''.join(parts))
++        config = p / 'native.config'
++        config.write_text(f"includeConfig '{ROOT}/conf/shared_quantification.config'\n"
++            "process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nprocess.maxForks=1\n"
++            "conda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\nparams.publish_dir_mode='copy'\n"
++            "process {\n" + f"withName: 'COVERM_SHARED' {{ beforeScript = 'export PATH=\"{coverm}/bin:$PATH\"' }}\n"
++            + f"withName: 'SHARED_CATALOGUE|SHARED_ABUNDANCE_TABLES' {{ beforeScript = 'export PATH=\"{python_prefix}/bin:$PATH\"' }}\n}}\n")
++        config.write_text(config.read_text().replace("\n}\n", f"\nwithName: 'SAMTOOLS_VIEW_SHARED' {{ beforeScript = 'export PATH=\"{coverm}/bin:$PATH\"' }}\n}}\n"))
++        params = {'outdir': str(p / 'out'), 'fixture_dir': str(fixture), 'read_ids': ['A', 'B', 'C'] if case == 'missing_sample' else ['A', 'B', 'C', 'D']}
++        (p / 'params.json').write_text(json.dumps(params))
++        cmd = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(ROOT / 'tests/nextflow/shared_quantification_edges.nf'),
++               '-params-file', str(p / 'params.json'), '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
++        env = os.environ.copy()
++        env['PATH'] = str(bowtie / 'bin') + ':' + env['PATH']
++        result = subprocess.run(cmd, env=env, text=True, capture_output=True)
++        (p / 'stdout.log').write_text(result.stdout)
++        (p / 'stderr.log').write_text(result.stderr)
++        tasks = rows(p / 'trace.tsv') if (p / 'trace.tsv').exists() else []
++        if case == 'missing_sample':
++            assert result.returncode != 0
++            diagnostics = ''.join(q.read_text() for q in (p / 'work').rglob('.command.err'))
++            assert 'missing/unexpected sample measurement' in diagnostics
++            assert not list((p / 'out/tables').rglob('*.tsv'))
++        else:
++            assert result.returncode == 0, result.stdout + result.stderr
++            assert len(tasks) == (2 if case == 'empty' else 15), len(tasks)
++            assert all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks)
++            measured = rows(p / 'out/tables/contig_abundance.tsv')
++            assert len(measured) == (0 if case == 'empty' else 8)
++            assert all(r['raw_count'] == '0' and float(r['coverage']) == 0 for r in measured)
++            states = rows(p / 'out/tables/sample_states.tsv')
++            assert {r['sample_id'] for r in states} == {'A', 'B', 'C', 'D'}
++            assert all(r['quantification_status'] == ('empty_catalogue' if case == 'empty' else 'measured_zero') for r in states)
++        runs.append({'case': case, 'command': cmd, 'exit': result.returncode, 'tasks': tasks,
++                     'checks': 'ambiguous low-MAPQ primary assignments excluded; globally empty catalogue explicit all-sample status; missing sample fails without final quantification publication'})
++        assert hashes == {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in sources}
++        (base / 'run.json').write_text(json.dumps({'pass': True, 'runs': runs, 'source_sha256': hashes,
++            'limits': ['short mapper boundary controls only; not near-homologue sensitivity, wet-lab truth, full platform, image or nf-test certification']}, indent=2) + '\n')
++        print('PASS', case, len(tasks), flush=True)
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True)
++    parser.add_argument('--reference', required=True)
++    parser.add_argument('--bowtie-prefix', required=True)
++    parser.add_argument('--coverm-prefix', required=True)
++    parser.add_argument('--python-prefix', required=True)
++    args = parser.parse_args()
++    base = Path(args.work_dir).resolve()
++    base.mkdir(parents=True, exist_ok=True)
++    run(base, Path(args.reference).resolve(), Path(args.bowtie_prefix).resolve(), Path(args.coverm_prefix).resolve(), Path(args.python_prefix).resolve())
+--- /dev/null
++++ b/tests/nextflow/shared_quantification.nf
+@@ -0,0 +1,37 @@
++nextflow.enable.dsl=2
++include { SHARED_QUANTIFICATION } from '../../subworkflows/shared_quantification'
++include { CROSS_SAMPLE } from '../../subworkflows/cross_sample'
++include { HOST_LINKING } from '../../subworkflows/host_linking'
++
++workflow {
++    ids = ['A', 'B', 'C', 'D']
++    assemblies = Channel.fromList(ids.reverse()).map { sid ->
++        tuple([id: sid, single_end: false], file("${params.fixture_dir}/${sid}/assembly.fasta", checkIfExists: true))
++    }
++    candidates = Channel.fromList(ids).map { sid ->
++        tuple([id: sid, single_end: false], file("${params.fixture_dir}/${sid}/plasmids.fasta", checkIfExists: true))
++    }
++    short_reads = Channel.empty()
++    long_reads = Channel.empty()
++    if (params.read_mode == 'short') {
++        short_reads = Channel.fromList(ids).map { sid ->
++            tuple([id: sid, single_end: false],
++                  file("${params.fixture_dir}/${sid}/R1.fastq", checkIfExists: true),
++                  file("${params.fixture_dir}/${sid}/R2.fastq", checkIfExists: true))
++        }
++    } else {
++        long_reads = Channel.fromList(ids).map { sid ->
++            tuple([id: sid, single_end: false], file("${params.fixture_dir}/${sid}/long.fastq", checkIfExists: true))
++        }
++    }
++    SHARED_QUANTIFICATION(assemblies, candidates, short_reads, long_reads, params.read_mode, 4)
++    profiles = Channel.fromList(['D', 'C', 'B', 'A']).map { sid ->
++        tuple([id: sid, single_end: false], file("${params.fixture_dir}/${sid}/${sid}.metaphlan.tsv", checkIfExists: true))
++    }
++    HOST_LINKING(Channel.empty(), Channel.empty(), Channel.empty(),
++                 SHARED_QUANTIFICATION.out.plasmids, profiles, Channel.empty(), Channel.empty(), false)
++    if (params.run_cross_sample) {
++        CROSS_SAMPLE(SHARED_QUANTIFICATION.out.contigs, SHARED_QUANTIFICATION.out.plasmids,
++                     Channel.empty(), SHARED_QUANTIFICATION.out.states, 4, 2)
++    }
++}
+--- /dev/null
++++ b/tests/nextflow/shared_quantification_edges.nf
+@@ -0,0 +1,15 @@
++nextflow.enable.dsl=2
++include { SHARED_QUANTIFICATION } from '../../subworkflows/shared_quantification'
++
++workflow {
++    assemblies = Channel.fromList(['A', 'B', 'C', 'D']).map { sid ->
++        tuple([id: sid, single_end: false], file("${params.fixture_dir}/${sid}/assembly.fasta", checkIfExists: true))
++    }
++    candidates = Channel.fromList(['D', 'C', 'B', 'A']).map { sid ->
++        tuple([id: sid, single_end: false], file("${params.fixture_dir}/${sid}/plasmids.fasta", checkIfExists: true))
++    }
++    reads = Channel.fromList(params.read_ids).map { sid ->
++        tuple([id: sid, single_end: false], file("${params.fixture_dir}/${sid}/R1.fastq"), file("${params.fixture_dir}/${sid}/R2.fastq"))
++    }
++    SHARED_QUANTIFICATION(assemblies, candidates, reads, Channel.empty(), 'short', 4)
++}

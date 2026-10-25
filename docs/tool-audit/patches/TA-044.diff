@@ -1,0 +1,127 @@
+--- a/bin/plasmid_consensus.R
++++ b/bin/plasmid_consensus.R
+@@ -142,6 +142,17 @@
+ 
+ empty_calls <- function() list(score = list(), is_plasmid = list())
+ 
++check_unique_ids <- function(ids, path, kind) {
++  nonempty <- which(!is.na(ids) & nzchar(ids))
++  repeated <- anyDuplicated(ids[nonempty])
++  if (repeated) {
++    second <- nonempty[repeated]
++    first <- match(ids[second], ids)
++    die(sprintf("Duplicate ID '%s' in %s: %s record %d; first seen at record %d",
++                ids[second], path, kind, second, first))
++  }
++}
++
+ parse_generic_predictions <- function(path, tool_id) {
+   dt <- sniff_table(path)
+   out <- empty_calls()
+@@ -151,6 +162,7 @@
+   if (is.null(id_col)) id_col <- fields[1L]
+   score_col <- pick_column(fields, SCORE_COLUMNS)
+   class_col <- pick_column(fields, CLASS_COLUMNS)
++  check_unique_ids(trimws(dt[[id_col]]), path, "prediction data")
+   for (i in seq_len(nrow(dt))) {
+     cid <- trimws(dt[[id_col]][i])
+     if (!nzchar(cid)) next
+@@ -174,6 +186,7 @@
+   id_col <- pick_column(fields, "seq_name")
+   if (is.null(id_col)) id_col <- fields[1L]
+   score_col <- pick_column(fields, "plasmid_score")
++  check_unique_ids(trimws(dt[[id_col]]), path, "geNomad data")
+   for (i in seq_len(nrow(dt))) {
+     cid <- trimws(dt[[id_col]][i])
+     if (!nzchar(cid)) next
+@@ -185,10 +198,12 @@
+ }
+ 
+ read_fasta_dss <- function(path) {
+-  tryCatch(
++  dss <- tryCatch(
+     readDNAStringSet(path),
+     error = function(e) die(paste0("Cannot read FASTA ", path, ": ", conditionMessage(e)))
+   )
++  check_unique_ids(fasta_ids(dss), path, "FASTA")
++  dss
+ }
+ 
+ fasta_ids <- function(dss) {
+@@ -283,12 +298,18 @@
+ 
+   calls <- list()
+   calls[["genomad"]] <- parse_genomad(args$genomad_summary)
++  sources <- list(genomad = args$genomad_summary)
+   for (extra in args$extra) {
+     tool <- identify_extra(extra)
+     if (is.null(tool)) {
+       cat(paste0("warning: unrecognized extra prediction file ", extra, "\n"), file = stderr())
+       next
+     }
++    if (tool %in% names(sources)) {
++      die(sprintf("Duplicate prediction source for tool %s: %s; first source %s",
++                  tool, extra, sources[[tool]]))
++    }
++    sources[[tool]] <- extra
+     if (tool == "scapp") {
+       calls[[tool]] <- parse_scapp(extra)
+     } else {
+--- /dev/null
++++ b/tests/test_consensus_integrity.py
+@@ -0,0 +1,55 @@
++"""Duplicate evidence must fail before consensus tables or FASTA are written."""
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++class ConsensusIntegrityTests(unittest.TestCase):
++    def check_duplicate(self, kind, reverse=False):
++        with tempfile.TemporaryDirectory() as directory:
++            base=Path(directory);assembly=base/'assembly.fa';summary=base/'genomad.tsv'
++            assembly.write_text('>p1 original\nACGT\n>p2\nACGTTGCA\n')
++            summary.write_text('seq_name\tplasmid_score\np1\t0.9\n')
++            extras=[];source=assembly
++            if kind=='assembly':assembly.write_text('>p1 original\nACGT\n>p1 alternate\nACGTTGCA\n')
++            elif kind=='genomad':
++                source=summary;summary.write_text('seq_name\tplasmid_score\np1\t0.9\np1\t0.2\n')
++            elif kind=='scapp':
++                source=base/'S.scapp.fasta';source.write_text('>p1 one\nACGT\n>p1 two\nACGTTGCA\n');extras=[source]
++            elif kind in ['table','identical']:
++                source=base/'S.platon.tsv';rows=['p1\tplasmid',' p1 \tchromosome']
++                if kind=='identical':rows=['p1\tplasmid','p1\tplasmid']
++                if reverse:rows.reverse()
++                source.write_text('contig_id\tclassification\n'+'\n'.join(rows)+'\n');extras=[source]
++            elif kind=='tool_sources':
++                source=base/'second.platon.tsv';first=base/'first.platon.tsv'
++                first.write_text('contig_id\n'+'p1\n');source.write_text('contig_id\np2\n');extras=[first,source]
++            outputs=[base/'out.fa',base/'predictions.tsv',base/'consensus.tsv']
++            args=['Rscript',str(ROOT/'bin/plasmid_consensus.R'),'--assembly',str(assembly),'--genomad-summary',str(summary)]
++            for extra in extras:args+=['--extra',str(extra)]
++            args+=['--out-fasta',str(outputs[0]),'--out-predictions',str(outputs[1]),'--out-consensus',str(outputs[2])]
++            r=subprocess.run(args,capture_output=True,text=True)
++            self.assertNotEqual(r.returncode,0,f'{kind}: duplicate was accepted')
++            self.assertIn('Duplicate',r.stderr);self.assertIn(str(source),r.stderr)
++            if kind!='tool_sources':
++                self.assertIn('p1',r.stderr)
++                self.assertIn('record 2',r.stderr)
++                self.assertIn('first seen at record 1',r.stderr)
++            else:
++                self.assertIn(str(first),r.stderr)
++            for output in outputs:self.assertFalse(output.exists(),str(output))
++
++    def test_duplicate_normalized_assembly_ids(self):self.check_duplicate('assembly')
++    def test_duplicate_genomad_records(self):self.check_duplicate('genomad')
++    def test_duplicate_scapp_fasta_ids(self):self.check_duplicate('scapp')
++    def test_conflicting_rows_rejected_in_either_order(self):
++        for reverse in [False,True]:
++            with self.subTest(reverse=reverse):self.check_duplicate('table',reverse)
++    def test_multiple_files_for_same_tool_rejected(self):self.check_duplicate('tool_sources')
++    def test_identical_duplicate_rows_are_also_rejected(self):self.check_duplicate('identical')
++
++
++if __name__=='__main__':unittest.main()

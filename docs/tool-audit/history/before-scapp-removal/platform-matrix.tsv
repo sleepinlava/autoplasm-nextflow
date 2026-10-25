@@ -1,0 +1,6 @@
+platform	required_input	assembly_route	graph_route	coverage_route	abundance_route	host_route	known_limits	current_real_validation
+illumina	read1+read2	megahit(default) / metaspades	SPADES FASTG when metaspades; Recycler receives same-task graph/k provenance and dedicated short-read BAM/BAI	short-read BAM	short abundance	metaphlan; kraken2	TA-005/006/007/008; Recycler interface verified only, full platform pending	not_verified
+ont	pod5 or bam or long_reads	metaflye; optional medaka	empty	long-read BAM	long abundance	metaphlan	TA-005 if compressed input; TA-007/008	not_verified
+pacbio_hifi	bam or long_reads	hifiasm_meta	empty	long-read BAM	long abundance	metaphlan	TA-007/008	not_verified
+hybrid	read1+read2 and pod5/bam/long_reads	opera_ms(default) / hybridspades	Recycler receives HYBRIDSPADES FASTG/k provenance only with hybridspades; other graph routes remain empty	short+long merged BAM; separate long BAM	short and long; cross-sample short	metaphlan on short reads	TA-001/005/007/008	not_verified
+assembly	assembly FASTA	provided	empty	empty	empty	plasmidhostfinder only when selected	TA-007; no MAG workflow; read-based choices silently skipped	not_verified

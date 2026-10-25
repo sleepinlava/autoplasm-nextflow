@@ -1,0 +1,156 @@
+path	line	declaration	limitations
+conf/gplas.config	2	withName: '.*:GPLAS_NODE_DETECTION:.*' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_detection.config	22	withName: 'GENOMAD' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	7	*     includeConfig 'conf/nfcore_downstream.config'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	18	withName: 'PLASMIDFINDER' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	21	ext.args   = '--legacy'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	22	"ext.prefix = { ""${meta.id}.plasmidfinder"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	26	withName: 'MOB_TYPER' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	28	ext.args   = '--multi'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	29	"ext.prefix = { ""${meta.id}.mob_typer"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	33	withName: 'CONJSCAN' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	35	ext.args   = '--db-type gembase --replicon-topology linear'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	36	"ext.prefix = { ""${meta.id}.conjscan"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	41	withName: 'MACSYFINDER' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	43	ext.args   = '--db-type gembase --replicon-topology linear'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	44	"ext.prefix = { ""${meta.id}.macsyfinder"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	50	withName: 'BAKTA' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	52	ext.args   = '--skip-sorf'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	56	withName: 'AMRFINDERPLUS' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	58	"ext.prefix = { ""${meta.id}.amrfinder"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	62	withName: 'ABRICATE' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	63	"ext.args   = { ""--db ${params.abricate_db}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	64	"ext.prefix = { ""${meta.id}.${params.abricate_db}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	68	withName: 'INTEGRONFINDER' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	74	withName: 'PRODIGAL' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	76	ext.args   = '-p meta'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	77	"ext.prefix = { ""${meta.id}.prodigal"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	81	withName: 'PROTEIN_INPUTS' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	85	withName: 'RGI' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	86	"ext.prefix = { ""${meta.id}.rgi"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	92	withName: 'EGGNOG_MAPPER' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	96	withName: 'MOB_SUITE_ANNOT' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	100	withName: 'MOB_RECON' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_host_comparative.config	10	*   includeConfig 'conf/nfcore_host_comparative.config'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_host_comparative.config	14	withName: 'METAPHLAN' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_host_comparative.config	27	withName: 'KRAKEN2' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_host_comparative.config	40	withName: 'MMSEQS2' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_host_comparative.config	41	"ext.args   = { ""--min-seq-id ${params.mmseqs2_min_seq_id} -c ${params.mmseqs2_min_cov} --cov-mode 1"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_host_comparative.config	56	withName: 'BLASTN' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_host_comparative.config	57	ext.args   = '-outfmt 6'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	11	*   includeConfig 'conf/nfcore_mag.config'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	15	withName: 'METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	20	withName: 'METABAT2' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	25	withName: 'CONCOCT_CUTUPFASTA' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	30	withName: 'CONCOCT_CONCOCTCOVERAGETABLE' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	35	withName: 'CONCOCT_CONCOCT' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	40	withName: 'CONCOCT_MERGECUTUPCLUSTERING' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	45	withName: 'CONCOCT' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	50	withName: 'SEMIBIN' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	58	withName: 'SCAFFOLDS2BIN_METABAT2' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	59	"ext.prefix = { ""${meta.id}.metabat2"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	64	withName: 'SCAFFOLDS2BIN_CONCOCT' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	65	"ext.prefix = { ""${meta.id}.concoct"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	70	withName: 'DAS_TOOL' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	71	ext.args = '--write_bins'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	76	withName: 'SCAFFOLDS2BIN_SEMIBIN' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	77	"ext.prefix = { ""${meta.id}.semibin"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	82	withName: 'CHECKM2' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	90	withName: 'GTDBTK' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_mag.config	96	ext.args = ''	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	36	*   includeConfig 'conf/nfcore_qc_assembly.config'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	42	withName: '^FASTP$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	53	withName: '^FASTQC$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	54	"ext.prefix = { ""${meta.id}.${meta.stage}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	61	withName: '^FASTQC_CLEAN$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	62	"ext.prefix = { ""${meta.id}.${meta.stage}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	71	withName: '^MULTIQC$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	74	ext.args = '--fullnames'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	77	"ext.prefix = { ""${meta.id}_report"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	84	withName: '^MULTIQC_ONT$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	85	ext.args = '--fullnames'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	86	"ext.prefix = { ""${meta.id}_report"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	95	withName: '^NANOPLOT$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	106	withName: '^FILTLONG$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	107	"ext.args   = { ""--min_length ${params.filtlong_min_length} --keep_percent ${params.filtlong_keep_percent}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	108	"ext.prefix = { ""${meta.id}.filtlong"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	117	withName: '^HIFIADAPTERFILT$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	129	withName: '^SAMTOOLS_FASTQ$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	142	withName: '^MEGAHIT$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	143	"ext.args   = { ""--memory ${params.megahit_memory_bytes}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	144	"ext.prefix = { ""${meta.id}.megahit"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	153	withName: '^METASPADES$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	154	ext.args   = '--meta'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	155	"ext.prefix = { ""${meta.id}.metaspades"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	164	withName: '^HYBRIDSPADES$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	165	ext.args   = '--meta'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	166	"ext.prefix = { ""${meta.id}.hybridspades"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	175	withName: '^METAFLYE$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	176	ext.args   = '--meta'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	177	"ext.prefix = { ""${meta.id}.metaflye"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	186	withName: '^QUAST$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	187	ext.args   = ''	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	188	"ext.prefix = { ""${meta.id}.quast_out"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	207	withName: '^MEDAKA$' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_qc_assembly.config	208	"ext.prefix = { ""${meta.id}.medaka.consensus"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	28	withName: 'BOWTIE2_ALIGN_COVERAGE' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	29	"ext.prefix = { ""${meta.id}.contig_alignment${meta.suffix}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	32	withName: 'MINIMAP2_ALIGN_COVERAGE' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	33	"ext.prefix = { ""${meta.id}.contig_alignment${meta.suffix}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	34	"ext.args   = { ""-ax ${meta.preset}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	37	withName: 'SAMTOOLS_MERGE' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	38	"ext.prefix = { ""${meta.id}.contig_alignment"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	41	withName: 'COVERM_CONTIG' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	42	ext.args   = '--methods mean tpm rpkm --min-covered-fraction 0'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	43	"ext.prefix = { ""${meta.id}.contig_coverm"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	49	withName: 'BOWTIE2_ALIGN_ABUNDANCE' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	50	"ext.prefix = { ""${meta.id}${meta.suffix ?: ''}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	53	withName: 'MINIMAP2_ALIGN_ABUNDANCE' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	54	"ext.prefix = { ""${meta.id}${meta.suffix ?: ''}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	55	"ext.args   = { ""-ax ${meta.preset}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	58	withName: 'COVERM_ABUNDANCE' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	59	ext.args   = '--methods mean tpm rpkm --min-covered-fraction 0'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	60	"ext.prefix = { ""${meta.id}${meta.suffix ?: ''}.coverm"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	64	withName: 'COVERM_ABUNDANCE_LONG' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	65	ext.args   = '--methods mean tpm rpkm --min-covered-fraction 0'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	66	"ext.prefix = { ""${meta.id}${meta.suffix ?: ''}.coverm"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	72	withName: 'BOWTIE2_ALIGN_HOST' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	73	"ext.prefix = { ""${meta.id}.host"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	76	withName: 'MINIMAP2_ALIGN_HOST' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	77	"ext.prefix = { ""${meta.id}.host"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	78	"ext.args   = { ""-ax ${meta.preset}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	81	withName: 'SAMTOOLS_VIEW_HOST' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	82	ext.args   = '-f 4' // keep only unmapped reads	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	83	"ext.prefix = { ""${meta.id}.host_removed"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	86	withName: 'SAMTOOLS_FASTQ_HOST' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_upstream.config	87	"ext.prefix = { ""${meta.id}.host_removed"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/plasmaag.config	2	withName: '.*:METASPADES' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/shared_quantification.config	3	withName: 'BOWTIE2_ALIGN_SHARED' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/shared_quantification.config	4	"ext.prefix = { ""${meta.id}.shared"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/shared_quantification.config	6	withName: 'MINIMAP2_ALIGN_SHARED' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/shared_quantification.config	7	"ext.prefix = { ""${meta.id}.shared"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/shared_quantification.config	8	"ext.args = { ""-ax ${meta.preset}"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/shared_quantification.config	10	withName: 'SAMTOOLS_VIEW_SHARED' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/shared_quantification.config	11	"ext.prefix = { ""${meta.id}.shared.eligible"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/shared_quantification.config	12	"ext.args = ""-b -F 2308 -q 10 -e 'mapq != 255'"""	lexical; evaluate profile and selector precedence with Nextflow
+conf/shared_quantification.config	14	withName: 'COVERM_SHARED' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/shared_quantification.config	15	"ext.prefix = { ""${meta.id}.shared.coverm"" }"	lexical; evaluate profile and selector precedence with Nextflow
+conf/shared_quantification.config	17	ext.args = '--methods mean tpm rpkm count --min-covered-fraction 0 --contig-end-exclusion 0 --exclude-supplementary'	lexical; evaluate profile and selector precedence with Nextflow
+conf/test.config	38	withName: '.*:GENOMAD' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/test.config	39	ext.args = '--cleanup --disable-nn-classification'	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	108	plasme_container    = null    // optional OCI/SIF override; default local image built from containers/plasme	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	137	withLabel: process_single {	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	142	withLabel: process_low {	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	147	withLabel: process_medium {	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	152	withLabel: process_high {	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	157	withLabel: process_highmem {	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	165	includeConfig 'conf/nfcore_upstream.config'	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	166	includeConfig 'conf/shared_quantification.config'	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	167	includeConfig 'conf/nfcore_qc_assembly.config'	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	168	includeConfig 'conf/nfcore_detection.config'	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	169	includeConfig 'conf/gplas.config'	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	170	includeConfig 'conf/nfcore_downstream.config'	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	171	includeConfig 'conf/nfcore_mag.config'	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	172	includeConfig 'conf/nfcore_host_comparative.config'	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	196	includeConfig 'conf/test.config'	lexical; evaluate profile and selector precedence with Nextflow
+nextflow.config	215	includeConfig 'conf/plasmaag.config'	lexical; evaluate profile and selector precedence with Nextflow

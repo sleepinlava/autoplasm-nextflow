@@ -1,0 +1,28 @@
+diff --git a/modules/nf-core/semibin/singleeasybin/main.nf b/modules/nf-core/semibin/singleeasybin/main.nf
+--- a/modules/nf-core/semibin/singleeasybin/main.nf
++++ b/modules/nf-core/semibin/singleeasybin/main.nf
+@@ -17,7 +17,7 @@
+ 
+     output:
+     tuple val(meta), path("${prefix}/*.csv"), emit: csv
+-    tuple val(meta), path("${prefix}/*.h5"), emit: model, optional: true
++    tuple val(meta), path("${prefix}/*.pt"), emit: model, optional: true
+     tuple val(meta), path("${prefix}/*.tsv"), emit: tsv
+     tuple val(meta), path("${prefix}/output_bins/*.fa.gz"), emit: output_fasta, optional: true
+     tuple val(meta), path("${prefix}/binning_status.json"), emit: state
+diff --git a/modules/nf-core/semibin/singleeasybin/meta.yml b/modules/nf-core/semibin/singleeasybin/meta.yml
+--- a/modules/nf-core/semibin/singleeasybin/meta.yml
++++ b/modules/nf-core/semibin/singleeasybin/meta.yml
+@@ -48,10 +48,10 @@
+           description: |
+             Groovy Map containing sample information
+             e.g. [ id:'test' ]
+-      - ${prefix}/*.h5:
++      - ${prefix}/*.pt:
+           type: file
+           description: model file
+-          pattern: "*.h5"
++          pattern: "*.pt"
+           ontologies: []
+   tsv:
+     - - meta:

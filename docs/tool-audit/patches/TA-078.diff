@@ -1,0 +1,22 @@
+diff --git a/subworkflows/plasmid_downstream.nf b/subworkflows/plasmid_downstream.nf
+--- a/subworkflows/plasmid_downstream.nf
++++ b/subworkflows/plasmid_downstream.nf
+@@ -92,15 +92,15 @@
+     if (run_conjscan || run_macsyfinder) {
+         // Match the model release already declared in the project's test data.
+         // Request once, only after at least one sample has actual proteins.
+-        MACSYFINDER_DOWNLOAD(ch_proteins.map { meta, proteins, topology -> 'CONJ' }.first())
++        MACSYFINDER_DOWNLOAD(ch_proteins.map { meta, proteins, topology -> 'CONJScan==2.1.0' }.first())
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER_DOWNLOAD.out], '06_plasmid_typing', 'MACSYFINDER_DOWNLOAD'))
+     }
+     if (run_conjscan) {
+-        CONJSCAN(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJ')
++        CONJSCAN(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJScan/Plasmids all')
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: CONJSCAN.out], '06_plasmid_typing', 'CONJSCAN'))
+     }
+     if (run_macsyfinder) {
+-        MACSYFINDER(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJ')
++        MACSYFINDER(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJScan/Plasmids all')
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER.out], '06_plasmid_typing', 'MACSYFINDER'))
+     }
+ 

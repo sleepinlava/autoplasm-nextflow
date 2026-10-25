@@ -1,0 +1,9 @@
+# MOB-suite 最终结果发布
+
+TA-029只处理发布契约。原nf-core MOBSUITE_RECON模块固定输出results/chromosome.fasta、contig_report.txt及可选plasmid_*.fasta、mobtyper_results.txt。MOB_SUITE_ANNOT/MOB_RECON两别名此前明确不设publishDir，子工作流也不向最终收集器转发这些产物；成功任务的结果只存在work中。
+
+修复只在conf/nfcore_downstream.config为两别名增加动态path闭包，分别发布到08_annotation/mob_suite/<sample_id>/results/和05_plasmid_binning/mob_recon/<sample_id>/results/。样本meta可用于path闭包，不需要在saveAs中读取meta或修改vendored命令。使用生产默认copy模式时，最终文件独立于work；其他用户自选链接模式不能据此宣称清理work安全。
+
+tests/run_mob_publication.py实际调度原生产模块、别名及配置，mob_recon为明确输出协议替身，不是原生MOB推理。两样本具有相同本地contig ID、不同DNA，其中一个产生可选质粒产物，一个仅必要产物。原配置4任务成功但无最终发布；当前配置对这4任务缓存恢复后正确发布，另4次当前冷任务也正确发布。逐样本/阶段核对文件集合、DNA和报告身份，保存task脚本/退出值/observer记录后删除本测试私有work，全部发布副本仍可读且hash不变。
+
+第一次test overlay把publish_dir_mode放在includeConfig之后，使配置在求值时取得null并使用Nextflow默认symlink。文件身份断言通过，但独立副本断言正确失败；未修改生产逻辑或删断言。修正overlay为与生产nextflow.config相同的先定义params再加载配置，重新完整通过。失败源码及原日志保留。该12条选定trace包含4旧配置任务、4缓存、4冷任务，不能称12个科学样本；未验证MOB安装、数据库、算法、容器或全平台。

@@ -1,0 +1,14 @@
+{
+  "run_id": "20261023-tetra-primary-metadata-readiness",
+  "artifact": "results/tool-audit/20261023-tetra-calibration/metadata-readiness.json",
+  "sha256": "d16d8c4e97ff9c6242b41758a0ca0a4dd432981664383d2ad635eab2da61fa3f",
+  "candidate_assemblies": 60,
+  "metadata_eligible_assemblies": 55,
+  "endpoint": "recorded_assembly_host",
+  "status": "readiness_only_no_scores_no_cutoff",
+  "limits": [
+    "Source BioSample association is not experimental permissiveness; alternative source hosts would be decoys",
+    "Plasmid relatedness grouping, cohort split, independent profile scoring and holdout evaluation are not performed",
+    "Default threshold is not changed and TA-039 remains open"
+  ]
+}

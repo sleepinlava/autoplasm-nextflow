@@ -1,0 +1,8 @@
+{
+  "historical_receipt": "docs/tool-audit/source-receipt.tsv",
+  "unchanged_sha256": "f545fa80bd184170487256c5d8652041c7cdb31a2b22616ced5a15ec88d534d9",
+  "regular_file_rows": 488,
+  "tracked_source_objects": 489,
+  "directory_symlink_supplement": "docs/tool-audit/source-receipt-symlinks.tsv",
+  "explanation": "Historical metadata counted489 tracked entries but hash TSV has488 regular files/489 physical lines including header. The missing entry is directory symlink tests/nf-test/workflows/bin -> ../../../bin (git120000). Keep original frozen ledger, supplement link identity and clarify units; no source missing from combined manifest."
+}

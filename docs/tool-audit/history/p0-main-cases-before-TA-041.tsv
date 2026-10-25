@@ -1,0 +1,12 @@
+case	stderr_diagnostic	exit_code	trace_tasks	command_files	artifacts	result
+duplicate	duplicate sample_id	1	0	0	results/tool-audit/20261020-main-p0/duplicate	pass
+invalid	invalid sample_id	1	0	0	results/tool-audit/20261020-main-p0/invalid	pass
+missing-mate	illumina requires read1/read2	1	0	0	results/tool-audit/20261020-main-p0/missing-mate	pass
+missing-genomad	geNomad is mandatory	1	0	0	results/tool-audit/20261020-main-p0-remaining/missing-genomad	pass
+crispr	CRISPR host-plasmid linking is not implemented	1	0	0	results/tool-audit/20261020-main-p0-remaining/crispr	pass
+platform	--platform must be one of	1	0	0	results/tool-audit/20261020-main-p0-remaining/platform	pass
+short-assembler	short_read_assembler must be	1	0	0	results/tool-audit/20261020-main-p0-remaining/short-assembler	pass
+hybrid-assembler	hybrid_assembler must be	1	0	0	results/tool-audit/20261020-main-p0-remaining/hybrid-assembler	pass
+bakta-db	requires --bakta_db	1	0	0	results/tool-audit/20261020-main-p0-remaining/bakta-db	pass
+mob-db	requires --mob_suite_db	1	0	0	results/tool-audit/20261020-main-p0-remaining/mob-db	pass
+clinker-bakta	requires annotation_tools 'bakta'	1	0	0	results/tool-audit/20261020-main-p0-remaining/clinker-bakta	pass

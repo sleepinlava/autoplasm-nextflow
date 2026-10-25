@@ -1,0 +1,761 @@
+diff --git a/tests/mock_e2e/generate.py b/tests/mock_e2e/generate.py
+--- a/tests/mock_e2e/generate.py
++++ b/tests/mock_e2e/generate.py
+@@ -14,18 +14,28 @@
+     root = Path(destination).resolve()
+     root.mkdir(parents=True, exist_ok=True)
+     rng = random.Random(20261016)
+-    sequences = {name: ''.join(rng.choices('ACGT', k=size))
+-                 for name, size in [('plasmid_1', 4000), ('chromosome_1', 12000)]}
+-    fasta = ''.join(f'>{name}\n{seq}\n' for name, seq in sequences.items())
+-    (root / 'reference.fasta').write_text(fasta)
+     rows = []
+     retained_long_reads = {}
++    reference_sequences = {}
++    read_origins = {}
++    expected_primary_reads = {}
++    host_reference_contigs = {}
+     for index, sid in enumerate(SAMPLES):
++        # Local IDs deliberately overlap; full DNA differs between samples.
++        # A swapped reference can no longer preserve an apparent expected hit.
++        sequences = {name: ''.join(rng.choices('ACGT', k=size))
++                     for name, size in [('plasmid_1', 4000), ('chromosome_1', 12000)]}
++        reference_sequences[sid] = sequences
++        fasta = ''.join(f'>{name}\n{seq}\n' for name, seq in sequences.items())
+         sample = root / sid
+         sample.mkdir(exist_ok=True)
+         (sample / 'assembly.fasta').write_text(fasta)
+         reads = [[], []]
+         long_reads = []
++        host_name = ['chromosome_1', 'plasmid_1'][index] if host_removal and index < 2 else None
++        host_reference_contigs[sid] = host_name
++        expected_primary_reads[sid] = {kind: {name: {'count': 0, 'bases': 0} for name in sequences}
++                                       for kind in ['short', 'long']}
+         # Two groups with three replicates; plasmid abundance differs between groups.
+         for name, seq in sequences.items():
+             depth = (10 + index * 2) if name == 'plasmid_1' else (30 - index)
+@@ -34,17 +44,26 @@
+                 fragment = seq[pos:pos + 350]
+                 pair = [fragment[:150], fragment[-150:].translate(str.maketrans('ACGT', 'TGCA'))[::-1]]
+                 for mate, read in enumerate(pair):
+-                    reads[mate].append(f'@{sid}_{name}_{n}/{mate+1}\n{read}\n+\n' + 'I' * len(read) + '\n')
++                    rid = f'{sid}_{name}_{n}/{mate+1}'
++                    reads[mate].append(f'@{rid}\n{read}\n+\n' + 'I' * len(read) + '\n')
++                    read_origins[rid] = {'sample_id': sid, 'kind': 'short', 'contig': name, 'length': len(read),
++                                         'start': pos if mate == 0 else pos + 200, 'strand': '+' if mate == 0 else '-'}
++                    expected_primary_reads[sid]['short'][name]['count'] += 1
++                    expected_primary_reads[sid]['short'][name]['bases'] += len(read)
+             for n in range(20):
+                 pos = rng.randrange(len(seq) - 2000)
+                 read = seq[pos:pos + 2000]
+-                long_reads.append(f'@{sid}_{name}_long{n}\n{read}\n+\n' + 'I' * len(read) + '\n')
++                rid = f'{sid}_{name}_long{n}'
++                long_reads.append(f'@{rid}\n{read}\n+\n' + 'I' * len(read) + '\n')
++                read_origins[rid] = {'sample_id': sid, 'kind': 'long', 'contig': name, 'length': len(read), 'start': pos, 'strand': '+'}
++                if host_name != name:
++                    expected_primary_reads[sid]['long'][name]['count'] += 1
++                    expected_primary_reads[sid]['long'][name]['bases'] += len(read)
+         for mate in range(2):
+             with gzip.GzipFile(filename=str(sample / f'R{mate+1}.fastq.gz'), mode='wb', mtime=0) as fh:
+                 fh.write(''.join(reads[mate]).encode())
+         with gzip.GzipFile(filename=str(sample / 'long.fastq.gz'), mode='wb', mtime=0) as fh:
+             fh.write(''.join(long_reads).encode())
+-        host_name = ['chromosome_1', 'plasmid_1'][index] if host_removal and index < 2 else None
+         host_reference = ''
+         if host_name:
+             path = sample / 'host_reference.fasta'
+@@ -54,6 +73,8 @@
+                                    if host_name is None or not read.startswith('@' + sid + '_' + host_name + '_long')]
+         rows.append([sid, 'A' if index < 3 else 'B', str(sample / 'R1.fastq.gz'),
+                      str(sample / 'R2.fastq.gz'), str(sample / 'long.fastq.gz'), str(sample / 'assembly.fasta'), host_reference])
++    (root / 'reference.fasta').write_text(''.join(f'>{sid}|{name}\n{dna}\n'
++        for sid, sequences in reference_sequences.items() for name, dna in sequences.items()))
+     with (root / 'samples.tsv').open('w') as fh:
+         writer = csv.writer(fh, delimiter='\t', lineterminator='\n')
+         writer.writerow(['sample_id', 'group', 'read1', 'read2', 'long_reads', 'assembly', 'host_reference'])
+@@ -61,6 +82,9 @@
+     (root / 'truth.json').write_text(json.dumps({'seed': 20261016, 'samples': SAMPLES,
+         'synthetic_sequences': True, 'plasmid': 'plasmid_1', 'chromosome': 'chromosome_1',
+         'long_read_expected_after_host_removal': retained_long_reads,
++        'reference_sequences': reference_sequences, 'read_origins': read_origins,
++        'expected_primary_reads': expected_primary_reads,
++        'host_reference_contigs': host_reference_contigs,
+         'host_removal': host_removal,
+         'note': 'Random DNA is not expected to be classified as a plasmid by real geNomad.'}, indent=2) + '\n')
+     return root
+diff --git a/tests/mock_e2e/mock_tool.py b/tests/mock_e2e/mock_tool.py
+--- a/tests/mock_e2e/mock_tool.py
++++ b/tests/mock_e2e/mock_tool.py
+@@ -9,6 +9,7 @@
+ (version probes, stdout SAM pipes, gzipped assembly inputs, renamed outputs).
+ """
+ import gzip
++import hashlib
+ import json
+ import os
+ import shutil
+@@ -75,6 +76,55 @@
+                 records[name] += line
+     assert records and all(records.values()), path
+     return records
++
++
++def fasta_text(records):
++    return ''.join(f'>{name}\n{sequence}\n' for name, sequence in records.items())
++
++
++def reference_for_reads(paths):
++    """Assembler observer selects truth by read provenance, never output name."""
++    truth = json.loads((fixture / 'truth.json').read_text())
++    origins = truth['read_origins']
++    owners = set()
++    for path in paths:
++        lines = fastq(path).splitlines()
++        owners.update(origins[lines[i][1:].split()[0]]['sample_id'] for i in range(0, len(lines), 4))
++    if len(owners) != 1:
++        raise ValueError('Assembler observer received mixed or missing sample reads')
++    return truth['reference_sequences'][owners.pop()]
++
++
++def exact_payload(records, inputs, mapper):
++    """Toy primary alignments for unique exact matches, not a native mapper."""
++    reads, alignments = [], []
++    seen = set()
++    for text in inputs:
++        lines = text.splitlines()
++        for i in range(0, len(lines), 4):
++            rid, dna = lines[i][1:].split()[0], lines[i + 1]
++            if rid in seen:
++                raise ValueError('Duplicate input read in alignment observer: ' + rid)
++            seen.add(rid)
++            digest = hashlib.sha256(dna.encode()).hexdigest()
++            reads.append({'read_id': rid, 'length': len(dna), 'dna_sha256': digest})
++            reverse = dna.translate(str.maketrans('ACGT', 'TGCA'))[::-1]
++            matches = {}
++            for contig, sequence in records.items():
++                for query, strand in [(dna, '+'), (reverse, '-')]:
++                    start = sequence.find(query)
++                    if start >= 0:
++                        if sequence.find(query, start + 1) >= 0:
++                            raise ValueError('Observer only supports unambiguous exact-match fixtures')
++                        matches.setdefault((contig, start), strand)
++            if len(matches) > 1:
++                raise ValueError('Observer only supports unambiguous exact-match fixtures')
++            if matches:
++                (contig, start), strand = next(iter(matches.items()))
++                alignments.append({'read_id': rid, 'contig': contig, 'start': start,
++                                   'end': start + len(dna), 'strand': strand, 'mapper': mapper})
++    return {'mock': True, 'scope': 'unique exact-match toy alignments, no native mapper inference',
++            'records': records, 'mappers': [mapper], 'input_reads': reads, 'alignments': alignments}
+ 
+ 
+ def positionals(tokens, flags_with_value=()):
+@@ -157,16 +207,16 @@
+     if args == ['-v']:
+         print('MEGAHIT v1.2.9')
+     else:
+-        fastq(arg('-1')); fastq(arg('-2'))
++        records = reference_for_reads([arg('-1'), arg('-2')])
+         # nf-core megahit: no -o; the tool writes ./megahit_out and the module
+         # pigz's the *.fa files and moves them up afterwards.
+         prefix = arg('--out-prefix')
+         write(Path('megahit_out') / (prefix + '.contigs.fa'),
+-              (fixture / 'reference.fasta').read_text())
++              fasta_text(records))
+         write(Path('megahit_out') / (prefix + '.log'), 'MOCK megahit log\n')
+         for suffix in ['contigs.fa', 'addi.fa', 'local.fa', 'final.contigs.fa']:
+             write(Path('megahit_out/intermediate_contigs') / f'k21.{suffix}',
+-                  (fixture / 'reference.fasta').read_text())
++                  fasta_text(records))
+ elif tool == 'quast.py':
+     if '--version' in args:
+         print('QUAST v5.3.0')
+@@ -223,7 +273,7 @@
+     else:
+         # nf-core bowtie2/align: SAM goes to stdout through a samtools pipe;
+         # host removal additionally requests --un-conc-gz unmapped pairs.
+-        fastq(arg('-1')); fastq(arg('-2'))
++        read_data = [fastq(arg('-1')), fastq(arg('-2'))]
+         if '--un-conc-gz' in args:
+             target = arg('--un-conc-gz')
+             # Bowtie2 2.5.4 wrapper replaces %, otherwise inserts .1/.2
+@@ -234,8 +284,7 @@
+                         path.stem + '.' + mate + path.suffix if path.suffix else path.name + '.' + mate)
+                 with gzip.open(path.with_name(name), 'wt') as fh:
+                     fh.write(fastq(arg('-' + mate)))
+-        print(json.dumps({'records': json.loads(require(arg('-x') + '.mock.json').read_text()),
+-                          'mappers': ['short']}))
++        print(json.dumps(exact_payload(json.loads(require(arg('-x') + '.mock.json').read_text()), read_data, 'short')))
+         print('mock bowtie2 alignment stats', file=sys.stderr)
+ elif tool == 'minimap2':
+     if '--version' in args:
+@@ -248,7 +297,9 @@
+         fasta_ref, reads = positional[0], positional[1]
+         data = fastq(reads)
+         assert arg('-ax') == ('map-hifi' if os.environ['AUTOPLASM_MOCK_PLATFORM'] == 'pacbio_hifi' else 'map-ont')
+-        print(json.dumps({'mock': True, 'unpaired': True, 'records': fasta(fasta_ref), 'mappers': ['long'], 'fastq': data}))
++        payload = exact_payload(fasta(fasta_ref), [data], 'long')
++        payload.update(unpaired=True, fastq=data)
++        print(json.dumps(payload))
+ elif tool == 'samtools':
+     if args[0] == 'version':
+         print('samtools 1.24')
+@@ -296,7 +347,10 @@
+             'short' if os.environ['AUTOPLASM_MOCK_PLATFORM'] == 'illumina' else 'long']
+         assert sorted(mappers) == sorted(expected), f'Merge lost or duplicated a mapper: {mappers}'
+         assert all(payload['records'] == payloads[0]['records'] for payload in payloads)
+-        write(output, json.dumps({'records': payloads[0]['records'], 'mappers': mappers}))
++        reads = [read for payload in payloads for read in payload['input_reads']]
++        assert len(reads) == len({read['read_id'] for read in reads}), 'Merge duplicated input reads'
++        write(output, json.dumps({'mock': True, 'records': payloads[0]['records'], 'mappers': mappers,
++                                  'input_reads': reads, 'alignments': [row for payload in payloads for row in payload['alignments']]}))
+     elif args[0] == 'view':
+         # view either copies a payload BAM (`-f 4` host filtering) or collects
+         # the aligner's stdout pipe (host-removal bowtie2 chain, input '-').
+@@ -316,22 +370,30 @@
+     else:
+         payload = json.loads(require(arg('--bam-files')).read_text())
+         records = payload['records']
+-        scale = sum(1 if mapper == 'short' else 2 for mapper in payload['mappers'])
+         output = arg('--output-file')
+-        samples = json.loads((fixture / 'truth.json').read_text())['samples']
+-        index = next(i for i, sid in enumerate(samples) if output.startswith(sid + '.'))
+         counted = 'count' in args
+         rows = ['Contig\tMOCK Mean\tMOCK TPM\tMOCK RPKM' + ('\tMOCK Read Count' if counted else '')]
+-        original = fasta(fixture / 'reference.fasta')
++        reads = {row['read_id']: row for row in payload['input_reads']}
++        assert len(reads) == len(payload['input_reads']), 'Duplicate input reads in BAM observer'
++        statistics = {name: {'count': 0, 'bases': 0} for name in records}
++        aligned = set()
++        for alignment in payload['alignments']:
++            rid, name = alignment['read_id'], alignment['contig']
++            assert rid not in aligned and rid in reads and name in records, 'Invalid or duplicate primary alignment'
++            aligned.add(rid)
++            sequence = records[name][alignment['start']:alignment['end']]
++            if alignment['strand'] == '-':sequence = sequence.translate(str.maketrans('ACGT', 'TGCA'))[::-1]
++            assert len(sequence) == reads[rid]['length'] and hashlib.sha256(sequence.encode()).hexdigest() == reads[rid]['dna_sha256'], 'Alignment reference differs from actual input read DNA'
++            statistics[name]['count'] += 1
++            statistics[name]['bases'] += len(sequence)
++        rpk_sum = sum(row['count'] * 1000 / len(records[name]) for name, row in statistics.items())
+         for name, dna in records.items():
+-            # Shared reference IDs derive from complete DNA, not local labels.
+-            labels = [label for label, sequence in original.items()
+-                      if dna in [sequence, sequence.translate(str.maketrans('ACGT', 'TGCA'))[::-1]]]
+-            assert len(labels) == 1
+-            value = (10 + 2 * index if labels[0] == 'plasmid_1' else 30 - index) * scale
+-            # Explicit mock count oracle, deliberately different from coverage.
+-            count = (13 + 3 * index if labels[0] == 'plasmid_1' else 80 - index) * scale
+-            rows.append(f'{name}\t{value}\t{value * 100}\t{value * 10}' + (f'\t{count}' if counted else ''))
++            count = statistics[name]['count']
++            mean = statistics[name]['bases'] / len(dna)
++            rpk = count * 1000 / len(dna)
++            tpm = rpk * 1e6 / rpk_sum if rpk_sum else 0
++            rpkm = rpk * 1e6 / len(reads) if reads else 0
++            rows.append(f'{name}\t{mean:.17g}\t{tpm:.17g}\t{rpkm:.17g}' + (f'\t{count}' if counted else ''))
+         write(output, '\n'.join(rows) + '\n')
+ elif tool == 'plasmidfinder.py':
+     # nf-core plasmidfinder: `plasmidfinder.py --legacy -i <fasta> -o ./ -x`;
+@@ -454,19 +516,19 @@
+     if '--version' in args:
+         print('2.9.5')
+     else:
+-        fastq(arg('--nano-raw'))
++        records = reference_for_reads([arg('--nano-raw')])
+         assert '--meta' in args
+         out = Path(arg('--out-dir'))
+-        write(out / 'assembly.fasta', (fixture / 'reference.fasta').read_text())
++        write(out / 'assembly.fasta', fasta_text(records))
+         write(out / 'assembly_graph.gfa', 'H\tVN:Z:1.0\nS\tcontig_1\t*\n')
+         write(out / 'assembly_graph.gv', 'digraph { }\n')
+         write(out / 'assembly_info.txt', '#seq_name\tlength\tcov.\tcircular\ncontig_1\t1000\t10\tN\n')
+         write(out / 'flye.log', 'MOCK flye log\n')
+         write(out / 'params.json', '{"mock": true}\n')
+ elif tool in ['hifiasm', 'hifiasm_meta']:
+-    fastq(args[-1])
++    records = reference_for_reads([args[-1]])
+     suffix = '.p_ctg.gfa' if tool == 'hifiasm_meta' else '.bp.p_ctg.gfa'
+-    write(arg('-o') + suffix, ''.join(f'S\t{name}\t{seq}\n' for name, seq in fasta(fixture / 'reference.fasta').items()))
++    write(arg('-o') + suffix, ''.join(f'S\t{name}\t{seq}\n' for name, seq in records.items()))
+ elif tool in ['OPERA-MS.pl', 'spades.py']:
+     if '--version' in args:
+         print('SPAdes genome assembler v4.1.0')
+@@ -475,6 +537,7 @@
+         for flag in flags:
+             if flag in args:
+                 fastq(arg(flag))
++        records = reference_for_reads([arg(flag) for flag in flags if flag in args])
+         if tool == 'OPERA-MS.pl':
+             assert int(arg('--num-processors')) >= 2, 'OPERA-MS requires at least two processors'
+             assert not arg('--long-read').lower().endswith('.gz'), 'OPERA-MS0.8.3 requires decoded long reads'
+@@ -483,10 +546,10 @@
+         # nf-core spades writes into -o ./ and the module renames/gzips the
+         # products; the FASTG/provenance interface supports Recycler.
+         output = Path(arg('--out-dir') if tool == 'OPERA-MS.pl' else arg('-o'))
+-        write(output / 'contigs.fasta', (fixture / 'reference.fasta').read_text())
++        write(output / 'contigs.fasta', fasta_text(records))
+         if tool == 'OPERA-MS.pl':
+             write(output / 'intermediate_files/coverage_estimation/short_read_analysis.err', 'Explicit CLI observer; no native coverage estimation\n')
+-        write(output / 'scaffolds.fasta', (fixture / 'reference.fasta').read_text())
++        write(output / 'scaffolds.fasta', fasta_text(records))
+         write(output / 'spades.log', 'MOCK spades log\n')
+         write(output / 'assembly_graph.fastg', '### mock fastg\n')
+         write(output / 'assembly_graph_with_scaffolds.gfa', 'H\tVN:Z:1.0\n')
+diff --git a/tests/mock_e2e/run.py b/tests/mock_e2e/run.py
+--- a/tests/mock_e2e/run.py
++++ b/tests/mock_e2e/run.py
+@@ -41,17 +41,26 @@
+     return records
+ 
+ 
++def current_audits(base, pattern, tasks=None):
++    """Only inspect attempts referenced by this execution's explicit trace."""
++    tasks = rows(base / 'trace.tsv') if tasks is None else tasks
++    for audit in (base / 'work').rglob(pattern):
++        matches = [t for t in tasks if str(audit.parent.relative_to(base / 'work')).startswith(t['hash'])]
++        if matches:
++            assert len(matches) == 1, 'Ambiguous task evidence: ' + str(audit)
++            yield audit, matches[0]
++
++
+ def validate_native_long_host_reads(base, platform, assembler):
+     truth = json.loads((base / 'fixture/truth.json').read_text())
+     tool = {'ont': 'flye', 'pacbio_hifi': 'hifiasm_meta', 'hybrid': 'OPERA-MS.pl' if assembler == 'opera_ms' else 'spades.py'}[platform]
+-    audits = list((base / 'work').rglob('mock-' + tool + '.json'))
++    audits = list(current_audits(base, 'mock-' + tool + '.json'))
+     assert len(audits) == len(SAMPLES)
+-    for audit in audits:
++    for audit, task in audits:
+         argv = json.loads(audit.read_text())['argv']
+         if platform == 'ont': name = argv[argv.index('--nano-raw') + 1]
+         elif platform == 'pacbio_hifi': name = argv[-1]
+         else: name = argv[argv.index('--long-read' if assembler == 'opera_ms' else '--nanopore') + 1]
+-        task = next(t for t in rows(base / 'trace.tsv') if str(audit.parent.relative_to(base / 'work')).startswith(t['hash']))
+         sid = task['name'].rsplit(' (', 1)[1][:-1]
+         allowed = set(truth['long_read_expected_after_host_removal'][sid])
+         original = fastq_records(base / 'fixture' / sid / 'long.fastq.gz')
+@@ -85,7 +94,7 @@
+ 
+ def validate_assembly(base, empty):
+     tasks = rows(base / 'trace.tsv')
+-    assert all(t['status'] == 'COMPLETED' for t in tasks)
++    assert all(t['status'] in ['COMPLETED', 'CACHED'] and t['exit'] == '0' for t in tasks)
+     counts = {}
+     for task in tasks:
+         name = task['name'].split(' (')[0].split(':')[-1]
+@@ -97,15 +106,84 @@
+     expected['REPORT'] = 1
+     assert counts == expected, (counts, expected)
+     validate_report(base, 'assembly', empty)
++    truth = json.loads((base / 'fixture/truth.json').read_text())
++    for sid in SAMPLES:
++        text = (base / 'out/04_plasmid_detection/consensus' / (sid + '.plasmid_contigs.fasta')).read_text()
++        observed = {}
++        current = None
++        for line in text.splitlines():
++            if line.startswith('>'):
++                current = line[1:].split()[0]
++                assert current not in observed, 'Duplicate consensus FASTA identifier'
++                observed[current] = ''
++            elif line:
++                assert current is not None, 'Malformed consensus FASTA'
++                observed[current] += line.strip()
++        expected_fasta = {} if empty else {'plasmid_1': truth['reference_sequences'][sid]['plasmid_1']}
++        assert observed == expected_fasta, f'{sid}: assembly consensus DNA belongs to another sample'
+     return {'status': 'PASS', 'platform': 'assembly', 'empty_plasmids': empty,
+             'tasks': len(tasks), 'mode': 'controlled external CLI observers, actual assembly workflow/R/report'}
++
++
++def validate_observer_read_provenance(base, truth):
++    """Compare mapper queries to generator truth and task metadata, not filenames."""
++    tasks = rows(base / 'trace.tsv')
++    checked = 0
++    expected_hashes = {task['hash'] for task in tasks if any(task['name'].split(' (', 1)[0].split(':')[-1].startswith(prefix)
++                       for prefix in ['BOWTIE2_ALIGN_', 'MINIMAP2_ALIGN_']) and not
++                       (truth['host_removal'] and task['name'].split(' (', 1)[0].split(':')[-1] == 'MINIMAP2_ALIGN_HOST')}
++    observed_hashes = set()
++    for tool in ['bowtie2', 'minimap2']:
++        for audit, task in current_audits(base, 'mock-' + tool + '.json', tasks):
++            argv = json.loads(audit.read_text())['argv']
++            if '--version' in argv:
++                continue
++            assert task['hash'] in expected_hashes, 'Unexpected observer in a native-only mapping task'
++            assert task['hash'] not in observed_hashes, 'Duplicate current mapper evidence'
++            observed_hashes.add(task['hash'])
++            sid = task['name'].rsplit(' (', 1)[1][:-1]
++            payloads = [json.loads(path.read_text()) for path in audit.parent.glob('*.bam')]
++            assert len(payloads) == 1, f'{sid}: ambiguous mapper payload'
++            payload = payloads[0]
++            component = task['name'].split(' (', 1)[0].split(':')[-1]
++            if component.endswith('_SHARED'):
++                expected_reference = {}
++                for sample_sequences in truth['reference_sequences'].values():
++                    for sequence in sample_sequences.values():
++                        canonical = min(sequence, sequence.translate(str.maketrans('ACGT', 'TGCA'))[::-1])
++                        expected_reference['seq_' + hashlib.sha256(canonical.encode()).hexdigest()] = canonical
++            elif component.endswith('_ABUNDANCE'):
++                expected_reference = {'plasmid_1': truth['reference_sequences'][sid]['plasmid_1']}
++            elif component.endswith('_HOST'):
++                host = truth['host_reference_contigs'][sid]
++                expected_reference = {host: truth['reference_sequences'][sid][host]}
++            else:
++                assert component.endswith('_COVERAGE'), 'Unknown alignment observer consumer: ' + component
++                expected_reference = truth['reference_sequences'][sid]
++            assert payload['records'] == expected_reference, f'{sid}: aligner index/reference differs from intended sample/catalogue'
++            assert len(payload['mappers']) == 1
++            kind = payload['mappers'][0]
++            actual = {row['read_id']: row for row in payload['input_reads']}
++            expected = {rid: origin for rid, origin in truth['read_origins'].items()
++                        if origin['sample_id'] == sid and origin['kind'] == kind}
++            if kind == 'long' and truth['host_removal']:
++                allowed = set(truth['long_read_expected_after_host_removal'][sid])
++                expected = {rid: origin for rid, origin in expected.items() if rid in allowed}
++            assert set(actual) == set(expected), f'{sid}: mapper query sample/read attribution differs'
++            for rid, origin in expected.items():
++                dna = truth['reference_sequences'][sid][origin['contig']][origin['start']:origin['start'] + origin['length']]
++                if origin['strand'] == '-':dna = dna.translate(str.maketrans('ACGT', 'TGCA'))[::-1]
++                assert actual[rid]['length'] == len(dna) and actual[rid]['dna_sha256'] == hashlib.sha256(dna.encode()).hexdigest(), f'{sid}: mapper query DNA differs'
++            checked += 1
++    assert checked and observed_hashes == expected_hashes, 'Missing current mapper evidence'
++    return checked
+ 
+ 
+ def validate(base, empty, platform='illumina', assembler='opera_ms', long_input='fastq'):
+     if platform == 'assembly': return validate_assembly(base, empty)
+     out = base / 'out'
+     trace = rows(base / 'trace.tsv')
+-    assert trace and all(row['status'] == 'COMPLETED' for row in trace), 'Failed/missing tasks'
++    assert trace and all(row['status'] in ['COMPLETED', 'CACHED'] and row['exit'] == '0' for row in trace), 'Failed/missing tasks'
+     counts = {}
+     for row in trace:
+         name = row['name'].split(' (')[0].split(':')[-1]
+@@ -115,7 +193,8 @@
+     expected.update({name: 1 for name in ['STATISTICS_INPUTS', 'SHARED_CATALOGUE', 'SHARED_ABUNDANCE_TABLES',
+         'DIVERSITY', 'DIFFERENTIAL_ABUNDANCE', 'REPORT']})
+     expected.update(SAMTOOLS_VIEW_SHARED=6, COVERM_SHARED=6)
+-    host_removal = json.loads((base / 'fixture/truth.json').read_text()).get('host_removal', False)
++    truth = json.loads((base / 'fixture/truth.json').read_text())
++    host_removal = truth.get('host_removal', False)
+     if host_removal:
+         expected.update(MINIMAP2_ALIGN_HOST=2, SAMTOOLS_VIEW_HOST=2, SAMTOOLS_FASTQ_HOST=2)
+         if platform == 'hybrid': expected.update(BOWTIE2_BUILD_HOST=2, BOWTIE2_ALIGN_HOST=2)
+@@ -154,23 +233,21 @@
+     validate_report(base, platform, empty)
+     contigs = rows(out / 'tables/contig_abundance.tsv')
+     plasmids = rows(out / 'tables/plasmid_abundance.tsv')
+-    assert len(contigs) == 12 and {r['sample_id'] for r in contigs} == set(SAMPLES)
+-    assert len(plasmids) == (0 if empty else 6)
+-    sequences = {}
+-    for line in (base / 'fixture/reference.fasta').read_text().splitlines():
+-        if line.startswith('>'):
+-            key = line[1:].split()[0]; sequences[key] = ''
+-        else:
+-            sequences[key] += line.strip()
+-    labels = {'seq_' + hashlib.sha256(min(dna, dna.translate(str.maketrans('ACGT', 'TGCA'))[::-1]).encode()).hexdigest(): label
+-              for label, dna in sequences.items()}
++    assert len(contigs) == 2 * len(SAMPLES) ** 2 and {r['sample_id'] for r in contigs} == set(SAMPLES)
++    assert len(plasmids) == (0 if empty else len(SAMPLES) ** 2)
++    labels = {'seq_' + hashlib.sha256(min(dna, dna.translate(str.maketrans('ACGT', 'TGCA'))[::-1]).encode()).hexdigest():
++              {'owner': sid, 'local_id': label, 'length': len(dna)}
++              for sid, sequences in truth['reference_sequences'].items() for label, dna in sequences.items()}
++    assert len(labels) == 2 * len(SAMPLES), 'Fixture sample DNA must be distinguishable'
+     assert {row['contig_id'] for row in contigs} == set(labels)
++    kind = 'short' if platform in ['illumina', 'hybrid'] else 'long'
+     for row in contigs + plasmids:
+-        index = SAMPLES.index(row['sample_id'])
++        sid = row['sample_id']
+         feature = labels[row.get('contig_id', row.get('plasmid_id'))]
+-        scale = 1 if platform in ['illumina', 'hybrid'] else 2
+-        assert float(row['coverage']) == (10 + index * 2 if feature == 'plasmid_1' else 30 - index) * scale
+-        assert int(row['raw_count']) == (13 + 3 * index if feature == 'plasmid_1' else 80 - index) * scale
++        expected_count = truth['expected_primary_reads'][sid][kind][feature['local_id']]['count'] if feature['owner'] == sid else 0
++        expected_bases = truth['expected_primary_reads'][sid][kind][feature['local_id']]['bases'] if feature['owner'] == sid else 0
++        assert math.isclose(float(row['coverage']), expected_bases / feature['length'], abs_tol=1e-10), f'{sid}: incorrect read-derived coverage'
++        assert int(row['raw_count']) == expected_count, f'{sid}: incorrect read-derived primary count'
+         assert row['count_unit'] == 'primary_read_alignment'
+     for sid in SAMPLES:
+         consensus = rows(out / f'04_plasmid_detection/consensus/{sid}.plasmid_consensus.tsv')
+@@ -178,7 +255,8 @@
+         assert sum(row['plasmid_call'] == 'plasmid' for row in consensus) == (0 if empty else 1)
+     # diversity.R emits 4 metrics per sample (richness/shannon/simpson/pielou)
+     assert len(rows(out / '11_diversity/diversity_metrics.tsv')) == 24
+-    assert len(rows(out / '11_diversity/differential_abundance.tsv')) == 2
++    expected_tested = sum(truth['expected_primary_reads'][feature['owner']][kind][feature['local_id']]['count'] > 0 for feature in labels.values())
++    assert len(rows(out / '11_diversity/differential_abundance.tsv')) == expected_tested
+     report = (out / 'report/report.md').read_text()
+     assert '- Samples: 6' in report, 'Report lost samples'
+     assert '- [x] `11_diversity`' in report, 'Report ran before diversity outputs were available'
+@@ -195,17 +273,16 @@
+     assert all(math.isfinite(float(row[sid])) for row in beta for sid in SAMPLES)
+     profiles = list((out / '07_host_prediction/metaphlan').glob('*.metaphlan.tsv'))
+     assert len(profiles) == 6, 'Host profiles must be unique per sample'
+-    audits = [(a, json.loads(a.read_text())['argv'])
+-              for a in (base / 'work').rglob('mock-metaphlan.json')]
+-    real = [(audit, argv) for audit, argv in audits if '--input_type' in argv]
++    audits = [(a, task, json.loads(a.read_text())['argv'])
++              for a, task in current_audits(base, 'mock-metaphlan.json', trace)]
++    real = [(audit, task, argv) for audit, task, argv in audits if '--input_type' in argv]
+     assert len(real) == 6, f'Expected 6 metaphlan audits, got {len(real)}: {audits}'
+-    for audit, argv in real:
++    for audit, task, argv in real:
+         # nf-core metaphlan/metaphlan puts flags first; the comma-separated
+         # reads are the token right after `--input_type fastq`.
+         reads = argv[argv.index('--input_type') + 2].split(',')
+         assert len(reads) == (2 if platform in ['illumina', 'hybrid'] else 1)
+         if platform == 'hybrid':
+-            task = next(t for t in rows(base / 'trace.tsv') if str(audit.parent.relative_to(base / 'work')).startswith(t['hash']))
+             sid = task['name'].rsplit(' (', 1)[1][:-1]
+             # Host removal changes filenames. Check the staged paired short
+             # records against the explicit pass-through observer fixture.
+@@ -216,16 +293,27 @@
+             short = rows(out / f'10_abundance/coverm/{sid}.short.coverm.tsv')
+             long = rows(out / f'10_abundance/coverm/{sid}.long.coverm.tsv')
+             assert len(short) == len(long) == 1
+-            assert float(long[0]['MOCK Mean']) == 2 * float(short[0]['MOCK Mean'])
++            length = len(truth['reference_sequences'][sid]['plasmid_1'])
++            for method, observed in [('short', short[0]), ('long', long[0])]:
++                expected = truth['expected_primary_reads'][sid][method]['plasmid_1']
++                assert math.isclose(float(observed['MOCK Mean']), expected['bases'] / length, abs_tol=1e-10)
++                # These local abundance wrappers request mean/TPM/RPKM only;
++                # the mandatory raw-count contract is checked on shared tables.
++                assert math.isclose(float(observed['MOCK TPM']), 1e6 if expected['count'] else 0, abs_tol=1e-8)
++                total_reads = sum(value['count'] for value in truth['expected_primary_reads'][sid][method].values())
++                expected_rpkm = expected['count'] * 1e9 / length / total_reads if total_reads else 0
++                assert math.isclose(float(observed['MOCK RPKM']), expected_rpkm, abs_tol=1e-8)
+     if not empty:
+         catalog = (out / '09_comparative_genomics/plasmid_catalog_input.fasta').read_text()
+         assert all(f'>{sid}|plasmid_1' in catalog for sid in SAMPLES)
++    checked_mappers = validate_observer_read_provenance(base, truth)
+     if host_removal: validate_native_long_host_reads(base, platform, assembler)
+     return {'status': 'PASS', 'mode': 'mock external tools; real Nextflow and repository R',
+             'tasks': len(trace), 'process_counts': counts, 'empty_plasmids': empty,
+             'platform': platform, 'hybrid_assembler': assembler if platform == 'hybrid' else None,
+             'long_input': long_input if platform != 'illumina' else None,
+-            'native_long_host_retention_checked': host_removal}
++            'native_long_host_retention_checked': host_removal, 'read_provenance_mapper_tasks': checked_mappers,
++            'limitations': 'Toy unique exact-match alignments/assembler/classifier observers; no native assembler, quantifier, classifier, or biological accuracy claim. With host removal, only the long-host mapper/filter/FASTQ are native; paired short-host unmapped output remains an explicit pass-through interface observer.'}
+ 
+ 
+ def configure_long_input(fixture, platform, source):
+diff --git a/tests/mock_e2e/README.md b/tests/mock_e2e/README.md
+--- a/tests/mock_e2e/README.md
++++ b/tests/mock_e2e/README.md
+@@ -12,8 +12,10 @@
+ 和长读 FASTQ。共 7,798 对短读，输入约 614 KiB。
+ 
+ 序列为随机合成 DNA；**真实 geNomad 不保证将其识别为质粒**。本测试由 mock
+-geNomad 给出预设阳性/阴性结果，mock CoverM 给出已知丰度，检验后续传递。
+-mock 比对文件是测试占位内容，不是可用于其他软件的 SAM/BAM。
++geNomad 给出预设阳性/阴性结果。六个样本的12条DNA均不同，本地contig ID仍重叠，
++用于检测把不同序列误当同一特征的错误。mock比对器只做精确匹配，并将实际read ID、
++DNA摘要、参考序列、坐标和方向写入JSON；mock CoverM据这些匹配计算计数、覆盖与丰度，
++不再根据输出文件名制造预期值。JSON不是可用于其他软件的SAM/BAM，也不代表原生比对效果。
+ 每个样本附 40 条 2 kb 长读。`--long-input mixed` 会加入明确标识为 mock 的
+ BAM/POD5 JSON 占位文件，以验证输入路由；这些文件不能交给真实 samtools/Dorado。
+ 
+@@ -27,7 +29,7 @@
+ python3 tests/mock_e2e/run.py --outdir results/mock-empty --empty-plasmids
+ ```
+ 
+-平台参数为 `--platform illumina|ont|pacbio_hifi|hybrid`，默认 `illumina`。
++平台参数为 `--platform illumina|ont|pacbio_hifi|hybrid|assembly`，默认 `illumina`。
+ 例如（同样要求每次使用全新目录）：
+ 
+ ```bash
+@@ -67,26 +69,35 @@
+ ## 检查内容与覆盖边界
+ 
+ - Illumina、ONT、PacBio HiFi、hybrid 默认工具链；短读额外开启 raw/clean FastQC。
+-- hybrid 覆盖默认 OPERA-MS 和替代 hybridSPAdes，生产主入口完整执行。
+-- 校验每类进程数量和 `COMPLETED` 状态，不将跳过、缓存或空跑计为通过。
+-- 校验 12 行 contig 丰度、6 行质粒丰度（空场景 0 行）及逐样本精确数值。
+-- 校验共识、带样本前缀的 catalog、12 行多样性指标、2 行差异结果、报告样本数。
++- hybrid可选择OPERA-MS或hybridSPAdes；支持选项不等于两种实现都已有本轮完整运行证据。
++- 校验实际trace中的每类进程数量、退出0及COMPLETED/CACHED状态；缓存另记，不计作新执行。
++- 统一参考目录含12条不同DNA特征，跨六个样本完整重映射，产生72行contig丰度及36行质粒丰度（空场景0行）。
++- 逐项核对read来源、实际计数/覆盖/丰度、参考DNA摘要、共识DNA、统计特征域与报告样本数。
+ - 空质粒时跳过分型、注释、质粒定量和 catalog，但保留全样本报告和空丰度表。
+ - 长读 minimap2 检查 ONT/hybrid 使用 `map-ont`，HiFi 使用 `map-hifi`。
+-- 长读丰度设为短读的两倍；hybrid contig 合并值为两路之和，质粒保留两路表，
+-  跨样本质粒表须使用短读值。merge 命令检查两路 BAM 实际进入合并。
++- 丰度由实际匹配的read数和碱基数决定，不能预设固定倍数；hybrid合并两路匹配，
++  质粒保留两路表，跨样本质粒表使用短读值。merge检查两路数据、参考身份及重复read。
+ - 各平台宿主 profile 每样本一份；hybrid 必须只使用短读输入。
+ - ONT/hybrid MultiQC 暂存目录必须保留全部 6 份 NanoPlot 报告。
+ 
+-未覆盖 assembly 平台、其他短读组装器、宿主去除、medaka、MAG、binning、
+-宿主关联、DESeq2 和网络分支；未验证真实外部工具运行、数据库、分类性能及
++本轮五场景为Illumina阳性160任务、ONT空91、HiFi mixed137、assembly63、
++hybrid宿主去除201，共652条当前trace，含明确记录的缓存；无样本丢失。
++hybrid中6个长读宿主任务使用真实Minimap2/SAMtools，逐read核对保留结果；
++短读宿主过滤仍是传递全部成对reads的命名观察替身，不能宣称真实去宿主。
++9项来源反例单元方法检查换reads、换index、混合mates、到达顺序、修改参考及过期任务证据。
++保留的失败/中断尝试另列，重放和只读重新核验不增加实际成功任务数。
++
++未验证其他短读组装器、medaka、MAG、binning、宿主关联、DESeq2和网络等可选分支；
++未验证全部真实外部工具运行、数据库、分类性能及
+ 新增 hifiasm_meta Conda 环境的实际安装。HiFi 生产分支当前没有接入 MultiQC，
+ 不会将该任务计为已验证。默认未启用的可选分析不计入通过的任务数。
+ 
+-报告仍扫描 publish 目录。此次补上跨样本统计完成依赖，但其他可选分支的
+-等待依赖、异步发布和复用旧 outdir 的风险尚未彻底解决；测试强制使用新目录。
++报告读取显式传入的本轮产物，测试仍强制新输出目录。验证器仅读取当前trace对应的
++工作目录，过期尝试不能弥补本轮缺失的来源证据。详见docs/tool-audit/contracts/mock-provenance.md。
+ 
+ ## 2026-10-16 实测
++
++以下为历史结果，不能作为当前来源/计数/通过状态；本轮2026-10-24记录见上述契约及对应receipt。
+ 
+ 追加平台场景全部通过（数字为完成任务数）：
+ 
+diff --git a/tests/test_mock_alignment_provenance.py b/tests/test_mock_alignment_provenance.py
+--- /dev/null
++++ b/tests/test_mock_alignment_provenance.py
+@@ -0,0 +1,148 @@
++"""Counterfactuals for mock sample/reference attribution; no native inference claims."""
++import csv
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / 'tests/mock_e2e'))
++from generate import generate, SAMPLES
++
++spec = importlib.util.spec_from_file_location('mock_e2e_runner', ROOT / 'tests/mock_e2e/run.py')
++runner = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(runner)
++
++
++class MockAlignmentProvenance(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.temporary = tempfile.TemporaryDirectory()
++        cls.root = Path(cls.temporary.name)
++        cls.fixture = generate(cls.root / 'fixture')
++        cls.truth = json.loads((cls.fixture / 'truth.json').read_text())
++        cls.bin = cls.root / 'bin'
++        cls.bin.mkdir()
++        for tool in ['bowtie2-build', 'bowtie2', 'coverm', 'megahit']:
++            (cls.bin / tool).write_bytes((ROOT / 'tests/mock_e2e/mock_tool.py').read_bytes())
++
++    @classmethod
++    def tearDownClass(cls):
++        cls.temporary.cleanup()
++
++    def setUp(self):
++        self.case = Path(tempfile.mkdtemp(dir=self.root))
++
++    def invoke(self, tool, arguments, directory):
++        env = dict(os.environ, AUTOPLASM_MOCK_FIXTURE=str(self.fixture), AUTOPLASM_MOCK_PLATFORM='illumina')
++        return subprocess.run([sys.executable, str(self.bin / tool), *map(str, arguments)], cwd=directory,
++                              env=env, text=True, capture_output=True)
++
++    def alignment(self, reads_sample, reference_sample=None, second_mate_sample=None, slot='aa/111111'):
++        directory = self.case / 'work' / slot
++        directory.mkdir(parents=True)
++        reference_sample = reference_sample or reads_sample
++        result = self.invoke('bowtie2-build', ['--threads', '1', self.fixture / reference_sample / 'assembly.fasta', 'index'], directory)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        result = self.invoke('bowtie2', ['-x', 'index', '-1', self.fixture / reads_sample / 'R1.fastq.gz',
++                             '-2', self.fixture / (second_mate_sample or reads_sample) / 'R2.fastq.gz'], directory)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        (directory / 'alignment.bam').write_text(result.stdout)
++        return directory, json.loads(result.stdout)
++
++    def trace(self, entries):
++        with (self.case / 'trace.tsv').open('w', newline='') as stream:
++            writer = csv.DictWriter(stream, fieldnames=['hash', 'name'], delimiter='\t')
++            writer.writeheader()
++            writer.writerows({'hash': slot, 'name': 'ILLUMINA:CONTIG_COVERAGE:BOWTIE2_ALIGN_COVERAGE (' + sid + ')'} for slot, sid in entries)
++
++    def count(self, directory, name):
++        result = self.invoke('coverm', ['contig', '--bam-files', directory / 'alignment.bam',
++                             '--methods', 'mean', 'tpm', 'rpkm', 'count', '--output-file', name], directory)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        with (directory / name).open() as stream:
++            return list(csv.DictReader(stream, delimiter='\t'))
++
++    def test_each_sample_has_distinguishable_dna_despite_same_contig_ids(self):
++        records = [sequence for sample in self.truth['reference_sequences'].values() for sequence in sample.values()]
++        self.assertEqual(len(records), 12)
++        self.assertEqual(len({hashlib.sha256(value.encode()).hexdigest() for value in records}), 12)
++        self.assertTrue(all(set(sample) == {'plasmid_1', 'chromosome_1'} for sample in self.truth['reference_sequences'].values()))
++
++    def test_abundance_does_not_depend_on_output_sample_filename(self):
++        directory, payload = self.alignment(SAMPLES[0])
++        one = self.count(directory, SAMPLES[0] + '.coverm.tsv')
++        self.assertEqual(one, self.count(directory, SAMPLES[1] + '.coverm.tsv'))
++        self.assertEqual(one, self.count(directory, 'unrelated-output.tsv'))
++        for row in one:
++            expected = self.truth['expected_primary_reads'][SAMPLES[0]]['short'][row['Contig']]
++            self.assertEqual(int(row['MOCK Read Count']), expected['count'])
++        self.assertEqual(len(payload['alignments']), len(payload['input_reads']))
++
++    def test_swapped_reads_are_rejected_even_with_expected_sample_output_name(self):
++        directory, _ = self.alignment(SAMPLES[1], reference_sample=SAMPLES[0])
++        self.assertTrue(all(int(row['MOCK Read Count']) == 0 for row in self.count(directory, SAMPLES[0] + '.coverm.tsv')))
++        self.trace([('aa/111111', SAMPLES[0])])
++        with self.assertRaisesRegex(AssertionError, 'sample/read attribution differs'):
++            runner.validate_observer_read_provenance(self.case, self.truth)
++
++    def test_swapped_index_is_rejected_even_when_read_ids_are_correct(self):
++        directory, _ = self.alignment(SAMPLES[0], reference_sample=SAMPLES[1])
++        self.assertTrue(all(int(row['MOCK Read Count']) == 0 for row in self.count(directory, SAMPLES[0] + '.coverm.tsv')))
++        self.trace([('aa/111111', SAMPLES[0])])
++        with self.assertRaisesRegex(AssertionError, 'index/reference differs'):
++            runner.validate_observer_read_provenance(self.case, self.truth)
++
++    def test_mixed_sample_mates_are_not_accepted_as_one_sample(self):
++        self.alignment(SAMPLES[0], second_mate_sample=SAMPLES[1])
++        self.trace([('aa/111111', SAMPLES[0])])
++        with self.assertRaisesRegex(AssertionError, 'sample/read attribution differs'):
++            runner.validate_observer_read_provenance(self.case, self.truth)
++
++    def test_out_of_order_task_payloads_keep_sample_attribution(self):
++        self.alignment(SAMPLES[1], slot='bb/222222')
++        self.alignment(SAMPLES[0], slot='aa/111111')
++        self.trace([('aa/111111', SAMPLES[0]), ('bb/222222', SAMPLES[1])])
++        self.assertEqual(runner.validate_observer_read_provenance(self.case, self.truth), 2)
++
++    def test_stale_attempt_is_excluded_but_current_evidence_is_mandatory(self):
++        self.alignment(SAMPLES[1], reference_sample=SAMPLES[0], slot='zz/999999')
++        directory, _ = self.alignment(SAMPLES[0], slot='aa/111111')
++        self.trace([('aa/111111', SAMPLES[0])])
++        self.assertEqual(runner.validate_observer_read_provenance(self.case, self.truth), 1)
++        (directory / 'mock-bowtie2.json').unlink()
++        with self.assertRaisesRegex(AssertionError, 'Missing current mapper evidence'):
++            runner.validate_observer_read_provenance(self.case, self.truth)
++
++    def test_reference_tampering_after_mapping_cannot_keep_counts(self):
++        directory, payload = self.alignment(SAMPLES[0])
++        alignment = payload['alignments'][0]
++        dna = list(payload['records'][alignment['contig']])
++        dna[alignment['start']] = 'C' if dna[alignment['start']] == 'A' else 'A'
++        payload['records'][alignment['contig']] = ''.join(dna)
++        (directory / 'alignment.bam').write_text(json.dumps(payload))
++        result = self.invoke('coverm', ['contig', '--bam-files', directory / 'alignment.bam',
++                             '--methods', 'mean', 'count', '--output-file', 'output.tsv'], directory)
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('Alignment reference differs from actual input read DNA', result.stderr)
++        self.assertFalse((directory / 'output.tsv').exists())
++
++    def test_assembler_observer_uses_reads_and_rejects_mixed_samples(self):
++        result = self.invoke('megahit', ['-1', self.fixture / SAMPLES[1] / 'R1.fastq.gz',
++                             '-2', self.fixture / SAMPLES[1] / 'R2.fastq.gz', '--out-prefix', SAMPLES[0]], self.case)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual((self.case / 'megahit_out' / (SAMPLES[0] + '.contigs.fa')).read_bytes(),
++                         (self.fixture / SAMPLES[1] / 'assembly.fasta').read_bytes())
++        result = self.invoke('megahit', ['-1', self.fixture / SAMPLES[0] / 'R1.fastq.gz',
++                             '-2', self.fixture / SAMPLES[1] / 'R2.fastq.gz', '--out-prefix', 'mixed'], self.case)
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('mixed or missing sample reads', result.stderr)
++
++
++if __name__ == '__main__':
++    unittest.main()

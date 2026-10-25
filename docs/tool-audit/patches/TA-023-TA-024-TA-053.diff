@@ -1,0 +1,602 @@
+--- a/bin/plasmid_consensus.R
++++ b/bin/plasmid_consensus.R
+@@ -142,6 +142,29 @@
+ 
+ empty_calls <- function() list(score = list(), is_plasmid = list())
+ 
++# PlasX emits every contig with a probability, not a positive-only collection.
++# Fixed upstream README recommends score > 0.5; equality is not positive.
++parse_plasx <- function(path) {
++  dt <- sniff_table(path)
++  if (!all(c("contig", "score") %in% names(dt)))
++    die(paste0("PlasX predictions require contig and score columns: ", path))
++  ids <- trimws(dt$contig)
++  check_unique_ids(ids, path, "PlasX prediction data")
++  out <- empty_calls()
++  for (i in seq_len(nrow(dt))) {
++    cid <- ids[i]
++    if (is.na(cid) || !nzchar(cid))
++      die(sprintf("Empty PlasX contig ID at %s:%d", path, i + 1L))
++    score <- suppressWarnings(as.numeric(dt$score[i]))
++    if (!is.finite(score) || score < 0 || score > 1)
++      die(sprintf("Invalid PlasX score %s at %s:%d: expected a finite probability in [0,1]",
++                  py_repr(dt$score[i]), path, i + 1L))
++    out$score[[cid]] <- score
++    out$is_plasmid[[cid]] <- score > 0.5
++  }
++  out
++}
++
+ check_unique_ids <- function(ids, path, kind) {
+   nonempty <- which(!is.na(ids) & nzchar(ids))
+   repeated <- anyDuplicated(ids[nonempty])
+@@ -318,7 +341,7 @@
+                   tool, extra, sources[[tool]]))
+     }
+     sources[[tool]] <- extra
+-    calls[[tool]] <- parse_generic_predictions(extra, tool)
++    calls[[tool]] <- if (tool == "plasx") parse_plasx(extra) else parse_generic_predictions(extra, tool)
+   }
+ 
+   for (tool in names(calls)) {
+@@ -350,7 +373,7 @@
+       info <- contig_info[[cid]]
+       pred_rows[[length(pred_rows) + 1L]] <- c(
+         cid, args$sample_id, tool,
+-        sprintf("%.4g", sc[[cid]]),
++        sprintf(if (tool == "plasx") "%.17g" else "%.4g", sc[[cid]]),
+         if (isTRUE(calls[[tool]]$is_plasmid[[cid]])) "plasmid" else "chromosome",
+         fmt_len(info), fmt_gc(info)
+       )
+--- a/modules/detection/plasme.nf
++++ b/modules/detection/plasme.nf
+@@ -18,30 +18,23 @@
+     output:
+     tuple val(meta), path("${meta.id}.plasme.tsv"), emit: predictions
+ 
++    tuple val(meta), path("${meta.id}.plasme.fasta"), emit: plasmid_fasta
++    tuple val(meta), path("${meta.id}.plasme_report.csv"), emit: report
++
+     script:
++    def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
++    def input_fasta = assembly.name.toLowerCase().endsWith('.gz') ? "${meta.id}.plasme.input.fasta" : assembly
++    def decompress = assembly.name.toLowerCase().endsWith('.gz') ? "gzip -cd ${shellQuote.call(assembly)} > ${shellQuote.call(input_fasta)}" : ''
++    def normalizer = file("${moduleDir}/../../bin/normalize_plasme_outputs.py").text
+     """
+-    PLASMe.py ${assembly} ${meta.id}.plasme -d ${plasme_db} -t ${task.cpus}
+-    # PLASMe writes <prefix>_plasmid.fasta plus a probability report; normalize
+-    # the prediction table to <sample>.plasme.tsv for the consensus step.
+-    if [ -f ${meta.id}.plasme.csv ]; then
+-        mv ${meta.id}.plasme.csv ${meta.id}.plasme.tsv
+-    elif ls ${meta.id}.plasme*.tsv > /dev/null 2>&1; then
+-        mv \$(ls ${meta.id}.plasme*.tsv | head -1) ${meta.id}.plasme.tsv
+-    else
+-        # Fall back to deriving calls from the plasmid FASTA
+-        python3 - <<'PYEOF'
+-    import re
+-    ids = []
+-    try:
+-        with open("${meta.id}.plasme_plasmid.fasta") as fh:
+-            ids = [l[1:].split()[0] for l in fh if l.startswith(">")]
+-    except FileNotFoundError:
+-        pass
+-    with open("${meta.id}.plasme.tsv", "w") as out:
+-        out.write("contig_id\\tplasmid_score\\tclassification\\n")
+-        for i in ids:
+-            out.write(f"{i}\\t1.0\\tplasmid\\n")
+-    PYEOF
+-    fi
++    ${decompress}
++    PLASMe.py ${shellQuote.call(input_fasta)} ${meta.id}.plasme -d ${shellQuote.call(plasme_db)} -t ${task.cpus}
++    cat > normalize_plasme_outputs.py <<'PLASME_NORMALIZER_PY'
++${normalizer}
++PLASME_NORMALIZER_PY
++    python3 normalize_plasme_outputs.py --assembly ${shellQuote.call(input_fasta)} \\
++        --plasmids ${meta.id}.plasme --report ${meta.id}.plasme_report.csv \\
++        --output ${meta.id}.plasme.tsv
++    mv ${meta.id}.plasme ${meta.id}.plasme.fasta
+     """
+ }
+--- /dev/null
++++ b/bin/normalize_plasme_outputs.py
+@@ -0,0 +1,84 @@
++#!/usr/bin/env python3
++"""Validate PLASMe v1.1's exact FASTA/report pair and export positive calls.
++
++The report is a positive-only set, including BLASTn hits with score=nan.
++Keep source_score as evidence; do not re-threshold Transformer probabilities.
++"""
++import argparse
++import csv
++from pathlib import Path
++import sys
++
++REPORT_COLUMNS = ['contig', 'length', 'reference', 'order', 'evidence', 'score', 'amb_region']
++
++
++def fasta(path):
++    records = {}
++    name = None
++    for number, line in enumerate(path.read_text().splitlines(), 1):
++        if line.startswith('>'):
++            words = line[1:].split()
++            if not words or words[0] in records:
++                raise ValueError('Empty or duplicate FASTA ID at {}:{}'.format(path, number))
++            name = words[0]
++            records[name] = ''
++        elif line.strip():
++            if name is None:
++                raise ValueError('Sequence before FASTA header in {}'.format(path))
++            records[name] += ''.join(line.split())
++    if any(not sequence for sequence in records.values()):
++        raise ValueError('Empty FASTA sequence in {}'.format(path))
++    return records
++
++
++def normalize(assembly, plasmids, report, output):
++    for path in [assembly, plasmids, report]:
++        if not path.is_file():
++            raise ValueError('Missing PLASMe output/input contract file: {}'.format(path))
++    source = fasta(assembly)
++    positive = fasta(plasmids)
++    with report.open(newline='') as stream:
++        reader = csv.DictReader(stream, delimiter='\t')
++        if reader.fieldnames != REPORT_COLUMNS:
++            raise ValueError('Invalid PLASMe report header: {}'.format(report))
++        rows = list(reader)
++    seen = set()
++    for number, row in enumerate(rows, 2):
++        cid = row['contig']
++        if None in row or any(v is None for v in row.values()) or not cid or cid != cid.strip():
++            raise ValueError('Invalid PLASMe report row at {}:{}'.format(report, number))
++        if cid in seen:
++            raise ValueError('Duplicate PLASMe report ID {} at {}:{}'.format(cid, report, number))
++        seen.add(cid)
++        if cid not in source or cid not in positive:
++            raise ValueError('Unresolved PLASMe report ID {} at {}:{}'.format(cid, report, number))
++        if row['length'] != str(len(source[cid])) or positive[cid] != source[cid]:
++            raise ValueError('PLASMe sequence/length mismatch for {} at {}:{}'.format(cid, report, number))
++    if seen != set(positive):
++        raise ValueError('PLASMe report/FASTA IDs differ: {}'.format(report))
++    # Validate the complete pair before creating the consumer-facing table.
++    with output.open('w', newline='') as stream:
++        fields = ['contig_id', 'classification', 'source_score', 'evidence', 'reference', 'order', 'amb_region']
++        writer = csv.DictWriter(stream, fieldnames=fields, delimiter='\t', lineterminator='\n')
++        writer.writeheader()
++        for row in rows:
++            writer.writerow({'contig_id': row['contig'], 'classification': 'plasmid',
++                             'source_score': row['score'], 'evidence': row['evidence'],
++                             'reference': row['reference'], 'order': row['order'], 'amb_region': row['amb_region']})
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    for flag in ['assembly', 'plasmids', 'report', 'output']:
++        parser.add_argument('--' + flag, type=Path, required=True)
++    args = parser.parse_args()
++    try:
++        normalize(args.assembly, args.plasmids, args.report, args.output)
++    except (ValueError, OSError, UnicodeError, csv.Error) as error:
++        print(str(error), file=sys.stderr)
++        return 2
++    return 0
++
++
++if __name__ == '__main__':
++    raise SystemExit(main())
+--- a/tests/test_plasmid_consensus.py
++++ b/tests/test_plasmid_consensus.py
+@@ -166,6 +166,8 @@
+             with self.subTest(tool=tool):
+                 suffix = "tsv"
+                 prediction = "contig_id\tclassification\tscore\np1\tplasmid\t0.9\n"
++                if tool == "plasx":
++                    prediction = "contig\tscore\np1\t0.9\n"
+                 weights = "genomad:0.4," + ",".join(
+                     f"{name}:{0.6 if name == tool else 0.1}" for name in tools
+                 )
+--- /dev/null
++++ b/tests/test_plasx_scores.py
+@@ -0,0 +1,88 @@
++"""PlasX's official contig/score table contains both positive and negative calls."""
++from pathlib import Path
++import csv
++import hashlib
++import json
++import os
++import shutil
++import subprocess
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++class PlasxScoreTests(unittest.TestCase):
++    def run_case(self, table, error=None):
++        with tempfile.TemporaryDirectory() as directory:
++            base = Path(directory)
++            sequences = {name: 'ACGT' * (i + 1) for i, name in enumerate(['zero', 'low', 'below', 'tie', 'above', 'high', 'one', 'missing'])}
++            (base / 'assembly.fa').write_text(''.join('>' + n + '\n' + s + '\n' for n, s in sequences.items()))
++            (base / 'genomad.tsv').write_text('seq_name\tplasmid_score\n')
++            source = base / 'S.plasx.tsv'
++            source.write_text(table)
++            outputs = [base / n for n in ['out.fa', 'pred.tsv', 'cons.tsv']]
++            args = ['Rscript', os.environ.get('AUTOPLASM_CONSENSUS_SCRIPT', str(ROOT / 'bin/plasmid_consensus.R')),
++                    '--assembly', str(base / 'assembly.fa'), '--genomad-summary', str(base / 'genomad.tsv'),
++                    '--extra', str(source), '--weights', 'genomad:0,plasx:1']
++            for flag, path in zip(['--out-fasta', '--out-predictions', '--out-consensus'], outputs):
++                args += [flag, str(path)]
++            result = subprocess.run(args, capture_output=True, text=True)
++            if os.environ.get('AUTOPLASM_SCORE_ARTIFACTS'):
++                artifacts = Path(os.environ['AUTOPLASM_SCORE_ARTIFACTS'])
++                artifacts.mkdir(parents=True, exist_ok=True)
++                saved = Path(tempfile.mkdtemp(prefix='case-', dir=artifacts))
++                shutil.copytree(base, saved, dirs_exist_ok=True)
++                (saved / 'stdout.log').write_text(result.stdout)
++                (saved / 'stderr.log').write_text(result.stderr)
++                receipt = {'command': args, 'exit': result.returncode, 'expected_error': error,
++                           'source_sha256': hashlib.sha256(Path(args[1]).read_bytes()).hexdigest(),
++                           'input_sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in [base / 'assembly.fa', base / 'genomad.tsv', source]}}
++                (saved / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++            if error:
++                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
++                self.assertIn(error, result.stderr)
++                self.assertIn(str(source), result.stderr)
++                self.assertTrue(all(not path.exists() for path in outputs))
++                return
++            self.assertEqual(result.returncode, 0, result.stderr)
++            with outputs[1].open() as stream:
++                predictions = list(csv.DictReader(stream, delimiter='\t'))
++            with outputs[2].open() as stream:
++                consensus = list(csv.DictReader(stream, delimiter='\t'))
++            return outputs[0].read_text(), predictions, consensus, sequences
++
++    def test_documented_strict_half_threshold_and_score_precision(self):
++        scores = {'zero': 0, 'low': 1e-8, 'below': 0.49999999999999, 'tie': 0.5,
++                  'above': 0.50000000000001, 'high': 0.99, 'one': 1}
++        fasta, predictions, consensus, sequences = self.run_case('contig\tscore\n' + ''.join(n + '\t' + repr(s) + '\n' for n, s in scores.items()))
++        expected = {'above', 'high', 'one'}
++        self.assertEqual({r['contig_id'] for r in predictions}, set(scores))
++        self.assertEqual({r['contig_id'] for r in consensus if r['plasmid_call'] == 'plasmid'}, expected)
++        for row in predictions:
++            self.assertEqual(float(row['plasmid_score']), scores[row['contig_id']])
++            self.assertEqual(row['classification'], 'plasmid' if row['contig_id'] in expected else 'chromosome')
++        self.assertEqual(fasta, ''.join('>' + n + '\n' + sequences[n] + '\n' for n in sequences if n in expected))
++        self.assertTrue(all(row['plasx'] == row['plasmid_call'] for row in consensus))
++
++    def test_invalid_probabilities_fail_before_output(self):
++        for score in ['', 'bad', 'NA', 'NaN', 'Inf', '-0.1', '1.1']:
++            with self.subTest(score=score):
++                self.run_case('contig\tscore\nlow\t' + score + '\n', 'Invalid PlasX score')
++
++    def test_missing_required_schema_fails_before_output(self):
++        for table in ['', 'contig\nlow\n', 'contig_id\tclassification\nlow\tplasmid\n']:
++            with self.subTest(table=table):
++                self.run_case(table, 'PlasX predictions require contig and score columns')
++
++    def test_duplicate_and_empty_ids_are_rejected(self):
++        self.run_case('contig\tscore\nlow\t0.9\n low \t0.1\n', 'Duplicate ID')
++        self.run_case('contig\tscore\n\t0.9\n', 'Empty PlasX contig ID')
++
++    def test_header_only_is_legitimate_no_prediction(self):
++        fasta, predictions, consensus, _ = self.run_case('contig\tscore\n')
++        self.assertEqual((fasta, predictions, consensus), ('', [], []))
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- /dev/null
++++ b/tests/test_plasme_outputs.py
+@@ -0,0 +1,73 @@
++"""PLASMe adapter rejects incomplete or inconsistent output pairs before writing calls."""
++import importlib.util
++from pathlib import Path
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++spec = importlib.util.spec_from_file_location('plasme_adapter', ROOT / 'bin/normalize_plasme_outputs.py')
++adapter = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(adapter)
++
++
++class PlasmeOutputTests(unittest.TestCase):
++    def run_case(self, change=None, error=None):
++        with tempfile.TemporaryDirectory() as directory:
++            p = Path(directory)
++            assembly, plasmids, report, output = [p / n for n in ['assembly.fa', 'positive.fa', 'report.csv', 'calls.tsv']]
++            assembly.write_text('>p1 source\nACGT\n>p2\nAAAA\n')
++            plasmids.write_text('>p1 source\nACGT\n')
++            header = 'contig\tlength\treference\torder\tevidence\tscore\tamb_region\n'
++            report.write_text(header + 'p1\t4\treference\tBacteria\tBLASTn\tnan\t\n')
++            if change:
++                change(assembly, plasmids, report, header)
++            if error:
++                with self.assertRaisesRegex(ValueError, error):
++                    adapter.normalize(assembly, plasmids, report, output)
++                self.assertFalse(output.exists())
++                return
++            adapter.normalize(assembly, plasmids, report, output)
++            return output.read_text()
++
++    def test_blast_positive_has_explicit_call_and_retains_missing_probability(self):
++        self.assertIn('p1\tplasmid\tnan\tBLASTn\treference\tBacteria\t\n', self.run_case())
++
++    def test_header_only_negative_requires_empty_positive_fasta(self):
++        result = self.run_case(lambda a, f, r, h: (f.write_text(''), r.write_text(h)))
++        self.assertEqual(len(result.splitlines()), 1)
++
++    def test_fasta_wrapping_and_sequence_whitespace_match_upstream(self):
++        result = self.run_case(lambda a, f, r, h: a.write_text('>p1 description\nA C\tG\nT\n>p2\nAAAA\n'))
++        self.assertIn('p1\tplasmid\tnan\tBLASTn', result)
++
++    def test_missing_files_are_errors(self):
++        for name in ['assembly', 'positive', 'report']:
++            with self.subTest(name=name):
++                self.run_case(lambda a, f, r, h: {'assembly': a, 'positive': f, 'report': r}[name].unlink(), 'Missing PLASMe')
++
++    def test_bad_report_headers_are_errors(self):
++        for header in ['', 'contig,score\n', 'contig\tscore\n']:
++            with self.subTest(header=header):
++                self.run_case(lambda a, f, r, h: r.write_text(header), 'Invalid PLASMe report header')
++
++    def test_mismatched_identity_length_or_sequence_are_errors(self):
++        cases = [lambda a, f, r, h: f.write_text('>p2\nAAAA\n'),
++                 lambda a, f, r, h: f.write_text('>p1\nTGCA\n'),
++                 lambda a, f, r, h: r.write_text(r.read_text().replace('p1\t4', 'p1\t99')),
++                 lambda a, f, r, h: f.write_text(f.read_text() + '>p2\nAAAA\n')]
++        for change in cases:
++            with self.subTest(change=change):
++                self.run_case(change, 'Unresolved|mismatch|IDs differ')
++
++    def test_duplicate_ids_empty_sequences_and_broken_rows_are_errors(self):
++        cases = [lambda a, f, r, h: f.write_text(f.read_text() * 2),
++                 lambda a, f, r, h: f.write_text('>p1\n'),
++                 lambda a, f, r, h: r.write_text(r.read_text() + r.read_text().splitlines()[1] + '\n'),
++                 lambda a, f, r, h: r.write_text(h + 'p1\t4\n')]
++        for change in cases:
++            with self.subTest(change=change):
++                self.run_case(change, 'duplicate|Duplicate|Empty|Invalid')
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- /dev/null
++++ b/tests/run_plasme_interface.py
+@@ -0,0 +1,148 @@
++#!/usr/bin/env python3
++"""Run the original PLASMe wrapper and R consumers with its pinned output writer.
++
++Only upstream plasme_output/merge_ranges/argument parsing execute. Candidate
++scores and BLAST hits are controlled fixtures; no model or database inference.
++"""
++from pathlib import Path
++import argparse
++import ast
++import csv
++import gzip
++import hashlib
++import json
++import os
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++SHIM = '''
++import argparse,ast,os
++from pathlib import Path
++import pandas as pd
++from Bio import SeqIO
++source=Path(os.environ['PLASME_WRITER_SOURCE'])
++tree=ast.parse(source.read_text())
++functions=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in ['plasme_cmd','merge_ranges','plasme_output']]
++assert len(functions)==3
++exec(compile(ast.Module(body=functions,type_ignores=[]),str(source),'exec'))
++args=plasme_cmd();sid=Path(args.output).name.removesuffix('.plasme')
++assert Path(args.database).is_dir(), 'database argument must preserve the complete path'
++Path('writer.invoked').write_text('upstream output writer only; controlled candidates; no inference')
++if sid=='TOOL_FAIL':raise SystemExit(23)
++table='order,query,identity,coverage,PLASMe,overlap\\n'
++for cid,ident,cov,score in [('blast',.99,.99,0),('transformer',.1,.1,.9),('both',.99,.99,.2),('tie',.1,.1,.5),('low',.1,.1,.1)]:
++ if sid=='NEGATIVE':ident,cov,score=.1,.1,.1
++ table+='Bacteria,'+cid+','+str(ident)+','+str(cov)+','+str(score)+',none\\n'
++Path('candidates.csv').write_text(table)
++Path('blast.csv').write_text(''.join(cid+' reference\\n' for cid in ['blast','transformer','both','tie','low']))
++plasme_output('candidates.csv','blast.csv',args.input,args.identity,args.coverage,args.probability,args.output)
++if sid=='MISSING_REPORT':Path(args.output+'_report.csv').unlink()
++if sid=='MISSING_FASTA':Path(args.output).unlink()
++'''
++
++
++def run_checks(base, python, module, cases):
++    cached = json.loads((ROOT / 'docs/tool-audit/evidence/score-tools-upstream.json').read_text())
++    source = next(s for s in cached['sources'] if s['key'] == 'plasme-cli')
++    data = source['content'].encode()
++    blob = hashlib.sha1(('blob ' + str(len(data)) + '\0').encode() + data).hexdigest()
++    assert blob == source['sha'] == '7f0718071849b73111a4e641b27e0f528d3356a2'
++    (base / 'PLASMe.py').write_bytes(data)
++    scripts = base / 'writer-bin'
++    scripts.mkdir()
++    shim = scripts / 'PLASMe.py'
++    shim.write_text('#!' + str(python) + '\n' + SHIM)
++    shim.chmod(0o755)
++    fixture = base / 'fixtures'
++    fixture.mkdir()
++    (fixture / "db directory's").mkdir()
++    sequences = {cid: 'ACGT' * (300 + i) for i, cid in enumerate(['blast', 'transformer', 'both', 'tie', 'low'])}
++    fasta = ''.join('>' + cid + ' description\n' + seq + '\n' for cid, seq in sequences.items()).encode()
++    mapping = {'PLAIN': 'fa', 'GZIP': 'fa.gz', 'UPPER': 'fa.GZ', 'NEGATIVE': 'fa',
++               'MISSING_REPORT': 'fa', 'MISSING_FASTA': 'fa', 'TOOL_FAIL': 'fa', 'CORRUPT': 'fa.gz'}
++    for sid, suffix in mapping.items():
++        path = fixture / (sid + " input's." + suffix)
++        path.write_bytes(b'not gzip' if sid == 'CORRUPT' else gzip.compress(fasta, mtime=0) if suffix.lower().endswith('.gz') else fasta)
++        (fixture / (sid + '.genomad.tsv')).write_text('seq_name\tplasmid_score\n')
++    config = base / 'config'
++    config.write_text("params.publish_dir_mode='copy'\nparams.consensus_method='weighted_vote'\n"
++                      "params.consensus_weights='genomad:0,plasme:1'\nprocess.executor='local'\n"
++                      "process.cpus=1\nprocess.memory='1 GB'\nconda.enabled=false\n"
++                      "docker.enabled=false\nsingularity.enabled=false\n")
++    probe = base / 'probe.nf'
++    probe.write_text("""nextflow.enable.dsl=2
++include { PLASME } from 'MODULE'
++include { PLASMID_CONSENSUS } from 'CONSENSUS'
++include { PLASMID_STRUCTURE } from 'STRUCTURE'
++workflow {
++    assemblies=Channel.fromList(params.inputs).map { row -> tuple([id:row.id],file(row.path)) }
++    PLASME(assemblies,Channel.value(file(params.db)))
++    inputs=PLASME.out.predictions.join(assemblies).map { meta,pred,assembly ->
++        tuple(meta,assembly,file("${params.fixture_dir}/${meta.id}.genomad.tsv"),[pred])
++    }
++    PLASMID_CONSENSUS(inputs)
++    PLASMID_STRUCTURE(PLASMID_CONSENSUS.out.contigs)
++}
++""".replace("'MODULE'", repr(str(module))).replace("'CONSENSUS'", repr(str(ROOT / 'modules/detection/consensus'))).replace("'STRUCTURE'", repr(str(ROOT / 'modules/detection/structure'))))
++    all_cases = [('plain', ['PLAIN'], None), ('compressed', ['GZIP', 'UPPER'], None),
++                 ('negative', ['NEGATIVE'], None), ('missing-report', ['MISSING_REPORT'], 'Missing PLASMe'),
++                 ('missing-fasta', ['MISSING_FASTA'], 'Missing PLASMe'), ('tool-failure', ['TOOL_FAIL'], '23'),
++                 ('corrupt-gzip', ['CORRUPT'], 'gzip')]
++    runs = []
++    for case, ids, error in all_cases:
++        if cases and case not in cases:
++            continue
++        p = base / case
++        p.mkdir()
++        (p / 'params.json').write_text(json.dumps({'inputs': [{'id': sid, 'path': str(fixture / (sid + " input's." + mapping[sid]))} for sid in ids],
++                                                 'db': str(fixture / "db directory's"), 'fixture_dir': str(fixture), 'outdir': str(p / 'out')}))
++        command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(probe),
++                   '-params-file', str(p / 'params.json'), '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
++        env = os.environ.copy()
++        env['PATH'] = str(scripts) + ':' + str(ROOT / 'bin') + ':' + env['PATH']
++        env['PLASME_WRITER_SOURCE'] = str(base / 'PLASMe.py')
++        result = subprocess.run(command, env=env, capture_output=True, text=True)
++        (p / 'stdout.log').write_text(result.stdout)
++        (p / 'stderr.log').write_text(result.stderr)
++        tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []
++        if error:
++            checks = {'nonzero': result.returncode != 0, 'diagnostic': error in result.stdout + result.stderr,
++                      'one_failed_producer': len(tasks) == 1 and tasks[0]['status'] == 'FAILED',
++                      'no_published_files': not [f for f in (p / 'out').rglob('*') if f.is_file()]}
++            if case == 'corrupt-gzip':
++                checks['writer_not_called'] = not list((p / 'work').rglob('writer.invoked'))
++        else:
++            checks = {'success': result.returncode == 0, 'completed_tasks': len(tasks) == len(ids) * 3 and all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks)}
++            if checks['success']:
++                for sid in ids:
++                    expected = set() if sid == 'NEGATIVE' else {'blast', 'transformer', 'both'}
++                    out = p / 'out/04_plasmid_detection'
++                    normalized = out / 'plasme' / (sid + '.plasme.tsv')
++                    rows = list(csv.DictReader(normalized.open(), delimiter='\t'))
++                    checks[sid + '_positive_IDs'] = {r['contig_id'] for r in rows} == expected
++                    checks[sid + '_evidence_preserved'] = {r['contig_id']: (r.get('source_score'), r.get('evidence')) for r in rows} == ({} if not expected else {'blast': ('nan', 'BLASTn'), 'transformer': ('0.9', 'Transformer'), 'both': ('0.2', 'Transformer')})
++                    checks[sid + '_raw_outputs_published'] = all((out / 'plasme' / name).is_file() for name in [sid + '.plasme.fasta', sid + '.plasme_report.csv'])
++                    consensus = list(csv.DictReader((out / 'consensus' / (sid + '.plasmid_consensus.tsv')).open(), delimiter='\t'))
++                    checks[sid + '_consensus_IDs'] = {r['contig_id'] for r in consensus if r['plasmid_call'] == 'plasmid'} == expected
++                    got = (out / 'consensus' / (sid + '.plasmid_contigs.fasta')).read_text().replace('\n', '')
++                    checks[sid + '_exact_DNA'] = got == ''.join('>' + cid + seq for cid, seq in sequences.items() if cid in expected)
++        runs.append({'case': case, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
++        print(case, checks, flush=True)
++        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'upstream_blob': blob,
++                   'module': str(module), 'source_sha256': hashlib.sha256((Path(str(module) + '.nf')).read_bytes()).hexdigest(),
++                   'limitations': ['real pinned upstream output writer only; candidates and BLAST hits controlled, no PLASMe model/database inference', 'native original wrapper and R consumers, not nf-test/image/full platform certification']}
++        (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    return receipt['pass']
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True, type=Path)
++    parser.add_argument('--python', required=True, type=Path)
++    parser.add_argument('--module', type=Path, default=ROOT / 'modules/detection/plasme')
++    parser.add_argument('--cases', default='')
++    args = parser.parse_args()
++    args.work_dir = args.work_dir.resolve()
++    args.work_dir.mkdir(parents=True, exist_ok=True)
++    raise SystemExit(0 if run_checks(args.work_dir, args.python.resolve(), args.module.resolve(), args.cases.split(',') if args.cases else []) else 1)
+--- a/tests/run_detection_selection.py
++++ b/tests/run_detection_selection.py
+@@ -32,14 +32,15 @@
+    text=('seq_name\\tplasmid_score\\n'+(cid+'\\t0.99\\n' if prefix=='S1' else '')) if suffix=='_summary.tsv' else ''
+    (summary/(prefix+'_'+entity+suffix)).write_text(text)
+ elif tool=='PLASMe.py':
+- source=Path(args[0]);out=Path(args[1]+'.csv');cid=source.read_text().splitlines()[0][1:]
+- out.write_text('contig_id,classification\\n'+cid+',plasmid\\n')
++ source=Path(args[0]);out=Path(args[1]);cid=source.read_text().splitlines()[0][1:];dna=''.join(source.read_text().splitlines()[1:])
++ out.write_text(source.read_text())
++ Path(args[1]+'_report.csv').write_text('contig\\tlength\\treference\\torder\\tevidence\\tscore\\tamb_region\\n'+cid+'\\t'+str(len(dna))+'\\treference\\tBacteria\\tTransformer\\t0.9\\t\\n')
+ elif tool=='platon':
+  source=Path(args[-1]);out=Path(args[args.index('--prefix')+1]+'.tsv');cid=source.read_text().splitlines()[0][1:]
+  out.write_text('contig_id\\tclassification\\n'+cid+'\\tplasmid\\n')
+ elif tool=='plasx':
+  out=Path(args[args.index('-o')+1]);sid=out.name.removesuffix('.plasx.tsv')
+- out.write_text('contig_id\\tclassification\\n'+sid+'_contig\\tplasmid\\n')
++ out.write_text('contig\\tscore\\n'+sid+'_contig\\t0.9\\n')
+ else:raise SystemExit('Unexpected observer CLI '+tool)
+ '''
+ 
+--- a/tests/nextflow/consensus_inputs.nf
++++ b/tests/nextflow/consensus_inputs.nf
+@@ -7,8 +7,9 @@
+     inputs = Channel.fromList(params.ids.split(',').toList()).map { sid ->
+         def base = "${params.fixture_dir}/${sid}"
+         def extra = file("${base}.platon.tsv")
++        def plasx = file("${base}.plasx.tsv")
+         def legacy = file("${base}.scapp.fasta")
+-        def extras = extra.exists() ? [extra] : (legacy.exists() ? [legacy] : [])
++        def extras = extra.exists() ? [extra] : (plasx.exists() ? [plasx] : (legacy.exists() ? [legacy] : []))
+         tuple([id: sid], file("${base}.assembly.fa", checkIfExists: true),
+               file("${base}.genomad.tsv", checkIfExists: true), extras)
+     }
+--- a/tests/run_consensus_inputs.py
++++ b/tests/run_consensus_inputs.py
+@@ -29,12 +29,15 @@
+     fixture = base / 'fixtures'
+     fixture.mkdir()
+     dna = 'ACGT' * 300
+-    expected = {'genomad': {'p1': dna}, 'platon': {'p1': dna}, 'negative': {}, 'empty': {}}
++    expected = {'genomad': {'p1': dna}, 'platon': {'p1': dna}, 'negative': {}, 'empty': {}, 'plasx': {'p1': dna}}
+     for sid in [*expected, 'legacy', 'foreign', 'empty-record']:
+         assembly = '>p1 original header\n' + dna + '\n'
+         summary = 'seq_name\tplasmid_score\n'
+         if sid in ['genomad', 'platon']:
+             summary += 'p1\t0.99\n'
++        if sid == 'plasx':
++            assembly += '>p2\n' + dna + '\n'
++            (fixture / (sid + '.plasx.tsv')).write_text('contig\tscore\np1\t0.99\np2\t1e-8\n')
+         if sid == 'empty':
+             assembly = ''
+         if sid == 'empty-record':
+@@ -49,7 +52,7 @@
+             (fixture / (sid + '.scapp.fasta')).write_text('>RNODE_1\n' + dna + '\n')
+     config = base / 'native.config'
+     config.write_text("params.consensus_method='weighted_vote'\n"
+-                      "params.consensus_weights='genomad:0.6,platon:0.4'\n"
++                      "params.consensus_weights='genomad:0.6,platon:0.4,plasx:1'\n"
+                       "params.publish_dir_mode='copy'\nprocess.executor='local'\n"
+                       "process.cpus=1\nprocess.memory='1 GB'\n"
+                       "conda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n")
+@@ -79,7 +82,7 @@
+                       'no_published_files': not [f for f in (p / 'out').rglob('*') if f.is_file()]}
+         else:
+             checks = {'success': result.returncode == 0,
+-                      'eight_completed_tasks': len(tasks) == 8 and all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks)}
++                      'ten_completed_tasks': len(tasks) == 10 and all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks)}
+             if checks['success']:
+                 for sid, sequences in expected.items():
+                     out = p / 'out/04_plasmid_detection'
+--- a/README.md
++++ b/README.md
+@@ -138,6 +138,13 @@
+   权重键限 `genomad/platon/plasme/plasx`，不得重复，数值须有限且非负；
+   `weighted_vote` 的实际参与工具权重总和须大于零。未指定的工具权重为 1，
+   空权重串也沿用此默认；格式或数值错误会在写出共识结果前失败。
++  PlasX 按官方 `contig/score` 表解析，严格 `score > 0.5` 才记为阳性；
++  分数须为 `[0,1]` 内有限值，等于 0.5 为阴性，完整分数保留在预测表中。
++  PLASMe 使用官方的阳性 FASTA 与 TAB 分隔报告，并核对 ID、长度和序列；
++  缺文件或两者不一致会失败。原始报告和 FASTA 一并发布，`source_score`
++  保留官方分数（BLASTn 命中可为 `nan`）；共识使用明确的阳性调用，
++  预测表中的 PLASMe 分数 1 是调用指示值，不是校准后的概率。
++
+ - 组装器选择：`--short_read_assembler megahit|metaspades`、
+   `--hybrid_assembler opera_ms|hybridspades`。
+ - 宿主去除：样本表 `host_reference` 列或全局 `--host_reference`。

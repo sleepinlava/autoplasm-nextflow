@@ -1,0 +1,591 @@
+--- a/main.nf
++++ b/main.nf
+@@ -8,6 +8,8 @@
+  */
+ nextflow.enable.dsl = 2
+ 
++include { selectedTools } from './lib/tool_selection'
++
+ include { ILLUMINA } from './subworkflows/illumina'
+ include { ONT } from './subworkflows/ont'
+ include { PACBIO_HIFI } from './subworkflows/pacbio_hifi'
+@@ -29,9 +31,51 @@
+     return (s != null && s.toString().trim()) ? file(s.toString().trim()) : null
+ }
+ 
+-// Accept comma-separated strings from the CLI for list params
+-def asList(v) {
+-    return (v in List) ? v : (v ? v.toString().split(',').collect { it.trim() } : [])
++// Names are validated independently of platform/DB eligibility. Keep declared
++// capabilities and supported aliases here, including explicitly rejected CRISPR.
++def toolChoices() {
++    return [
++        polishing_tools: ['medaka'],
++        plasmid_detection_tools: ['genomad','plasme','plasx','platon','scapp'],
++        plasmid_binning_tools: ['plasmaag','gplas2','mob_recon','mob_suite','scapp','recycler'],
++        typing_tools: ['plasmidfinder','mob_typer'],
++        typing_optional_tools: ['copla','conjscan','macsyfinder'],
++        host_prediction_tools: ['metaphlan','kraken2','plasmidhostfinder'],
++        mag_tools: ['metabat2','concoct','semibin','das_tool','checkm2','gtdbtk'],
++        host_linking_methods: ['co_abundance','sequence','long_read'],
++        host_linking_optional_methods: ['crispr','hotspot'],
++        annotation_tools: ['bakta','amrfinderplus','abricate','isescan','integronfinder','prodigal'],
++        annotation_optional_tools: ['prodigal','abricate','rgi','eggnog_mapper','mob_suite'],
++        comparative_tools: ['mmseqs2'],
++        comparative_optional_tools: ['blast','mummer','clinker']
++    ]
++}
++
++def normalizeToolSelections() {
++    toolChoices().each { key, allowed ->
++        def raw = params[key]
++        def values
++        if (raw == null) {
++            values = []
++        } else if (raw instanceof List) {
++            values = raw
++        } else if (raw instanceof CharSequence) {
++            values = raw.toString().trim() ? raw.toString().split(',', -1) as List : []
++        } else {
++            paramError("--${key} must be a list of tool names or a comma-separated string")
++        }
++        values.eachWithIndex { value, index ->
++            if (!(value instanceof CharSequence)) {
++                paramError("--${key} has an invalid tool name at entry ${index + 1}: ${value} (expected a string)")
++            }
++            def name = value.toString().trim()
++            if (!name) paramError("--${key} has an empty tool name at entry ${index + 1}")
++            if (!allowed.contains(name)) {
++                paramError("--${key} has unknown tool '${name}' (choose from ${allowed})")
++            }
++        }
++        // Consumers normalize their own copied params; do not mutate ParamsMap.
++    }
+ }
+ 
+ def col(header, name) {
+@@ -53,10 +97,10 @@
+ }
+ 
+ def validateParams() {
+-    if (params.host_plasmid_linking && params.host_linking_optional_methods.contains('crispr')) {
++    if (params.host_plasmid_linking && selectedTools(params.host_linking_optional_methods).contains('crispr')) {
+         paramError("CRISPR host-plasmid linking is not implemented; remove 'crispr' from --host_linking_optional_methods")
+     }
+-    if (params.host_plasmid_linking && params.host_linking_optional_methods.contains('hotspot')) {
++    if (params.host_plasmid_linking && selectedTools(params.host_linking_optional_methods).contains('hotspot')) {
+         ['hotspot_home', 'hotspot_db', 'hotspot_models'].each { p ->
+             if (!params[p]) {
+                 paramError("host_linking_optional_methods 'hotspot' requires --${p} (cloned HOTSPOT repo + database/models folders)")
+@@ -79,34 +123,34 @@
+     }
+     // Every enabled tool that needs a database must have it configured
+     def required = []
+-    if (params.plasmid_detection_tools.contains('plasme')) required << ['plasme_db', params.plasme_db]
+-    if (params.plasmid_detection_tools.contains('platon')) required << ['platon_db', params.platon_db]
+-    if (params.plasmid_detection_tools.contains('plasx')) {
++    if (selectedTools(params.plasmid_detection_tools).contains('plasme')) required << ['plasme_db', params.plasme_db]
++    if (selectedTools(params.plasmid_detection_tools).contains('platon')) required << ['platon_db', params.platon_db]
++    if (selectedTools(params.plasmid_detection_tools).contains('plasx')) {
+         required << ['plasx_annotations', params.plasx_annotations]
+         required << ['plasx_model', params.plasx_model]
+     }
+     // nf-core plasmidfinder / mobsuite-recon use their packaged databases
+-    if (params.typing_tools.contains('mob_typer')) required << ['mob_suite_db', params.mob_suite_db]
+-    if (params.typing_optional_tools.contains('copla')) {
++    if (selectedTools(params.typing_tools).contains('mob_typer')) required << ['mob_suite_db', params.mob_suite_db]
++    if (selectedTools(params.typing_optional_tools).contains('copla')) {
+         required << ['copla_refgraph', params.copla_refgraph]
+         required << ['copla_reflist', params.copla_reflist]
+     }
+-    if (params.annotation_tools.contains('bakta')) required << ['bakta_db', params.bakta_db]
+-    if (params.annotation_tools.contains('amrfinderplus')) required << ['amrfinderplus_db', params.amrfinderplus_db]
+-    if (params.annotation_optional_tools.contains('rgi')) required << ['card_db', params.card_db]
+-    if (params.annotation_optional_tools.contains('eggnog_mapper')) required << ['eggnog_db', params.eggnog_db]
+-    if (params.host_prediction_tools.contains('metaphlan') && params.platform != 'assembly') {
++    if (selectedTools(params.annotation_tools).contains('bakta')) required << ['bakta_db', params.bakta_db]
++    if (selectedTools(params.annotation_tools).contains('amrfinderplus')) required << ['amrfinderplus_db', params.amrfinderplus_db]
++    if (selectedTools(params.annotation_optional_tools).contains('rgi')) required << ['card_db', params.card_db]
++    if (selectedTools(params.annotation_optional_tools).contains('eggnog_mapper')) required << ['eggnog_db', params.eggnog_db]
++    if (selectedTools(params.host_prediction_tools).contains('metaphlan') && params.platform != 'assembly') {
+         required << ['metaphlan_db', params.metaphlan_db]
+     }
+-    if (params.host_prediction_tools.contains('kraken2')) required << ['kraken2_db', params.kraken2_db]
+-    if (params.host_prediction_tools.contains('plasmidhostfinder') && params.platform == 'assembly') {
++    if (selectedTools(params.host_prediction_tools).contains('kraken2')) required << ['kraken2_db', params.kraken2_db]
++    if (selectedTools(params.host_prediction_tools).contains('plasmidhostfinder') && params.platform == 'assembly') {
+         required << ['plasmidhostfinder_db', params.plasmidhostfinder_db]
+     }
+-    if (params.mag_tools.contains('gtdbtk')) required << ['gtdbtk_db', params.gtdbtk_db]
+-    if (params.mag_tools.contains('checkm2')) required << ['checkm2_db', params.checkm2_db]
+-    if (params.comparative_optional_tools.contains('blast')) required << ['blast_db', params.blast_db]
+-    if (params.comparative_optional_tools.contains('mummer')) required << ['reference_plasmids', params.reference_plasmids]
+-    if (params.comparative_optional_tools.contains('clinker') && !params.annotation_tools.contains('bakta')) {
++    if (selectedTools(params.mag_tools).contains('gtdbtk')) required << ['gtdbtk_db', params.gtdbtk_db]
++    if (selectedTools(params.mag_tools).contains('checkm2')) required << ['checkm2_db', params.checkm2_db]
++    if (selectedTools(params.comparative_optional_tools).contains('blast')) required << ['blast_db', params.blast_db]
++    if (selectedTools(params.comparative_optional_tools).contains('mummer')) required << ['reference_plasmids', params.reference_plasmids]
++    if (selectedTools(params.comparative_optional_tools).contains('clinker') && !selectedTools(params.annotation_tools).contains('bakta')) {
+         paramError("comparative_optional_tools 'clinker' requires annotation_tools 'bakta'")
+     }
+     required.each { entry ->
+@@ -123,14 +167,7 @@
+ }
+ 
+ workflow {
+-    // Accept comma-separated strings from the CLI for all list params
+-    ['polishing_tools', 'plasmid_detection_tools', 'plasmid_binning_tools',
+-     'typing_tools', 'typing_optional_tools', 'host_prediction_tools',
+-     'mag_tools', 'host_linking_methods', 'host_linking_optional_methods',
+-     'annotation_tools', 'annotation_optional_tools',
+-     'comparative_tools', 'comparative_optional_tools'].each { k ->
+-        params[k] = asList(params[k])
+-    }
++    normalizeToolSelections()
+ 
+     validateParams()
+ 
+--- a/subworkflows/comparative.nf
++++ b/subworkflows/comparative.nf
+@@ -1,3 +1,5 @@
++include { selectedTools } from '../lib/tool_selection'
++
+ /*
+  * Comparative genomics subworkflow (stage 09 comparative_genomics):
+  * catalog preparation (bin/plasmid_catalog_prepare.R) + MMseqs2 cross-sample
+@@ -22,7 +24,7 @@
+     ch_bakta_dir // tuple(meta, bakta out dir); may be empty
+ 
+     main:
+-    if (params.comparative_tools.contains('mmseqs2')) {
++    if (selectedTools(params.comparative_tools).contains('mmseqs2')) {
+         ch_catalog_files = ch_plasmids
+             .map { meta, fasta -> fasta }
+             .collect()
+@@ -33,7 +35,7 @@
+         // stay plasmid_catalog_cluster.tsv / plasmid_catalog_rep_seq.fasta.
+         MMSEQS2(PLASMID_CATALOG_PREPARE.out.combined.map { fasta -> tuple([id: 'plasmid_catalog'], fasta) })
+     }
+-    if (params.comparative_optional_tools.contains('blast')) {
++    if (selectedTools(params.comparative_optional_tools).contains('blast')) {
+         BLASTN(
+             ch_plasmids,
+             Channel.value(tuple([id: 'blast_db'], file(params.blast_db, checkIfExists: true))),
+@@ -42,10 +44,10 @@
+             false   // negative_tax
+         )
+     }
+-    if (params.comparative_optional_tools.contains('mummer')) {
++    if (selectedTools(params.comparative_optional_tools).contains('mummer')) {
+         MUMMER(ch_plasmids, Channel.value(file(params.reference_plasmids, checkIfExists: true)))
+     }
+-    if (params.comparative_optional_tools.contains('clinker')) {
++    if (selectedTools(params.comparative_optional_tools).contains('clinker')) {
+         CLINKER(ch_bakta_dir)
+     }
+ }
+--- a/subworkflows/host_linking.nf
++++ b/subworkflows/host_linking.nf
+@@ -1,3 +1,5 @@
++include { selectedTools } from '../lib/tool_selection'
++
+ /*
+  * Host-plasmid linking subworkflow (stage 07 host_plasmid_linking;
+  * default disabled — params.host_plasmid_linking). Methods: co_abundance
+@@ -26,13 +28,13 @@
+     ch_links = Channel.empty()
+ 
+     if (params.host_plasmid_linking) {
+-        if (params.host_linking_optional_methods.contains('crispr')) {
++        if (selectedTools(params.host_linking_optional_methods).contains('crispr')) {
+             throw new IllegalArgumentException(
+                 'CRISPR host-plasmid linking is not implemented; remove crispr from host_linking_optional_methods'
+             )
+         }
+         // co_abundance: cross-sample over collected per-sample tables
+-        if (params.host_linking_methods.contains('co_abundance')) {
++        if (selectedTools(params.host_linking_methods).contains('co_abundance')) {
+             ch_abundance_input = ch_plasmid_abundance.toList().map { entries ->
+                 tuple(entries.collect { entry -> entry[0].id }, entries.collect { entry -> entry[1] })
+             }
+@@ -48,7 +50,7 @@
+             ch_links = ch_links.mix(LINK_COABUNDANCE.out.links)
+         }
+         // sequence similarity: needs MAG bins
+-        if (params.host_linking_methods.contains('sequence')) {
++        if (selectedTools(params.host_linking_methods).contains('sequence')) {
+             ch_seq_in = ch_plasmids
+                 .map { meta, contigs -> tuple(meta, [contigs]) }
+                 .join(ch_mag_bins, remainder: true, failOnDuplicate: true)
+@@ -61,12 +63,12 @@
+             ch_links = ch_links.mix(LINK_SEQUENCE.out.links.map { meta, f -> f })
+         }
+         // long-read bridge evidence
+-        if (params.host_linking_methods.contains('long_read') && has_long_reads) {
++        if (selectedTools(params.host_linking_methods).contains('long_read') && has_long_reads) {
+             LINK_LONGREAD(ch_plasmids.join(ch_assembly).join(ch_longread_bam))
+             ch_links = ch_links.mix(LINK_LONGREAD.out.links.map { meta, f -> f })
+         }
+         // HOTSPOT Transformer host prediction (optional; needs --hotspot_home/--hotspot_db/--hotspot_models)
+-        if (params.host_linking_optional_methods.contains('hotspot')) {
++        if (selectedTools(params.host_linking_optional_methods).contains('hotspot')) {
+             LINK_HOTSPOT(ch_plasmids)
+             ch_links = ch_links.mix(LINK_HOTSPOT.out.links.map { meta, f -> f })
+         }
+--- a/subworkflows/host_prediction.nf
++++ b/subworkflows/host_prediction.nf
+@@ -1,3 +1,5 @@
++include { selectedTools } from '../lib/tool_selection'
++
+ /*
+  * Host prediction subworkflow (stage 07 host_prediction): MetaPhlAn4
+  * (default) on cleaned reads, Kraken2 (optional, illumina only),
+@@ -38,7 +40,7 @@
+ 
+     main:
+     ch_host_profile = Channel.empty()
+-    if (params.host_prediction_tools.contains('metaphlan') && !is_assembly) {
++    if (selectedTools(params.host_prediction_tools).contains('metaphlan') && !is_assembly) {
+         HOST_PROFILE_READS(ch_short_reads, ch_long_reads)
+         METAPHLAN(
+             HOST_PROFILE_READS.out.reads,
+@@ -47,7 +49,7 @@
+         )
+         ch_host_profile = METAPHLAN.out.profile
+     }
+-    if (params.host_prediction_tools.contains('kraken2') && is_illumina) {
++    if (selectedTools(params.host_prediction_tools).contains('kraken2') && is_illumina) {
+         KRAKEN2(
+             ch_short_reads.map { meta, r1, r2 -> tuple(meta + [single_end: false], [r1, r2]) },
+             Channel.value(file(params.kraken2_db, checkIfExists: true)),
+@@ -55,7 +57,7 @@
+             false   // save_reads_assignment
+         )
+     }
+-    if (params.host_prediction_tools.contains('plasmidhostfinder') && is_assembly) {
++    if (selectedTools(params.host_prediction_tools).contains('plasmidhostfinder') && is_assembly) {
+         PLASMIDHOSTFINDER(ch_plasmids, Channel.value(file(params.plasmidhostfinder_db, checkIfExists: true)))
+     }
+ 
+--- a/subworkflows/mag_host.nf
++++ b/subworkflows/mag_host.nf
+@@ -1,3 +1,5 @@
++include { selectedTools } from '../lib/tool_selection'
++
+ /*
+  * MAG host-genome subworkflow (mag_host_genomes): MetaBAT2 /
+  * CONCOCT / SemiBin binners, optional DAS Tool aggregation, CheckM2 quality,
+@@ -35,20 +37,20 @@
+     // Only index when a MAG tool actually consumes the BAM; the bridge is
+     // pointless (and fails container-less hosts) when mag_tools is empty.
+     ch_bam_bai = Channel.empty()
+-    if (params.mag_tools) {
++    if (selectedTools(params.mag_tools)) {
+         ch_bam_bai = ch_contig_bam
+             .join(SAMTOOLS_INDEX(ch_contig_bam).bai)
+     }
+ 
+     ch_metabat2_bins = Channel.empty()
+-    if (params.mag_tools.contains('metabat2')) {
++    if (selectedTools(params.mag_tools).contains('metabat2')) {
+         METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS(ch_bam_bai)
+         METABAT2(ch_assembly.join(METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.out.depth))
+         ch_metabat2_bins = METABAT2.out.fasta
+     }
+ 
+     ch_concoct_bins = Channel.empty()
+-    if (params.mag_tools.contains('concoct')) {
++    if (selectedTools(params.mag_tools).contains('concoct')) {
+         CONCOCT_CUTUPFASTA(ch_assembly, Channel.value(true))
+         CONCOCT_CONCOCTCOVERAGETABLE(
+             CONCOCT_CUTUPFASTA.out.bed.join(ch_bam_bai)
+@@ -61,12 +63,12 @@
+         ch_concoct_bins = CONCOCT.out.fasta
+     }
+ 
+-    if (params.mag_tools.contains('semibin')) {
++    if (selectedTools(params.mag_tools).contains('semibin')) {
+         SEMIBIN(ch_assembly.join(ch_contig_bam))
+     }
+ 
+     ch_final_bins = ch_metabat2_bins
+-    if (params.mag_tools.contains('das_tool')) {
++    if (selectedTools(params.mag_tools).contains('das_tool')) {
+         ch_s2b_metabat2 = SCAFFOLDS2BIN_METABAT2(ch_metabat2_bins, Channel.value('fa')).fastatocontig2bin
+         ch_s2b_concoct = SCAFFOLDS2BIN_CONCOCT(ch_concoct_bins, Channel.value('fa')).fastatocontig2bin
+         ch_das_in = ch_assembly
+@@ -76,7 +78,7 @@
+         ch_final_bins = DAS_TOOL.out.bins
+     }
+ 
+-    if (params.mag_tools.contains('checkm2')) {
++    if (selectedTools(params.mag_tools).contains('checkm2')) {
+         CHECKM2(
+             ch_final_bins,
+             Channel.value([[id: 'checkm2_db'], file(params.checkm2_db, checkIfExists: true)])
+@@ -84,7 +86,7 @@
+     }
+ 
+     ch_taxonomy = Channel.empty()
+-    if (params.mag_tools.contains('gtdbtk')) {
++    if (selectedTools(params.mag_tools).contains('gtdbtk')) {
+         GTDBTK(
+             ch_final_bins,
+             Channel.value([[id: 'gtdbtk_db'], file(params.gtdbtk_db, checkIfExists: true)]),
+--- a/subworkflows/ont.nf
++++ b/subworkflows/ont.nf
+@@ -1,3 +1,5 @@
++include { selectedTools } from '../lib/tool_selection'
++
+ /*
+  * ONT platform subworkflow (platform: ont):
+  * [Dorado basecalling | BAM→FASTQ | provided FASTQ] → NanoPlot + Filtlong →
+@@ -82,7 +84,7 @@
+     // ---------------- assembly (02) + optional medaka polishing ----------------
+     METAFLYE(ch_final_long, '--nano-raw')
+     ch_assembly = METAFLYE.out.fasta
+-    if (params.polishing_tools.contains('medaka')) {
++    if (selectedTools(params.polishing_tools).contains('medaka')) {
+         // nf-core medaka takes (meta, reads, assembly) — note the order.
+         MEDAKA(ch_final_long.join(METAFLYE.out.fasta))
+         ch_assembly = MEDAKA.out.assembly
+--- a/subworkflows/plasmid_detection.nf
++++ b/subworkflows/plasmid_detection.nf
+@@ -1,3 +1,5 @@
++include { selectedTools } from '../lib/tool_selection'
++
+ /*
+  * Shared plasmid detection subworkflow: geNomad via the nf-core
+  * genomad/endtoend module (mandatory) + optional PLASMe/PlasX/Platon/SCAPP,
+@@ -23,24 +25,24 @@
+     GENOMAD(ch_assembly, Channel.value([[:], file(params.genomad_db, checkIfExists: true)]))
+ 
+     ch_plasme = Channel.empty()
+-    if (params.plasmid_detection_tools.contains('plasme')) {
++    if (selectedTools(params.plasmid_detection_tools).contains('plasme')) {
+         PLASME(ch_assembly, Channel.value(file(params.plasme_db, checkIfExists: true)))
+         ch_plasme = PLASME.out.predictions
+     }
+     ch_plasx = Channel.empty()
+-    if (params.plasmid_detection_tools.contains('plasx')) {
++    if (selectedTools(params.plasmid_detection_tools).contains('plasx')) {
+         PLASX(ch_assembly,
+               Channel.value(file(params.plasx_annotations, checkIfExists: true)),
+               Channel.value(file(params.plasx_model, checkIfExists: true)))
+         ch_plasx = PLASX.out.predictions
+     }
+     ch_platon = Channel.empty()
+-    if (params.plasmid_detection_tools.contains('platon')) {
++    if (selectedTools(params.plasmid_detection_tools).contains('platon')) {
+         PLATON(ch_assembly, Channel.value(file(params.platon_db, checkIfExists: true)))
+         ch_platon = PLATON.out.predictions
+     }
+     ch_scapp = Channel.empty()
+-    if (params.plasmid_detection_tools.contains('scapp')) {
++    if (selectedTools(params.plasmid_detection_tools).contains('scapp')) {
+         SCAPP_DETECT(ch_scapp_reads)
+         ch_scapp = SCAPP_DETECT.out.predictions
+     }
+--- a/subworkflows/plasmid_downstream.nf
++++ b/subworkflows/plasmid_downstream.nf
+@@ -1,3 +1,5 @@
++include { selectedTools } from '../lib/tool_selection'
++
+ /*
+  * Shared per-sample downstream subworkflow over consensus plasmid contigs:
+  * typing (06), annotation (08) and plasmid binning (05). All optional tools
+@@ -41,24 +43,24 @@
+ 
+     main:
+     // ---------------- typing (06) ----------------
+-    if (params.typing_tools.contains('plasmidfinder')) {
++    if (selectedTools(params.typing_tools).contains('plasmidfinder')) {
+         // nf-core module: bundled PlasmidFinder db (params.plasmidfinder_db no longer used)
+         PLASMIDFINDER(ch_plasmids)
+     }
+-    if (params.typing_tools.contains('mob_typer')) {
++    if (selectedTools(params.typing_tools).contains('mob_typer')) {
+         // optional per-file db inputs (mash/meta/replicons/mask/mob/mpf/orit) left empty
+         MOB_TYPER(ch_plasmids,
+                   Channel.value(file(params.mob_suite_db, checkIfExists: true)),
+                   [], [], [], [], [], [], [],
+                   false, false)
+     }
+-    if (params.typing_optional_tools.contains('copla')) {
++    if (selectedTools(params.typing_optional_tools).contains('copla')) {
+         COPLA(ch_plasmids,
+               Channel.value(file(params.copla_refgraph, checkIfExists: true)),
+               Channel.value(file(params.copla_reflist, checkIfExists: true)))
+     }
+-    def run_conjscan    = params.typing_optional_tools.contains('conjscan')
+-    def run_macsyfinder = params.typing_optional_tools.contains('macsyfinder')
++    def run_conjscan    = selectedTools(params.typing_optional_tools).contains('conjscan')
++    def run_macsyfinder = selectedTools(params.typing_optional_tools).contains('macsyfinder')
+     if (run_conjscan || run_macsyfinder) {
+         // CONJScan models via macsydata (macsyfinder >= 2.1.2 no longer ships them)
+         MACSYFINDER_DOWNLOAD(Channel.value('CONJ'))
+@@ -72,7 +74,7 @@
+ 
+     // ---------------- annotation (08) ----------------
+     ch_bakta_dir = Channel.empty()
+-    if (params.annotation_tools.contains('bakta')) {
++    if (selectedTools(params.annotation_tools).contains('bakta')) {
+         // optional proteins/prodigal-tf/regions/hmms inputs left empty
+         BAKTA(ch_plasmids,
+               Channel.value(file(params.bakta_db, checkIfExists: true)),
+@@ -80,33 +82,33 @@
+         // clinker consumes the directory holding the *.gbff files (the task dir itself)
+         ch_bakta_dir = BAKTA.out.gbff.map { meta, gbff -> tuple(meta, gbff.parent) }
+     }
+-    if (params.annotation_tools.contains('amrfinderplus')) {
++    if (selectedTools(params.annotation_tools).contains('amrfinderplus')) {
+         AMRFINDERPLUS(ch_plasmids, Channel.value(file(params.amrfinderplus_db, checkIfExists: true)))
+     }
+-    if (params.annotation_tools.contains('abricate')) {
++    if (selectedTools(params.annotation_tools).contains('abricate')) {
+         // optional --datadir left empty; --db selected via ext.args
+         ABRICATE(ch_plasmids, [])
+     }
+-    if (params.annotation_tools.contains('isescan')) {
++    if (selectedTools(params.annotation_tools).contains('isescan')) {
+         ISESCAN(ch_plasmids)
+     }
+-    if (params.annotation_tools.contains('integronfinder')) {
++    if (selectedTools(params.annotation_tools).contains('integronfinder')) {
+         INTEGRONFINDER(ch_plasmids)
+     }
+-    if (params.annotation_tools.contains('prodigal') || params.annotation_optional_tools.contains('prodigal')) {
++    if (selectedTools(params.annotation_tools).contains('prodigal') || selectedTools(params.annotation_optional_tools).contains('prodigal')) {
+         PRODIGAL(ch_plasmids, Channel.value('gff'))
+     }
+-    if (params.annotation_optional_tools.contains('mob_suite')) {
++    if (selectedTools(params.annotation_optional_tools).contains('mob_suite')) {
+         // nf-core module: no db input (uses mob_suite 3.1.9 bundled db)
+         MOB_SUITE_ANNOT(ch_plasmids)
+     }
+-    if (params.annotation_optional_tools.contains('rgi')) {
++    if (selectedTools(params.annotation_optional_tools).contains('rgi')) {
+         // card = directory with card.json + card_database_v*.fasta; wildcard optional
+         RGI(ch_plasmids,
+             Channel.value(file(params.card_db, checkIfExists: true)),
+             [])
+     }
+-    if (params.annotation_optional_tools.contains('eggnog_mapper')) {
++    if (selectedTools(params.annotation_optional_tools).contains('eggnog_mapper')) {
+         // search_mode=diamond with no explicit dmnd db (falls back to --data_dir)
+         EGGNOG_MAPPER(ch_plasmids,
+                       Channel.value(['diamond', []]),
+@@ -114,20 +116,20 @@
+     }
+ 
+     // ---------------- plasmid binning (05) ----------------
+-    if (params.plasmid_binning_tools.contains('plasmaag')) {
++    if (selectedTools(params.plasmid_binning_tools).contains('plasmaag')) {
+         PLASMAAG(ch_plasmids.join(ch_contig_table))
+     }
+-    if (params.plasmid_binning_tools.contains('gplas2')) {
++    if (selectedTools(params.plasmid_binning_tools).contains('gplas2')) {
+         GPLAS2(ch_plasmids.join(ch_graph))
+     }
+-    if (params.plasmid_binning_tools.contains('mob_suite') || params.plasmid_binning_tools.contains('mob_recon')) {
++    if (selectedTools(params.plasmid_binning_tools).contains('mob_suite') || selectedTools(params.plasmid_binning_tools).contains('mob_recon')) {
+         // nf-core module: no db input (uses mob_suite 3.1.9 bundled db)
+         MOB_RECON(ch_plasmids)
+     }
+-    if (params.plasmid_binning_tools.contains('scapp')) {
++    if (selectedTools(params.plasmid_binning_tools).contains('scapp')) {
+         SCAPP_BIN(ch_graph.join(ch_short_reads))
+     }
+-    if (params.plasmid_binning_tools.contains('recycler')) {
++    if (selectedTools(params.plasmid_binning_tools).contains('recycler')) {
+         RECYCLER(ch_graph.join(ch_contig_bam))
+     }
+ 
+--- a/tests/run_module_regressions.py
++++ b/tests/run_module_regressions.py
+@@ -302,6 +302,8 @@
+     sequence_optional_fixtures(fixture)
+     scenarios = [
+         ("default", {}),
++        ("trimmed-list", {"host_linking_methods": [" sequence "]}),
++        ("trimmed-string", {"host_linking_methods": " sequence "}),
+         ("no-mag", {"omit_mag": True}),
+         ("no-taxonomy", {"omit_taxonomy": True}),
+         ("no-plasmids", {"empty_plasmids": True}),
+@@ -319,7 +321,7 @@
+         assert_true(not (table_dir / "S3.sequence_links.tsv").exists(), "MAG-only S3 was not filtered")
+         assert_true(not (table_dir / "S4.sequence_links.tsv").exists(), "taxonomy-only S4 was not filtered")
+         assert_true(len(task_statuses) == 2, f"{name}: expected two plasmid sample tasks, got {task_statuses}")
+-        if name == "default":
++        if name in ("default", "trimmed-list", "trimmed-string"):
+             s1 = (table_dir / "S1.sequence_links.tsv").read_text()
+             s2 = (table_dir / "S2.sequence_links.tsv").read_text()
+             assert_true("sequence_similarity" in s1 and "sequence_similarity" not in s2,
+--- a/tests/nf-test/validation.nf.test
++++ b/tests/nf-test/validation.nf.test
+@@ -98,4 +98,43 @@
+             }
+         }
+     }
++
++    // Selection errors must win over later samplesheet/database guards.
++    [
++        ['unknown polishing_tools', [polishing_tools: ['__unknown_tool__']], "--polishing_tools has unknown tool '__unknown_tool__'"],
++        ['unknown plasmid_detection_tools', [plasmid_detection_tools: ['__unknown_tool__']], "--plasmid_detection_tools has unknown tool '__unknown_tool__'"],
++        ['unknown plasmid_binning_tools', [plasmid_binning_tools: ['__unknown_tool__']], "--plasmid_binning_tools has unknown tool '__unknown_tool__'"],
++        ['unknown typing_tools', [typing_tools: ['__unknown_tool__']], "--typing_tools has unknown tool '__unknown_tool__'"],
++        ['unknown typing_optional_tools', [typing_optional_tools: ['__unknown_tool__']], "--typing_optional_tools has unknown tool '__unknown_tool__'"],
++        ['unknown host_prediction_tools', [host_prediction_tools: ['__unknown_tool__']], "--host_prediction_tools has unknown tool '__unknown_tool__'"],
++        ['unknown mag_tools', [mag_tools: ['__unknown_tool__']], "--mag_tools has unknown tool '__unknown_tool__'"],
++        ['unknown host_linking_methods', [host_linking_methods: ['__unknown_tool__']], "--host_linking_methods has unknown tool '__unknown_tool__'"],
++        ['unknown host_linking_optional_methods', [host_linking_optional_methods: ['__unknown_tool__']], "--host_linking_optional_methods has unknown tool '__unknown_tool__'"],
++        ['unknown annotation_tools', [annotation_tools: ['__unknown_tool__']], "--annotation_tools has unknown tool '__unknown_tool__'"],
++        ['unknown annotation_optional_tools', [annotation_optional_tools: ['__unknown_tool__']], "--annotation_optional_tools has unknown tool '__unknown_tool__'"],
++        ['unknown comparative_tools', [comparative_tools: ['__unknown_tool__']], "--comparative_tools has unknown tool '__unknown_tool__'"],
++        ['unknown comparative_optional_tools', [comparative_optional_tools: ['__unknown_tool__']], "--comparative_optional_tools has unknown tool '__unknown_tool__'"],
++        ['empty comma entry', [plasmid_detection_tools: 'genomad,,platon'], '--plasmid_detection_tools has an empty tool name'],
++        ['trailing comma entry', [plasmid_detection_tools: 'genomad,'], '--plasmid_detection_tools has an empty tool name'],
++        ['empty list entry', [plasmid_detection_tools: ['']], '--plasmid_detection_tools has an empty tool name'],
++        ['null list entry', [plasmid_detection_tools: [null]], '--plasmid_detection_tools has an invalid tool name'],
++        ['nested list entry', [plasmid_detection_tools: [['platon']]], '--plasmid_detection_tools has an invalid tool name'],
++        ['map selection', [plasmid_detection_tools: [platon: true]], '--plasmid_detection_tools must be a list of tool names']
++    ].each { caseName, overrides, diagnostic ->
++        test(caseName) {
++            when {
++                params {
++                    samplesheet = new File('tests/nf-test/fixtures/duplicate.tsv').absolutePath
++                    outdir = "$outputDir"
++                    overrides.each { key, value -> delegate.setProperty(key, value) }
++                }
++            }
++            then {
++                assert workflow.failed
++                assert workflow.stderr.join('\n').contains(diagnostic)
++                assert workflow.trace.succeeded().isEmpty()
++                assert workflow.trace.failed().isEmpty()
++            }
++        }
++    }
+ }
+--- a/README.md
++++ b/README.md
+@@ -126,6 +126,9 @@
+   （默认 `['bakta','amrfinderplus','isescan','integronfinder']`）、
+   `--host_prediction_tools`（默认 `['metaphlan']`）、`--mag_tools`（默认 `[]`）、
+   `--comparative_tools`（默认 `['mmseqs2']`）等。
++- 工具/方法列表可用逗号串或字符串列表，两种形式都会逐项去除首尾空白；
++  未知名称、空条目、null 条目、嵌套列表和 map 会在分析任务提交前被拒绝。
++  空列表或空串保留禁用列表的含义；工具名称合法后仍须满足平台、数据库和依赖条件。
+ - 共识策略：`--consensus_method weighted_vote`（另支持 `intersection` /
+   `majority_vote` / `single_tool`），`--consensus_weights
+   'genomad:0.6,platon:0.15,plasme:0.15,plasx:0.1'`。
+--- /dev/null
++++ b/lib/tool_selection.nf
+@@ -0,0 +1,7 @@
++// Pure normalization at each consumer: module params are copied by Nextflow.
++// Name/type validation belongs to the main entry registry before task submission.
++def selectedTools(value) {
++    if (value == null) return []
++    if (value instanceof List) return value.collect { it.toString().trim() }
++    return value.toString().trim() ? value.toString().split(',', -1).collect { it.trim() } : []
++}

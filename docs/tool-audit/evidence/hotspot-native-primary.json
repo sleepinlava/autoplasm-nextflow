@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-24",
+  "verified_findings": [
+    "TA-046",
+    "TA-080",
+    "TA-081"
+  ],
+  "unit_unique_methods": 13,
+  "native_trace_entries": 9,
+  "native_status_counts": {
+    "COMPLETED": 4,
+    "CACHED": 3,
+    "FAILED": 1,
+    "ABORTED": 1
+  },
+  "source_commit": "0e3e3013a6a29fbdadc8e58180c9eb259877ce99",
+  "source_blobs": 14,
+  "package_entries": 102,
+  "asset_files": {
+    "database": 17,
+    "models": 19
+  },
+  "assets_bytes": {
+    "database": 273686908,
+    "models": 1911643940
+  },
+  "artifacts": {
+    "results/tool-audit/20261023-hotspot/source-proof.json": "32a79c50b58d7fadb58f3077f45481e04bc0803b5d162a789790a49acbcdfc61",
+    "results/tool-audit/20261023-hotspot/asset-proof.json": "3815bcd4b6dbf7957f960ad94db59ffa9c9c0021def4fa61fd9d204b1ef8080b",
+    "results/tool-audit/20261023-hotspot/package-proof.json": "b290b61eacd7c6c1601e86833f3a4d81872724b3406ac076f2bbbb0928746bf2",
+    "results/tool-audit/20261023-hotspot/native-workflow-v4/run.json": "a004306f6afb7a925598a44a78648f477ee6477751a7aa7d34a632dc7b3152c8",
+    "tests/hotspot-native.lock.json": "d78d192b1b12cdb7839132d0185d6f1b320686a275c6d0686b9b804434423788"
+  },
+  "limitations": [
+    "Complete fixed official models/DB and real original normal-mode programs; ELF bootstrap alters private GNU_STACK metadata only, never source/weights/thresholds.",
+    "Legacy wrapper requires a logged ELF-only Python transport to isolate its actual CR/parser and resource-cache defects; no classifier observer.",
+    "Model corruption is a private copied input boundary, not a scientific method or retrained model; source originals restored/unchanged.",
+    "Taxonomy-label/hierarchy, sequence/sample attribution and interface parity only, not biological host-range/sensitivity/accuracy validation.",
+    "Official examples may overlap training; no independent biological replicates claimed. Current native and fixed-lock Conda only; no image/AWS/full platform/nf-test claim."
+  ]
+}

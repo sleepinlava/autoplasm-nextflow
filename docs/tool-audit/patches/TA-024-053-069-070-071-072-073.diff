@@ -1,0 +1,1693 @@
+--- a/README.md
++++ b/README.md
+@@ -190,7 +190,8 @@
+ | `--kraken2_db` | Kraken2 | 标准/自定义 Kraken2 库 |
+ | `--gtdbtk_db` | GTDB-Tk | GTDB release 参考数据 |
+ | `--checkm2_db` | CheckM2 | `checkm2 database --download --path <dir>`（启用 checkm2 时必填） |
+-| `--plasme_db / --platon_db` | PLASMe / Platon | 各自官方数据库 |
++| `--plasme_db / --plasme_dir` | PLASMe | 完整官方库（含已建索引和模型）/ 官方源码目录 |
++| `--platon_db` | Platon | 官方数据库 |
+ | `--plasx_annotations / --plasx_model` | PlasX | PlasX 官方注释与模型文件 |
+ | `--copla_refgraph / --copla_reflist` | COPLA | COPLA 参考图与列表 |
+ | `--card_db` | RGI | 含 card.json 与 card_database 序列的目录 |
+@@ -200,6 +201,22 @@
+ | `--plasmidhostfinder_db` | PlasmidHostFinder | 官方数据库（assembly 平台） |
+ 
+ 启用某个可选工具但未配置其数据库时，流程在启动阶段直接报错。
++
++启用 PLASMe 还须设置 `--plasme_dir`，目录内含 `PLASMe.py`、
++`bio_script.py`、`trans_data.py`、`trans_model.py`。已核验的源码为
++`HubertTang/PLASMe` 的 `4405d5aa82065cf23a9d78de8b70ba261342ad40`；
++数据库为 Zenodo `8046934` 的完整 `DB.zip`，需先建立 BLAST/DIAMOND 索引。
++`tests/prepare_plasme_database.py` 可校验完整归档并建库；不把模型子集当完整库。
++Conda 环境固定在 `envs/plasme.yml`。容器使用仓库内镜像，先从仓库根目录构建：
++
++```bash
++podman build --format docker --ignorefile containers/plasme/Dockerfile.dockerignore \
++  -f containers/plasme/Dockerfile -t autoplasm-plasme:1.1 .
++```
++
++可用 `--plasme_container` 指向已构建的镜像或兼容运行文件。运行记录会保留
++源码与依赖身份；对上述固定源码，适配器只修正空查询及外部命令失败传播，
++不改模型和阈值。旧版被漏写的 PLASMe 阳性结果需要重跑检测与后续共识。
+ 
+ ## Conda 环境
+ 
+--- /dev/null
++++ b/bin/plasme_runtime.py
+@@ -0,0 +1,198 @@
++#!/usr/bin/env python3
++"""Launch the pinned PLASMe source with explicit resources and private ABI compatibility."""
++import argparse
++import csv
++import hashlib
++import importlib.metadata
++import importlib.util
++import json
++import os
++from pathlib import Path
++import shutil
++import struct
++import subprocess
++import sys
++
++
++def sha(path):
++    with path.open('rb') as stream:
++        digest=hashlib.sha256()
++        for chunk in iter(lambda:stream.read(1024*1024),b''):digest.update(chunk)
++        return digest.hexdigest()
++
++
++def stack_flags(path):
++    with path.open('rb') as stream:
++        header=stream.read(64)
++        if header[:6]!=b'\x7fELF\x02\x01':raise ValueError('Expected a Linux64 little-endian ELF library')
++        offset=struct.unpack_from('<Q',header,32)[0]
++        size,count=struct.unpack_from('<HH',header,54)
++        if size!=56:raise ValueError('Invalid ELF program header size')
++        matches=[]
++        for i in range(count):
++            stream.seek(offset+i*size);entry=stream.read(size)
++            if len(entry)!=size:raise ValueError('Truncated ELF program header')
++            if struct.unpack_from('<I',entry)[0]==0x6474e551:
++                matches.append((offset+i*size+4,struct.unpack_from('<I',entry,4)[0]))
++    if len(matches)!=1:raise ValueError('Expected one GNU_STACK header')
++    return matches[0]
++
++
++def clear_stack(path):
++    """Copy/replace avoids writing through shared Conda package-cache hardlinks."""
++    path=Path(path)
++    offset,flags=stack_flags(path)
++    before=sha(path)
++    if flags & 1:
++        temporary=path.with_name(path.name+'.private-compat')
++        shutil.copyfile(path,temporary)
++        shutil.copymode(path,temporary)
++        with temporary.open('r+b') as stream:
++            stream.seek(offset);stream.write(struct.pack('<I',flags & ~1))
++        os.replace(temporary,path)
++    return {'flags_before':flags,'flags_after':flags & ~1,'before_sha256':before,'after_sha256':sha(path),
++            'scope':'GNU_STACK PF_X only; executable code and model bytes unchanged'}
++
++
++def runtime_environment(work):
++    spec=importlib.util.find_spec('torch')
++    if spec is None or spec.origin is None:raise ValueError('PLASMe requires the pinned PyTorch environment')
++    torch_lib=Path(spec.origin).parent/'lib'
++    library=torch_lib/'libtorch_cpu.so'
++    _,flags=stack_flags(library)
++    environment=os.environ.copy()
++    search=[]
++    compatibility=None
++    if flags & 1:
++        work.mkdir()
++        private=work/library.name
++        shutil.copyfile(library,private)
++        compatibility=clear_stack(private)
++        search.append(str(work.resolve()))
++        # torch extensions use an RPATH which takes precedence over LD_LIBRARY_PATH.
++        # Preload the private corrected object for this Python child only.
++        environment['LD_PRELOAD']=str(private.resolve())+(' '+environment['LD_PRELOAD'] if environment.get('LD_PRELOAD') else '')
++    search += [str(torch_lib.resolve()),str(Path(sys.prefix)/'lib')]
++    if environment.get('LD_LIBRARY_PATH'):search.append(environment['LD_LIBRARY_PATH'])
++    environment['LD_LIBRARY_PATH']=os.pathsep.join(search)
++    versions={name:importlib.metadata.version(name) for name in ['torch','numpy','pandas','biopython']}
++    return environment,{'versions':versions,'torch_cpu_library_sha256':sha(library),'private_elf_compatibility':compatibility}
++
++
++def prepare_program(source):
++    """Version-scoped boundary fixes; keep the configured checkout unchanged."""
++    program=source/'PLASMe.py'
++    if sha(program)!='d9f9f3d1f2f2e2e420d73bb7d0ad21862f62c7fa54ce5a284abaae4ee3fd4f09':
++        return program,{'applied':False,'reason':'not the fixed official4405d5aa source'}
++    if sha(source/'bio_script.py')!='db7a2363e33fa6cdecee486ba20116e8391402a63b56ab06455eee63cedb4e3c':
++        raise ValueError('Fixed PLASMe source requires its matching bio_script.py')
++    private=Path('plasme_program')
++    private.mkdir()
++    for name in ['PLASMe.py','bio_script.py','trans_data.py','trans_model.py']:
++        # Do not copy host security xattrs into a rootless container's task.
++        shutil.copyfile(source/name,private/name)
++    text=(private/'PLASMe.py').read_text()
++    marker='    ### run PC transformer in the non-overlapped region\n'
++    if text.count(marker)!=1:raise ValueError('Unexpected fixed PLASMe no-hit boundary')
++    empty=('    # Local boundary fix: zero BLAST hits implies no eligible Transformer queries.\n'
++           '    if not query_set:\n'
++           '        with open(out_path, "w") as empty_result:\n'
++           '            empty_result.write("order,query,identity,coverage,PLASMe,overlap\\n")\n'
++           '        return\n\n')
++    text=text.replace(marker,empty+marker)
++    lines=text.splitlines(True);changed=0
++    for i,line in enumerate(lines):
++        if line.lstrip().startswith('subprocess.call(f"blastn -query'):
++            lines[i]=line.replace('subprocess.call(','subprocess.run(',1).replace('shell=True)','shell=True, check=True)')
++            changed+=1
++    if changed!=1:raise ValueError('Unexpected fixed PLASMe BLAST call')
++    (private/'PLASMe.py').write_text(''.join(lines))
++    bio=(private/'bio_script.py').read_text()
++    start='    for temp_id in range(threads):\n'
++    job='        pool.apply_async(prodigal, [f"{contig_path}.{temp_id}"])'
++    if bio.count(start)!=1 or bio.count(job)!=1 or bio.count('    pool.join()\n')!=1:
++        raise ValueError('Unexpected fixed PLASMe Prodigal worker boundary')
++    bio=bio.replace(start,'    jobs = []\n'+start).replace(job,'        jobs.append(pool.apply_async(prodigal, [f"{contig_path}.{temp_id}"]))')
++    bio=bio.replace('    pool.join()\n','    pool.join()\n    for job in jobs:\n        job.get()\n')
++    lines=bio.splitlines(True);changed=0
++    for i,line in enumerate(lines):
++        if line.lstrip().startswith('subprocess.run('):
++            lines[i]=line.replace('shell=True)','shell=True, check=True)');changed+=1
++    if changed!=4:raise ValueError('Unexpected fixed PLASMe helper subprocess calls')
++    (private/'bio_script.py').write_text(''.join(lines))
++    return private/'PLASMe.py',{'applied':True,'source_commit':'4405d5aa82065cf23a9d78de8b70ba261342ad40',
++        'scope':'no-hit empty result and external-command failure propagation only; no model/threshold/feature changes',
++        'patched_source_sha256':{p.name:sha(p) for p in private.iterdir() if p.is_file()}}
++
++
++def run(args):
++    source=Path(args.source_dir)
++    sources=[source/name for name in ['PLASMe.py','bio_script.py','trans_data.py','trans_model.py']]
++    for path in sources:
++        if not path.is_file():raise ValueError('Missing PLASMe source file: '+str(path))
++    if not Path(args.assembly).is_file():raise ValueError('Missing PLASMe input assembly')
++    database=Path(args.database)
++    for name in ['plsdb_Mar30.dmnd','plsdb_taxon.tsv','plas_overlap.csv','plas_chrom_thres.csv','plsdb_Mar30.clusters.p2a']:
++        path=database/name
++        if not path.is_file() or not path.stat().st_size:raise ValueError('Missing prepared PLASMe resource: '+str(path))
++    for extension in ['nin','nhr','nsq']:
++        if not any(p.stat().st_size for p in database.glob('plsdb_Mar30*.'+extension) if p.is_file()):
++            raise ValueError('Missing prepared PLASMe BLAST index: '+extension)
++    if not (database/'trans_model').is_dir():raise ValueError('Missing PLASMe model directory')
++    if args.threads<1:raise ValueError('PLASMe threads must be positive')
++    if Path(args.output).exists() or Path(args.output+'_report.csv').exists() or Path('plasme_temp').exists():
++        raise ValueError('PLASMe outputs/temp already exist; refusing stale result reuse')
++    for binary in ['blastn','diamond','prodigal']:
++        if not shutil.which(binary):raise ValueError('Missing PLASMe executable: '+binary)
++    work=Path('.plasme_private_compat')
++    if work.exists():raise ValueError('PLASMe private compatibility directory already exists')
++    environment,metadata=runtime_environment(work)
++    environment['OMP_NUM_THREADS']=str(args.threads)
++    environment['MKL_NUM_THREADS']=str(args.threads)
++    metadata['source_sha256']={p.name:sha(p) for p in sources}
++    metadata['threads']=args.threads
++    try:
++        program,patch=prepare_program(source)
++        metadata['local_source_patch']=patch
++        command=[sys.executable]
++        if metadata['private_elf_compatibility']:
++            # The interpreter has loaded the private SONAME already. Do not
++            # inject Torch into BLAST/Prodigal/DIAMOND children via LD_PRELOAD.
++            bootstrap=('import os,sys,runpy;os.environ.pop("LD_PRELOAD",None);'
++                       'sys.argv=sys.argv[1:];sys.path.insert(0,os.path.dirname(os.path.abspath(sys.argv[0])));'
++                       'runpy.run_path(sys.argv[0],run_name="__main__")')
++            command+=['-c',bootstrap]
++        command += [str(program),args.assembly,args.output,'-d',args.database,
++                    '-t',str(args.threads),'--temp','plasme_temp']
++        metadata['command']=command
++        result=subprocess.run(command,env=environment)
++        metadata['exit_code']=result.returncode
++        candidates=Path('plasme_temp/PLASMe_candidate.csv')
++        if patch['applied'] and result.returncode==0 and candidates.is_file():
++            with candidates.open(newline='') as stream:rows=list(csv.DictReader(stream))
++            metadata['candidate_records']=len(rows)
++            metadata['transformer_scores']=sum(float(row['PLASMe'])>=0 for row in rows)
++            metadata['scope']='no eligible BLAST queries' if not rows else 'fixed classifier candidate outputs; no accuracy claim'
++        Path(args.runtime_record).write_text(json.dumps(metadata,indent=2)+'\n')
++        return result.returncode
++    finally:
++        if work.exists():shutil.rmtree(work)
++
++
++def main():
++    parser=argparse.ArgumentParser(description=__doc__)
++    commands=parser.add_subparsers(dest='action',required=True)
++    fix=commands.add_parser('fix-elf');fix.add_argument('library',type=Path)
++    launch=commands.add_parser('run')
++    for name in ['source-dir','assembly','database','output']:launch.add_argument('--'+name,required=True)
++    launch.add_argument('--threads',type=int,required=True)
++    launch.add_argument('--runtime-record',default='plasme_runtime.json')
++    args=parser.parse_args()
++    try:
++        if args.action=='fix-elf':print(json.dumps(clear_stack(args.library)));return 0
++        return run(args)
++    except (ValueError,OSError,importlib.metadata.PackageNotFoundError) as error:
++        print('PLASMe runtime: '+str(error),file=sys.stderr);return 1
++
++
++if __name__=='__main__':raise SystemExit(main())
+--- /dev/null
++++ b/containers/plasme/Dockerfile
+@@ -0,0 +1,14 @@
++# Build from the repository root: podman build -f containers/plasme/Dockerfile -t autoplasm-plasme:1.1 .
++# The dedicated ignore file keeps database/work directories out of the context.
++FROM docker.io/mambaorg/micromamba@sha256:b61105e17d910735a6cc3db188d349c67623306560328495424ddac551785599
++COPY --chown=$MAMBA_USER:$MAMBA_USER containers/plasme/conda-linux-64.lock /tmp/plasme.lock
++RUN micromamba create -y -n plasme -f /tmp/plasme.lock && micromamba clean --all --yes
++ENV PATH=/opt/conda/envs/plasme/bin:$PATH
++ENV ENV_NAME=plasme
++COPY --chown=$MAMBA_USER:$MAMBA_USER bin/plasme_runtime.py /usr/local/bin/plasme_runtime.py
++RUN python3 /usr/local/bin/plasme_runtime.py fix-elf /opt/conda/envs/plasme/lib/python3.9/site-packages/torch/lib/libtorch_cpu.so \
++    && python3 -c 'import torch,numpy,pandas,Bio; assert torch.__version__ == "1.11.0"; assert not torch.cuda.is_available(); assert torch.tensor([[1.,2.],[3.,4.]]).matmul(torch.tensor([[5.,6.],[7.,8.]])).tolist() == [[19.,22.],[43.,50.]]'
++USER root
++# Nextflow's task metrics require ps even when the classifier itself does not.
++RUN apt-get update && apt-get install -y --no-install-recommends procps && rm -rf /var/lib/apt/lists/*
++USER $MAMBA_USER
+--- /dev/null
++++ b/containers/plasme/Dockerfile.dockerignore
+@@ -0,0 +1,7 @@
++**
++!containers/
++!containers/plasme/
++!containers/plasme/Dockerfile
++!containers/plasme/conda-linux-64.lock
++!bin/
++!bin/plasme_runtime.py
+--- /dev/null
++++ b/containers/plasme/conda-linux-64.lock
+@@ -0,0 +1,100 @@
++@EXPLICIT
++https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-8_kmp_llvm.conda#b4d1b93dd1dab4eea23395fd5e5b357d
++https://conda.anaconda.org/conda-forge/linux-64/biopython-1.80-py39hb9d737c_0.conda#3dbf17a57281fc44c8dd45a1f36eed13
++https://conda.anaconda.org/conda-forge/linux-64/blas-2.112-mkl.tar.bz2#6d538161387106773ce03e3785cb0b28
++https://conda.anaconda.org/conda-forge/linux-64/blas-devel-3.9.0-12_linux64_mkl.tar.bz2#ba8170bb8a334acfc89f2fa1d54acda7
++https://conda.anaconda.org/bioconda/linux-64/blast-2.13.0-hf3cf87c_1.tar.bz2#56b9bbd9595b07b30023b805aff30a9c
++https://conda.anaconda.org/conda-forge/linux-64/boost-cpp-1.74.0-h75c5d50_8.tar.bz2#9c5996e7741d205bc76a518173ff6b82
++https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_10.conda#e675fabcf81499adc7edf58124fb1e01
++https://conda.anaconda.org/conda-forge/linux-64/c-ares-1.34.9-hebe6cf0_0.conda#78b505af04bf7a87ca957ef0cb5946f5
++https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.10.19-hbd8a1cb_0.conda#a1d1bf676059d2863f000d5e2777743f
++https://conda.anaconda.org/pytorch/noarch/cpuonly-2.0-0.tar.bz2#1cf3a59ef90a4078c253e3b02c272065
++https://conda.anaconda.org/conda-forge/linux-64/curl-7.88.1-hdc1c0ab_1.conda#2016c398f234cfa354ea704c6731b5d5
++https://conda.anaconda.org/bioconda/linux-64/diamond-2.0.15-hb97b32f_1.tar.bz2#6951be09685f9979086684bfcef47932
++https://conda.anaconda.org/bioconda/linux-64/entrez-direct-26.0-h1079eea_0.conda#eb37fd2fbf2bc8192c550999a3bbc5c3
++https://conda.anaconda.org/conda-forge/linux-64/icu-70.1-h27087fc_0.tar.bz2#87473a15119779e021c314249d4b4aed
++https://conda.anaconda.org/conda-forge/linux-64/keyutils-1.6.3-h7cc23a3_1.conda#ba55d1b89fd7775e67de8291029b4059
++https://conda.anaconda.org/conda-forge/linux-64/krb5-1.20.1-h81ceb04_0.conda#89a41adce7106749573d883b2f657d78
++https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.46.1-bootstrap_ha15bf96_3.conda#e82d33173910cc8da8da4e51d732ff3e
++https://conda.anaconda.org/conda-forge/linux-64/libblas-3.9.0-12_linux64_mkl.tar.bz2#7c015ce76785c39d15c0f93c30cbb644
++https://conda.anaconda.org/conda-forge/linux-64/libcblas-3.9.0-12_linux64_mkl.tar.bz2#4491ca8c3b6436e3377635d86faa8c44
++https://conda.anaconda.org/conda-forge/linux-64/libcurl-7.88.1-hdc1c0ab_1.conda#3d1189864d1c0ed2a5919cb067b5903d
++https://conda.anaconda.org/conda-forge/linux-64/libedit-3.1.20260512-pl5321h373387f_0.conda#27dbd7e2984b8fe48e069379636ccfdd
++https://conda.anaconda.org/conda-forge/linux-64/libev-4.33-h280c20c_3.conda#7bc31538d6e3fb349e897353969237ec
++https://conda.anaconda.org/conda-forge/linux-64/libffi-3.7.0-h81df57d_1.conda#6525a0b06aa4fd390795f0740636a9dd
++https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda#735629b400b70eeab21a2ba8f5b1c2ce
++https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-16.2.0-h69a702a_7.conda#2005515ac9340f816fb2ac7e83afe553
++https://conda.anaconda.org/conda-forge/linux-64/libgfortran-16.2.0-h69a702a_7.conda#3a8d285f5f22138ef826ad54cf267e73
++https://conda.anaconda.org/conda-forge/linux-64/libgfortran-ng-16.2.0-h69a702a_7.conda#a31f744c0c83d31dacf9c01b2e3c12a2
++https://conda.anaconda.org/conda-forge/linux-64/libgfortran5-16.2.0-h6b99dfc_7.conda#7719ed7be38ad8c492c4bd5cc2bce0c4
++https://conda.anaconda.org/conda-forge/linux-64/libhwloc-2.9.1-hd6dc26d_0.conda#a3ede1b8e47f993ff1fe3908b23bb307
++https://conda.anaconda.org/conda-forge/linux-64/libiconv-1.18-h0cb94f2_3.conda#f92233bf33e24a25668bb2119e2c51f9
++https://conda.anaconda.org/conda-forge/linux-64/libidn2-2.3.8-hfac485b_1.conda#842a81de672ddcf476337c8bde3cad33
++https://conda.anaconda.org/conda-forge/linux-64/liblapack-3.9.0-12_linux64_mkl.tar.bz2#bb8ef22697afa520822f579c3b72d2e0
++https://conda.anaconda.org/conda-forge/linux-64/liblapacke-3.9.0-12_linux64_mkl.tar.bz2#2ee2c73c1b7343665bc43c42d025f00d
++https://conda.anaconda.org/conda-forge/linux-64/liblzma-5.8.3-hb03c661_1.conda#1390b7c5ac0b1d8e447bc5efa6d3c8c2
++https://conda.anaconda.org/conda-forge/linux-64/liblzma-devel-5.8.3-hb03c661_1.conda#6d83d6a332c19424e9e66b69b180ec11
++https://conda.anaconda.org/conda-forge/linux-64/libnghttp2-1.58.0-h47da74e_1.conda#700ac6ea6d53d5510591c4344d5c989a
++https://conda.anaconda.org/conda-forge/linux-64/libnsl-2.0.1-hb9d3cd8_1.conda#d864d34357c3b65a4b731f78c0801dc4
++https://conda.anaconda.org/conda-forge/linux-64/libsqlite-3.46.0-hde9e2c9_0.conda#18aa975d2094c34aef978060ae7da7d8
++https://conda.anaconda.org/conda-forge/linux-64/libssh2-1.11.0-h0841786_0.conda#1f5a58e686b13bcfde88b93f547d23fe
++https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda#9b6707e0caca917fa6ea9ee473f37a5d
++https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-16.2.0-hdf11a46_7.conda#25a23bde5e26d548374f3e02b4669670
++https://conda.anaconda.org/conda-forge/linux-64/libunistring-0.9.10-h7f98852_0.tar.bz2#7245a044b4a1980ed83196176b78b73a
++https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.42.4-hcfc3c73_0.conda#54a948337e66706380ff24d6b5fde63f
++https://conda.anaconda.org/conda-forge/linux-64/libuv-1.52.1-h280c20c_1.conda#01c4ed87826af55996768af6dbc936b4
++https://conda.anaconda.org/conda-forge/linux-64/libxcrypt-4.4.38-h280c20c_0.conda#f7a7ff5a6ab331e037abd34f379a631d
++https://conda.anaconda.org/conda-forge/linux-64/libxml2-2.10.3-hca2bb57_4.conda#bb808b654bdc3c783deaf107a2ffb503
++https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.2.13-h4ab18f5_6.conda#27329162c0dc732bcf67a4e0cd488125
++https://conda.anaconda.org/conda-forge/linux-64/llvm-openmp-23.1.4-h7148c6a_0.conda#ad441557f951f09d7e4c79731a6a34dc
++https://conda.anaconda.org/conda-forge/linux-64/mkl-2021.4.0-h8d4b97c_729.tar.bz2#584dc18ddedfda6273c25a728389189e
++https://conda.anaconda.org/conda-forge/linux-64/mkl-devel-2021.4.0-ha770c72_730.tar.bz2#b3b6612363b1a888a06195890d9175ce
++https://conda.anaconda.org/conda-forge/linux-64/mkl-include-2021.4.0-h8d4b97c_729.tar.bz2#36681f8545e25efcb7dfec9335757822
++https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda#ee6c0cd80a60961a1f48aa3e0b91f986
++https://conda.anaconda.org/conda-forge/linux-64/numpy-1.23.4-py39h3d75532_1.tar.bz2#ba4f1c0466d4ba7f53090c150fc88434
++https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.5-h781a0a9_0.conda#5a51a2ea653f120240b1a9bf76e0aae9
++https://conda.anaconda.org/conda-forge/linux-64/pandas-1.5.2-py39h2ad29b5_2.conda#5fb2814013a84e9a59d7a9ddf803c6b4
++https://conda.anaconda.org/conda-forge/linux-64/pcre-8.45-h9c3ff4c_0.tar.bz2#c05d1820a6d34ff07aaaab7a9b7eddaa
++https://conda.anaconda.org/conda-forge/linux-64/perl-5.32.1-10_h7cc23a3_perl5.conda#dfa988f7a513f0f441ba36d128b5d327
++https://conda.anaconda.org/bioconda/noarch/perl-archive-tar-3.14-pl5321hcbfc158_0.conda#290aa04cc6fe79133433eb72de48edc0
++https://conda.anaconda.org/conda-forge/noarch/perl-carp-1.50-pl5321hd8ed1ab_0.tar.bz2#bdddc03e28019b902da71b722f2288d7
++https://conda.anaconda.org/conda-forge/noarch/perl-common-sense-3.75-pl5321hd8ed1ab_0.tar.bz2#ef70dc77e8b10bbb62f5e843b401ef0e
++https://conda.anaconda.org/conda-forge/linux-64/perl-compress-raw-bzip2-2.214-pl5321hda65f42_0.conda#1ec33b9f74a71c17cc5579e35027832a
++https://conda.anaconda.org/conda-forge/linux-64/perl-compress-raw-zlib-2.214-pl5321h4dac143_0.conda#943e7033e6f709adf0d89a3af51ab81b
++https://conda.anaconda.org/conda-forge/linux-64/perl-encode-3.24-pl5321hb03c661_0.conda#35776d4c5766e9d98754d1e7530c2961
++https://conda.anaconda.org/conda-forge/noarch/perl-exporter-5.74-pl5321hd8ed1ab_0.tar.bz2#fd2eac4e35f8c970870a3961c1df3e29
++https://conda.anaconda.org/conda-forge/noarch/perl-exporter-tiny-1.002002-pl5321hd8ed1ab_0.tar.bz2#48d709826875be1f2c108d3d1d8efec7
++https://conda.anaconda.org/conda-forge/noarch/perl-extutils-makemaker-7.70-pl5321hd8ed1ab_0.conda#ec3e57ed34f7765bfc7054a05868ce5d
++https://conda.anaconda.org/bioconda/linux-64/perl-io-compress-2.216-pl5321h503566f_0.conda#0784cb3c120f934a5fe61961c8238330
++https://conda.anaconda.org/bioconda/noarch/perl-io-zlib-1.15-pl5321hdfd78af_1.tar.bz2#db92645dabe9467115729e4479841b5d
++https://conda.anaconda.org/bioconda/noarch/perl-json-4.11-pl5321hdfd78af_0.conda#56411755d21870a9ec16c76fd7b66dba
++https://conda.anaconda.org/bioconda/linux-64/perl-json-xs-4.04-pl5321h9948957_0.conda#7916b2e794393b3389535ba750f489da
++https://conda.anaconda.org/bioconda/noarch/perl-list-moreutils-0.430-pl5321hdfd78af_0.tar.bz2#7f04c79d216d0f8e7b6d5a51de4aafa0
++https://conda.anaconda.org/bioconda/linux-64/perl-list-moreutils-xs-0.430-pl5321h7b50bb2_5.tar.bz2#9192770eb08524038c3fcf24e915b10c
++https://conda.anaconda.org/conda-forge/noarch/perl-parent-0.243-pl5321hd8ed1ab_0.conda#314caa3b72d65f8078d426c6721dcacc
++https://conda.anaconda.org/conda-forge/linux-64/perl-pathtools-3.75-pl5321hb9d3cd8_2.conda#03d88c89dfac8a26adcdeff242f94007
++https://conda.anaconda.org/conda-forge/linux-64/perl-scalar-list-utils-1.70-pl5321hb03c661_0.conda#046486011bf7674e3c2f2a1513ac4f3d
++https://conda.anaconda.org/conda-forge/linux-64/perl-storable-3.15-pl5321hb9d3cd8_2.conda#212f63a5c7c753ecf0a74c349b9270c5
++https://conda.anaconda.org/bioconda/noarch/perl-types-serialiser-1.01-pl5321hdfd78af_0.tar.bz2#cfc65753e827bbef80c00eaa395f6ae7
++https://conda.anaconda.org/conda-forge/noarch/pip-25.2-pyh8b19718_0.conda#dfce4b2af4bfe90cdcaf56ca0b28ddf5
++https://conda.anaconda.org/bioconda/linux-64/prodigal-2.6.3-h7b50bb2_10.tar.bz2#66cc94ede7d4cd483a0412adaf9532ce
++https://conda.anaconda.org/conda-forge/linux-64/python-3.9.15-hba424b6_0_cpython.conda#7b9485fce17fac2dd4aca6117a9936c2
++https://conda.anaconda.org/conda-forge/noarch/python-dateutil-2.9.0.post0-pyhe01879c_2.conda#5b8d21249ff20967101ffa321cab24e8
++https://conda.anaconda.org/conda-forge/noarch/python_abi-3.9-9_cp39.conda#9615f53c60b6d766f740be806484bad7
++https://conda.anaconda.org/pytorch/linux-64/pytorch-1.11.0-py3.9_cpu_0.tar.bz2#d272501b0cb9814eccca2358d5ee22bd
++https://conda.anaconda.org/pytorch/noarch/pytorch-mutex-1.0-cpu.tar.bz2#49565ed726991fd28d08a39885caa88d
++https://conda.anaconda.org/conda-forge/noarch/pytz-2025.2-pyhd8ed1ab_0.conda#bc8e3267d44011051f2eb14d22fb0960
++https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-hd6e31c0_1.conda#69c01c781e7c8190bbdaf79e3848c5ca
++https://conda.anaconda.org/conda-forge/noarch/setuptools-80.9.0-pyhff2d567_0.conda#4de79c071274a53dcaf2a8c749d1499e
++https://conda.anaconda.org/conda-forge/noarch/six-1.17.0-pyhe01879c_1.conda#3339e3b65d58accf4ca4fb8748ab16b3
++https://conda.anaconda.org/conda-forge/linux-64/tbb-2021.9.0-hf52228f_0.conda#f495e42d3d2020b025705625edf35490
++https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h4845f30_101.conda#d453b98d9c83e71da0741bb0ff4d76bc
++https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.14.1-pyhe01879c_0.conda#e523f4f1e980ed7a4240d7e27e9ec81f
++https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda#fcb489df604d100968b737f2cb6076c6
++https://conda.anaconda.org/conda-forge/linux-64/wget-1.21.4-hda4d442_0.conda#361e96b664eac64a33c20dfd11affbff
++https://conda.anaconda.org/conda-forge/noarch/wheel-0.45.1-pyhd8ed1ab_1.conda#75cb7132eb58d97896e173ef12ac9986
++https://conda.anaconda.org/conda-forge/linux-64/xz-5.8.3-ha02ee65_1.conda#36a079606b3aaf9d726211825f182452
++https://conda.anaconda.org/conda-forge/linux-64/xz-gpl-tools-5.8.3-ha02ee65_1.conda#137db930adb0b3c5407485e0e1a50cfa
++https://conda.anaconda.org/conda-forge/linux-64/xz-tools-5.8.3-hb03c661_1.conda#10d693a2db6e8339e4eebcb3a3dae88d
++https://conda.anaconda.org/conda-forge/linux-64/zlib-1.2.13-h4ab18f5_6.conda#559d338a4234c2ad6e676f460a093e67
++https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.6-ha6fb4c9_0.conda#4d056880988120e29d75bfff282e0f45
+--- a/envs/plasme.yml
++++ b/envs/plasme.yml
+@@ -1,6 +1,17 @@
+ name: autoplasm-plasme
+ channels:
++  - pytorch
+   - conda-forge
+   - bioconda
+ dependencies:
+-  - plasme>=1.1
++  # Core versions from the fixed upstream plasme.yaml, CPU build.
++  - python=3.9.15
++  - pytorch=1.11.0=py3.9_cpu_0
++  - cpuonly
++  - numpy=1.23.4
++  - pandas=1.5.2
++  - biopython=1.80
++  - diamond=2.0.15
++  - blast=2.13.0
++  - prodigal=2.6.3
++  - mkl=2021.4.0
+--- a/main.nf
++++ b/main.nf
+@@ -128,7 +128,10 @@
+     }
+     // Every enabled tool that needs a database must have it configured
+     def required = []
+-    if (selectedTools(params.plasmid_detection_tools).contains('plasme')) required << ['plasme_db', params.plasme_db]
++    if (selectedTools(params.plasmid_detection_tools).contains('plasme')) {
++        required << ['plasme_db', params.plasme_db]
++        required << ['plasme_dir', params.plasme_dir]
++    }
+     if (selectedTools(params.plasmid_detection_tools).contains('platon')) required << ['platon_db', params.platon_db]
+     if (selectedTools(params.plasmid_detection_tools).contains('plasx')) {
+         required << ['plasx_annotations', params.plasx_annotations]
+@@ -161,6 +164,13 @@
+     required.each { entry ->
+         if (!entry[1]) {
+             paramError("an enabled tool requires --${entry[0]}")
++        }
++    }
++    if (selectedTools(params.plasmid_detection_tools).contains('plasme')) {
++        def source = new File(params.plasme_dir.toString())
++        if (!source.isDirectory()) paramError('--plasme_dir must be a source directory')
++        ['PLASMe.py', 'bio_script.py', 'trans_data.py', 'trans_model.py'].each { name ->
++            if (!new File(source, name).isFile()) paramError("--plasme_dir missing source file ${name}")
+         }
+     }
+     if (!['megahit', 'metaspades'].contains(params.short_read_assembler)) {
+--- a/modules/detection/plasme.nf
++++ b/modules/detection/plasme.nf
+@@ -5,30 +5,39 @@
+ process PLASME {
+     tag { meta.id }
+     label 'process_medium'
+-    conda "${projectDir}/envs/plasme.yml"
+-    // PLASMe 无 bioconda 包（envs pin 亦无法解析），container 用 python 运行时兜底
+-    container 'quay.io/biocontainers/python:3.11'
++    conda "${moduleDir}/../../envs/plasme.yml"
++    container "${params.plasme_container ?: 'autoplasm-plasme:1.1'}"
++    containerOptions workflow.containerEngine == 'podman' ? '--userns=keep-id --user $(id -u):$(id -g)' :
++        workflow.containerEngine == 'docker' ? '--user $(id -u):$(id -g)' : ''
+ 
+     publishDir "${params.outdir}/04_plasmid_detection/plasme", mode: params.publish_dir_mode
+ 
+     input:
+     tuple val(meta), path(assembly)
+-    path plasme_db
++    path(plasme_db, stageAs: 'plasme_database')
++    path(plasme_source, stageAs: 'plasme_source')
+ 
+     output:
+     tuple val(meta), path("${meta.id}.plasme.tsv"), emit: predictions
+ 
+     tuple val(meta), path("${meta.id}.plasme.fasta"), emit: plasmid_fasta
+     tuple val(meta), path("${meta.id}.plasme_report.csv"), emit: report
++    tuple val(meta), path("${meta.id}.plasme_runtime.json"), emit: runtime
+ 
+     script:
+     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+-    def input_fasta = assembly.name.toLowerCase().endsWith('.gz') ? "${meta.id}.plasme.input.fasta" : assembly
+-    def decompress = assembly.name.toLowerCase().endsWith('.gz') ? "gzip -cd ${shellQuote.call(assembly)} > ${shellQuote.call(input_fasta)}" : ''
++    def input_fasta = 'plasme_input.fasta'
++    def prepare = assembly.name.toLowerCase().endsWith('.gz') ? "gzip -cd -- ${shellQuote.call(assembly)} > ${input_fasta}" : "ln -s -- ${shellQuote.call(assembly)} ${input_fasta}"
+     def normalizer = file("${moduleDir}/../../bin/normalize_plasme_outputs.py").text
++    def runtime = file("${moduleDir}/../../bin/plasme_runtime.py").text
+     """
+-    ${decompress}
+-    PLASMe.py ${shellQuote.call(input_fasta)} ${meta.id}.plasme -d ${shellQuote.call(plasme_db)} -t ${task.cpus}
++    ${prepare}
++    cat > plasme_runtime.py <<'PLASME_RUNTIME_PY'
++${runtime}
++PLASME_RUNTIME_PY
++    python3 plasme_runtime.py run --source-dir ${plasme_source} \\
++        --assembly ${input_fasta} --database ${plasme_db} --output ${meta.id}.plasme \\
++        --threads ${task.cpus} --runtime-record ${meta.id}.plasme_runtime.json
+     cat > normalize_plasme_outputs.py <<'PLASME_NORMALIZER_PY'
+ ${normalizer}
+ PLASME_NORMALIZER_PY
+--- a/nextflow.config
++++ b/nextflow.config
+@@ -99,6 +99,8 @@
+     gtdbtk_db           = null
+     checkm2_db          = null
+     plasme_db           = null
++    plasme_dir          = null    // fixed source checkout with PLASMe.py and its helper modules
++    plasme_container    = null    // optional OCI/SIF override; default local image built from containers/plasme
+     plasx_annotations   = null
+     plasx_model         = null
+     platon_db           = null
+--- a/subworkflows/plasmid_detection.nf
++++ b/subworkflows/plasmid_detection.nf
+@@ -27,7 +27,8 @@
+ 
+     ch_plasme = Channel.empty()
+     if (selectedTools(params.plasmid_detection_tools).contains('plasme')) {
+-        PLASME(ch_assembly, Channel.value(file(params.plasme_db, checkIfExists: true)))
++        PLASME(ch_assembly, Channel.value(file(params.plasme_db, checkIfExists: true)),
++               Channel.value(file(params.plasme_dir, checkIfExists: true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASME.out], '04_plasmid_detection', 'PLASME'))
+         ch_plasme = PLASME.out.predictions
+     }
+--- /dev/null
++++ b/tests/nextflow/plasme_native.nf
+@@ -0,0 +1,8 @@
++nextflow.enable.dsl=2
++include { PLASME } from '../../modules/detection/plasme'
++
++workflow {
++    PLASME(Channel.of(tuple([id:params.sample_id],file(params.assembly,checkIfExists:true))),
++           Channel.value(file(params.database,checkIfExists:true)),
++           Channel.value(file(params.source_dir,checkIfExists:true)))
++}
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -14,6 +14,21 @@
+ P0/P2 使用 `P0`/`P2` tag，P2 还可按平台 tag 筛选。P1 直接选择已有文件，
+ 没有为了添加 tag 修改上游测试。缺失程序、数据库或网络导致的失败必须报告为环境阻塞，
+ 不能改成 skip、更新快照或用 stub 的成功替代。`--dry-run` 只说明用例可被发现。
++
++## PLASMe 完整模型节点
++
++`nodes-detection-plasme.nf.test` 要求完整官方数据库与已建 BLAST/DIAMOND
++索引，版本和校验和见 `tests/plasme-native.lock.json`。设置三个绝对路径：
++`AUTOPLASM_PLASME_SOURCE` 为固定官方源码目录，`AUTOPLASM_PLASME_DB` 为
++准备好的 DB 目录，`AUTOPLASM_PLASME_INPUTS` 内含完整 pUTI89 的
++`pUTI89.fna` 与 `pUTI89.fna.gz`。使用 `envs/plasme.yml` 的原生环境将其
++程序放入 PATH，然后运行此文件及 `--profile native`；也可使用已构建的
++`containers/plasme/Dockerfile` 镜像和 `--profile podman`。
++
++断言要求真实 Transformer 分数、阳性 ID、完整 DNA、原始报告和运行身份。
++plain/gzip 是同一生物样本的两种编码，不计两个科学重复。writer observer、
++微型 BLAST 边界与完整模型运行分别记录，均不替代分类准确率基准。
++`tests/run_plasme_native.py` 另覆盖 Conda/容器后端及独立 BioPython 解析。
+ 
+ ## uv 隔离环境
+ 
+--- /dev/null
++++ b/tests/nf-test/nodes-detection-plasme.nf.test
+@@ -0,0 +1,85 @@
++// P3 original PLASME node with the complete locked official DB and model inference.
++// Requires AUTOPLASM_PLASME_SOURCE, AUTOPLASM_PLASME_DB and AUTOPLASM_PLASME_INPUTS.
++// Plain/gzip are one biological specimen; neither proves sensitivity/specificity.
++nextflow_process {
++    name 'P3 real node: PLASME'
++    script '../../modules/detection/plasme.nf'
++    process 'PLASME'
++    tag 'P3'
++    tag 'detection'
++    tag 'backend-native'
++
++    test('complete pUTI89 plain runs the real Transformer') {
++        when {
++            process {
++                """
++                input[0] = [[id: 'pUTI89'], file("${System.getenv('AUTOPLASM_PLASME_INPUTS')}/pUTI89.fna", checkIfExists: true)]
++                input[1] = file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true)
++                input[2] = file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true)
++                """
++            }
++        }
++        then {
++            assert process.success
++            assert process.out.predictions.size() == 1
++            assert process.out.plasmid_fasta.size() == 1
++            assert process.out.report.size() == 1
++            assert process.out.runtime.size() == 1
++            assert process.out.predictions[0][0].id == 'pUTI89'
++            def rows = path(process.out.predictions[0][1]).text.readLines()
++            assert rows.size() == 2
++            assert rows[0].startsWith('contig_id\t')
++            assert rows[1].startsWith('NC_007941.1\t')
++            def raw = path(process.out.report[0][1]).text.readLines()
++            assert raw.size() == 2
++            assert raw[1].startsWith('NC_007941.1\t')
++            def observed = path(process.out.plasmid_fasta[0][1]).text.readLines()
++            def original = new File(System.getenv('AUTOPLASM_PLASME_INPUTS'), 'pUTI89.fna').readLines()
++            assert observed.findAll { !it.startsWith('>') }.join('') == original.findAll { !it.startsWith('>') }.join('')
++            assert observed[0].tokenize(' ')[0] == '>NC_007941.1'
++            def runtime = new groovy.json.JsonSlurper().parseText(path(process.out.runtime[0][1]).text)
++            assert runtime.exit_code == 0
++            assert runtime.versions.torch == '1.11.0'
++            assert runtime.local_source_patch.applied
++            assert runtime.candidate_records == 1
++            assert runtime.transformer_scores == 1
++        }
++    }
++
++    test('complete pUTI89 gzip runs the real Transformer') {
++        when {
++            process {
++                """
++                input[0] = [[id: 'pUTI89'], file("${System.getenv('AUTOPLASM_PLASME_INPUTS')}/pUTI89.fna.gz", checkIfExists: true)]
++                input[1] = file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true)
++                input[2] = file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true)
++                """
++            }
++        }
++        then {
++            assert process.success
++            assert process.out.predictions.size() == 1
++            assert process.out.plasmid_fasta.size() == 1
++            assert process.out.report.size() == 1
++            assert process.out.runtime.size() == 1
++            assert process.out.predictions[0][0].id == 'pUTI89'
++            def rows = path(process.out.predictions[0][1]).text.readLines()
++            assert rows.size() == 2
++            assert rows[0].startsWith('contig_id\t')
++            assert rows[1].startsWith('NC_007941.1\t')
++            def raw = path(process.out.report[0][1]).text.readLines()
++            assert raw.size() == 2
++            assert raw[1].startsWith('NC_007941.1\t')
++            def observed = path(process.out.plasmid_fasta[0][1]).text.readLines()
++            def original = new File(System.getenv('AUTOPLASM_PLASME_INPUTS'), 'pUTI89.fna').readLines()
++            assert observed.findAll { !it.startsWith('>') }.join('') == original.findAll { !it.startsWith('>') }.join('')
++            assert observed[0].tokenize(' ')[0] == '>NC_007941.1'
++            def runtime = new groovy.json.JsonSlurper().parseText(path(process.out.runtime[0][1]).text)
++            assert runtime.exit_code == 0
++            assert runtime.versions.torch == '1.11.0'
++            assert runtime.local_source_patch.applied
++            assert runtime.candidate_records == 1
++            assert runtime.transformer_scores == 1
++        }
++    }
++}
+--- /dev/null
++++ b/tests/plasme-native.lock.json
+@@ -0,0 +1,538 @@
++{
++  "schema": 1,
++  "tool": "PLASMe",
++  "version": "1.1",
++  "source": {
++    "repository": "https://github.com/HubertTang/PLASMe",
++    "commit": "4405d5aa82065cf23a9d78de8b70ba261342ad40",
++    "archive_sha256": "2e716e5ad25d08d271a14b4231798eb3f9f104bb73f271e4098b3cec6c062104",
++    "files": {
++      "PLASMe.py": {
++        "path": "PLASMe.py",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "7f0718071849b73111a4e641b27e0f528d3356a2",
++        "size": 22052,
++        "url": "https://api.github.com/repos/HubertTang/PLASMe/git/blobs/7f0718071849b73111a4e641b27e0f528d3356a2",
++        "sha256": "d9f9f3d1f2f2e2e420d73bb7d0ad21862f62c7fa54ce5a284abaae4ee3fd4f09"
++      },
++      "PLASMe_db.py": {
++        "path": "PLASMe_db.py",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "d4123489ec8e02703aafb22664396dd6c039dc68",
++        "size": 5633,
++        "url": "https://api.github.com/repos/HubertTang/PLASMe/git/blobs/d4123489ec8e02703aafb22664396dd6c039dc68",
++        "sha256": "a91aef8c1694c87beaa0adb62c9b8e0224e753a3de3f3ca3692956f91e4d6514"
++      },
++      "README.md": {
++        "path": "README.md",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "65c6c16366b93ad5f113c8540a394434a821b6bf",
++        "size": 6954,
++        "url": "https://api.github.com/repos/HubertTang/PLASMe/git/blobs/65c6c16366b93ad5f113c8540a394434a821b6bf",
++        "sha256": "0a5d28de385ee83cc76504e20e3a16180c1473c29846803442e1f7c22398a0d9"
++      },
++      "bio_script.py": {
++        "path": "bio_script.py",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "80d401c9780906cc6c89fbae8f33aa5065134303",
++        "size": 4932,
++        "url": "https://api.github.com/repos/HubertTang/PLASMe/git/blobs/80d401c9780906cc6c89fbae8f33aa5065134303",
++        "sha256": "db7a2363e33fa6cdecee486ba20116e8391402a63b56ab06455eee63cedb4e3c"
++      },
++      "plasme.yaml": {
++        "path": "plasme.yaml",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "da2e64e73a23e7a03accb96bb4e545be44871f78",
++        "size": 2559,
++        "url": "https://api.github.com/repos/HubertTang/PLASMe/git/blobs/da2e64e73a23e7a03accb96bb4e545be44871f78",
++        "sha256": "b8d8b559337f3045afe6b23f8654f89ec8abdd9817045c0d8712b4f0a13f79e7"
++      },
++      "test.fasta": {
++        "path": "test.fasta",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "d040f814022e5a49fb956102ea22a451e5971947",
++        "size": 19153403,
++        "url": "https://api.github.com/repos/HubertTang/PLASMe/git/blobs/d040f814022e5a49fb956102ea22a451e5971947",
++        "sha256": "4bcbf904125b65e8b9f2bd3cc02f591ff54a72719aab9215edad212e8b495338"
++      },
++      "train_pc_model.py": {
++        "path": "train_pc_model.py",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "96f3850724e30e2f1e26c03a1252ac570f8b171b",
++        "size": 16459,
++        "url": "https://api.github.com/repos/HubertTang/PLASMe/git/blobs/96f3850724e30e2f1e26c03a1252ac570f8b171b",
++        "sha256": "2de241009fb4c3632f52524c6206bd944ae32b87d29523a6a69dcbf9ca46afaa"
++      },
++      "trans_data.py": {
++        "path": "trans_data.py",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "4c00eed109baeb6b75c48487419d49f27989308d",
++        "size": 5358,
++        "url": "https://api.github.com/repos/HubertTang/PLASMe/git/blobs/4c00eed109baeb6b75c48487419d49f27989308d",
++        "sha256": "124c9c6d56dcade96fb8b83af09aa291d74c4eda250afdb79a44a2d46648dafe"
++      },
++      "trans_model.py": {
++        "path": "trans_model.py",
++        "mode": "100644",
++        "type": "blob",
++        "sha": "ea08915dd514eeb32d9fb974db3ecf13d4c5ed47",
++        "size": 6663,
++        "url": "https://api.github.com/repos/HubertTang/PLASMe/git/blobs/ea08915dd514eeb32d9fb974db3ecf13d4c5ed47",
++        "sha256": "242b9ae44549958d1eb50a97436ebdb1e1a682e0a3eb95e97e413bb69de07544"
++      }
++    }
++  },
++  "database": {
++    "zenodo_record": "8046934",
++    "archive_bytes": 13632339031,
++    "archive_md5": "b32263ad4fb20c04044700170b1609ef",
++    "archive_sha256": "3375080dec8e6151566816824bd7c712ee36462a472516335cb5d5015a2f36f2",
++    "archive_members": [
++      {
++        "path": "DB/plsdb_taxon.tsv",
++        "bytes": 966044,
++        "crc32": "0x61f6758c",
++        "sha256": "9baafdad32a4b2d509c13f60cede8c0db8895828e26aadda54c5db1b58b5ddcb"
++      },
++      {
++        "path": "DB/plsdb_Mar30.clusters.p2a",
++        "bytes": 95233781,
++        "crc32": "0x9eea99de",
++        "sha256": "aa085f63a1331b7c9ce935b446c2287e2d07e83f7fc4ea1f755a6fd27f89e2bb"
++      },
++      {
++        "path": "DB/plas_chrom_thres.csv",
++        "bytes": 4106302,
++        "crc32": "0x740f7721",
++        "sha256": "902f4e88773fa255854f603998a261e1b0483b3fd3145f9ac2b093114c793ff9"
++      },
++      {
++        "path": "DB/plas_overlap.csv",
++        "bytes": 3556525,
++        "crc32": "0xdc710381",
++        "sha256": "6cecf218667d6b1377530af087aac0a8db9dbf86924114c4d997e226bc89f70e"
++      },
++      {
++        "path": "DB/plsdb.zip",
++        "bytes": 1230738534,
++        "crc32": "0x32897863",
++        "sha256": "5f6ffe34e3a5b94510af5cc4aa1a603d25bce86054df400e5833a65b0485b61b"
++      },
++      {
++        "path": "DB/trans_model/Enterobacterales.pt",
++        "bytes": 372192285,
++        "crc32": "0x6513fce",
++        "sha256": "802fa2d4de21cf4f2ba686f091e412616925f13263ed21026a0366ee945b8712"
++      },
++      {
++        "path": "DB/trans_model/unified.pt",
++        "bytes": 372192285,
++        "crc32": "0x418b01a7",
++        "sha256": "1ddb20b3755de2ce6799aca73b93262d81c7537a510e92738956ddb2ce52c7e9"
++      },
++      {
++        "path": "DB/trans_model/Lactobacillales.pt",
++        "bytes": 372192285,
++        "crc32": "0xd827c976",
++        "sha256": "5f96d6b5b51d56db8a57b8776f7eb68900f4cafd098caad411adf6d2cbaf5a25"
++      },
++      {
++        "path": "DB/trans_model/Bacillales.pt",
++        "bytes": 372192285,
++        "crc32": "0xca71f9d9",
++        "sha256": "7c20dc4355f0f58dd78d191414fb1238615888c37efda579306782a11072c88e"
++      },
++      {
++        "path": "DB/trans_model/Pseudomonadales.pt",
++        "bytes": 372192285,
++        "crc32": "0xaa297604",
++        "sha256": "a8dbcb1db7813567800240ad22b7f009f7826300cb9fd124556b5ac053f4c03a"
++      },
++      {
++        "path": "DB/trans_model/Rhodobacterales.pt",
++        "bytes": 372192285,
++        "crc32": "0x4101c837",
++        "sha256": "577acea2a0c61df5354c3bca6e763a0088c0092c26560649f36245fdca5738fa"
++      },
++      {
++        "path": "DB/trans_model/Hyphomicrobiales.pt",
++        "bytes": 372192285,
++        "crc32": "0x53feda1e",
++        "sha256": "93ebde8a91b34599c0f980581a58880c8119ea57cd1c789427652bb9bcef3938"
++      },
++      {
++        "path": "DB/trans_model/Spirochaetales.pt",
++        "bytes": 372192285,
++        "crc32": "0x9e2dfd19",
++        "sha256": "5fedd78c8c697f6a24809632f440a81c4f25d76d152350801a24f90506745c30"
++      },
++      {
++        "path": "DB/trans_model/Corynebacteriales.pt",
++        "bytes": 372192285,
++        "crc32": "0xf5a1413c",
++        "sha256": "97aa5498cfcf90a43d57b698d70eddf21254cfd27aba2cb5e1aaf00691bd0e1b"
++      },
++      {
++        "path": "DB/trans_model/Burkholderiales.pt",
++        "bytes": 372192285,
++        "crc32": "0x59c600c4",
++        "sha256": "4c59990b12bca48b20159028f4a9cff5b3ee330449c2cdce5890e72eb2bf2f49"
++      },
++      {
++        "path": "DB/trans_model/Xanthomonadales.pt",
++        "bytes": 372192285,
++        "crc32": "0xb8a1a629",
++        "sha256": "a8e69c643bd411c30e2f35b431adec355e5f5eaea7ec5c4507fe075f538f5edc"
++      },
++      {
++        "path": "DB/trans_model/Campylobacterales.pt",
++        "bytes": 372192285,
++        "crc32": "0x3835ef84",
++        "sha256": "0720693ab47c7b14c492619b4f02a36d1bccc169bff8bc64390c6f1a0c48dee6"
++      },
++      {
++        "path": "DB/trans_model/Thiotrichales.pt",
++        "bytes": 372192285,
++        "crc32": "0xca85ddd1",
++        "sha256": "2539ca6495d8675aae22174084ebf9e4108319a60dae8d09701d8a67c8766d63"
++      },
++      {
++        "path": "DB/trans_model/Vibrionales.pt",
++        "bytes": 372192285,
++        "crc32": "0x29fc6c4e",
++        "sha256": "f17cd6d67e53063c4f2ed236056fa65eb6ee162017d3d554d3d304778f6cb671"
++      },
++      {
++        "path": "DB/trans_model/Aeromonadales.pt",
++        "bytes": 372192285,
++        "crc32": "0xf70a2c98",
++        "sha256": "c4a604e8a20b1fdabc7a5fa3dc5ba2f2faa99c52eba038fa83e9f2a2a097040e"
++      },
++      {
++        "path": "DB/trans_model/Sphingomonadales.pt",
++        "bytes": 372192285,
++        "crc32": "0xcedb8842",
++        "sha256": "a4c60f34e8d83682dbfb09df22e2d5718490d90366e1248a8761211a784ac5cf"
++      },
++      {
++        "path": "DB/trans_model/Eubacteriales.pt",
++        "bytes": 372192285,
++        "crc32": "0x4c7635ce",
++        "sha256": "491c3c0e36cfc194d3a43fd60d981825a170129425c7d4d931e0d433b7cf7713"
++      },
++      {
++        "path": "DB/trans_model/Rhodospirillales.pt",
++        "bytes": 372192285,
++        "crc32": "0xc22c7494",
++        "sha256": "d7ea44628751cd9223eca1515fa4a716449a81c2c81ae05ea53422b9bc54fed2"
++      },
++      {
++        "path": "DB/trans_model/Micrococcales.pt",
++        "bytes": 372192285,
++        "crc32": "0x2cc83114",
++        "sha256": "d04809b1a0f207612e5559108aef8c8511dd91614f8302ee551a6a4e5f8ac7e8"
++      },
++      {
++        "path": "DB/trans_model/Streptomycetales.pt",
++        "bytes": 372192285,
++        "crc32": "0x82866855",
++        "sha256": "5c93715ec54d9585aa3fdcd5236d867b8ae3939cb3dfb4c9999f956c87587535"
++      },
++      {
++        "path": "DB/trans_model/Nostocales.pt",
++        "bytes": 372192285,
++        "crc32": "0x844ff3ac",
++        "sha256": "f96b08791a5bd801e66c1161185f57e5dea17eca831a971f004c4d887b6690af"
++      },
++      {
++        "path": "DB/trans_model/Pasteurellales.pt",
++        "bytes": 372192285,
++        "crc32": "0x3ab1f567",
++        "sha256": "d481b054843d674e987fc313a5d6abb70daa15967ce81a521de62a64f7ddfd13"
++      },
++      {
++        "path": "DB/trans_model/Neisseriales.pt",
++        "bytes": 372192285,
++        "crc32": "0xa036981d",
++        "sha256": "772946b3d0b5fb29be4098d7068d05f2235f4b25e360e0b02d2e7f124d3a5ddd"
++      },
++      {
++        "path": "DB/trans_model/Bacteroidales.pt",
++        "bytes": 372192285,
++        "crc32": "0xda835950",
++        "sha256": "a271dff86e6055aa87b44d5015480e5955c6883696571a05d0853f88e1d7a205"
++      },
++      {
++        "path": "DB/trans_model/Legionellales.pt",
++        "bytes": 372192285,
++        "crc32": "0x959a1de3",
++        "sha256": "ef3935fe7fc183f63c31e30abe29685e6ccfefb7c37c5f6d09bb38c65194a9f7"
++      },
++      {
++        "path": "DB/trans_model/Synechococcales.pt",
++        "bytes": 372192285,
++        "crc32": "0xd9ddca39",
++        "sha256": "e673d6db515c23129f265a36f633eb77e9db112a224a71d9e6d6dc6bc29ca6e2"
++      },
++      {
++        "path": "DB/trans_model/Cytophagales.pt",
++        "bytes": 372192285,
++        "crc32": "0x86297501",
++        "sha256": "5a196e15d04f61dda9c73aa1b845a9acbc58c1c1532cf89b54fa45736efe2d8f"
++      },
++      {
++        "path": "DB/trans_model/Mycoplasmatales.pt",
++        "bytes": 372192285,
++        "crc32": "0xdeb84d72",
++        "sha256": "afad85c5c3cfc5e59acbd19d825e8499489eb7eed8c80f0449c1fe5576e7a637"
++      },
++      {
++        "path": "DB/trans_model/Alteromonadales.pt",
++        "bytes": 372192285,
++        "crc32": "0x9791b572",
++        "sha256": "df59be61911bd898dc0d0befb326c2730d8bb375785c977c9fa84a84a6956d81"
++      },
++      {
++        "path": "DB/trans_model/Chlamydiales.pt",
++        "bytes": 372192285,
++        "crc32": "0x63f06e4b",
++        "sha256": "6371c1676a14e94262f57fe127a417f2ada2f90c121a78033764599dea89bf06"
++      },
++      {
++        "path": "DB/trans_model/Chroococcales.pt",
++        "bytes": 372192285,
++        "crc32": "0xfac2c821",
++        "sha256": "e69584f3716a084413a10f3990f03ec6d076aa245700a433c2dd766fd93f674a"
++      },
++      {
++        "path": "DB/trans_model/Flavobacteriales.pt",
++        "bytes": 372192285,
++        "crc32": "0x2d1fb0ae",
++        "sha256": "0cfcf127dba77e31422afefa92e6805522d10bdfc7b389b060966ce2bd75fbe3"
++      },
++      {
++        "path": "DB/trans_model/Thermales.pt",
++        "bytes": 372192285,
++        "crc32": "0xed3d3ff5",
++        "sha256": "a2efd54c3b6d344d9c39e90efca2735412a51aa254bf0ffaf0280da6e8b9a47e"
++      },
++      {
++        "path": "DB/trans_model/Entomoplasmatales.pt",
++        "bytes": 372192285,
++        "crc32": "0x2d9e609a",
++        "sha256": "d3991711f4eac836b7b73d363795f826edfdc26f1678e868763b248fb3a31e34"
++      },
++      {
++        "path": "DB/trans_model/Deinococcales.pt",
++        "bytes": 372192285,
++        "crc32": "0x12d0453",
++        "sha256": "201e5443c728639513a71956ef54cb4832d26989987706be53bde043d0ef8589"
++      },
++      {
++        "path": "DB/trans_model/other.pt",
++        "bytes": 372192285,
++        "crc32": "0xdfcc2828",
++        "sha256": "c3a9b2fe74ef2bb7864439e6c60221787d47a33dea6803ee8a02dbc53a9dae1a"
++      }
++    ],
++    "nested_sequence_members": [
++      {
++        "path": "plsdb_Mar30.fna",
++        "bytes": 2388938974,
++        "crc32": "0x4e414df4",
++        "sha256": "e4df450d53f6473cf7ce766df3f8c7e0333c2ca3446a9c4a58908a9e4bd67089"
++      },
++      {
++        "path": "plsdb_Mar30.fna.aa",
++        "bytes": 1038840699,
++        "crc32": "0x8a3d6ea0",
++        "sha256": "c2be4f63a720c3ec056673f7d1ab5a455dc14efda070630f9b422b93cd6858aa"
++      }
++    ],
++    "index_files": [
++      {
++        "path": "plsdb_Mar30.dmnd",
++        "bytes": 1097751979,
++        "sha256": "b20722547e20b25d585840121cd4b30451bebe87362638f7f61996dd83d3f8f6"
++      },
++      {
++        "path": "plsdb_Mar30.ndb",
++        "bytes": 20480,
++        "sha256": "25bb9c1b4f7676523c73e14225f22ac6183f0012976679b527f14ecef27f60c0"
++      },
++      {
++        "path": "plsdb_Mar30.ntf",
++        "bytes": 16384,
++        "sha256": "67982e4d7b1490b09cce06e7c29175c6bd011cd542cfacb1a1c310084a50821a"
++      },
++      {
++        "path": "plsdb_Mar30.nin",
++        "bytes": 397608,
++        "sha256": "e9124ed58e6151b96c13dd75536692700ae420f02632f5a7d4f1e986eb0eee6a"
++      },
++      {
++        "path": "plsdb_Mar30.nhr",
++        "bytes": 2529070,
++        "sha256": "7759bb9e1f2c598848066b088ef4f5b8d6a264febe97e7a7c9ef308c525a9c4d"
++      },
++      {
++        "path": "plsdb_Mar30.nsq",
++        "bytes": 597157831,
++        "sha256": "f633d099a510ebea1d64d1924995786b7fbf383dcb68c0e4c5d027342810bb65"
++      },
++      {
++        "path": "plsdb_Mar30.not",
++        "bytes": 397508,
++        "sha256": "b6231d6c02101c0fd31341a2640b7665497eae8e6c033f2569dbb3ba1c08e176"
++      },
++      {
++        "path": "plsdb_Mar30.nto",
++        "bytes": 132504,
++        "sha256": "8c11c888ee6425eeddc5e81304f45c55e9264f9311e6956bc29d3fe4ac549316"
++      },
++      {
++        "path": "plsdb_Mar30.njs",
++        "bytes": 502,
++        "sha256": "28de78914dc7f672cc399fde60551762a8d97f9d81c9eab0797d8804d5630aec"
++      }
++    ]
++  },
++  "environment": {
++    "platform": "linux-64",
++    "explicit_url_md5": [
++      "https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-8_kmp_llvm.conda#b4d1b93dd1dab4eea23395fd5e5b357d",
++      "https://conda.anaconda.org/conda-forge/linux-64/biopython-1.80-py39hb9d737c_0.conda#3dbf17a57281fc44c8dd45a1f36eed13",
++      "https://conda.anaconda.org/conda-forge/linux-64/blas-2.112-mkl.tar.bz2#6d538161387106773ce03e3785cb0b28",
++      "https://conda.anaconda.org/conda-forge/linux-64/blas-devel-3.9.0-12_linux64_mkl.tar.bz2#ba8170bb8a334acfc89f2fa1d54acda7",
++      "https://conda.anaconda.org/bioconda/linux-64/blast-2.13.0-hf3cf87c_1.tar.bz2#56b9bbd9595b07b30023b805aff30a9c",
++      "https://conda.anaconda.org/conda-forge/linux-64/boost-cpp-1.74.0-h75c5d50_8.tar.bz2#9c5996e7741d205bc76a518173ff6b82",
++      "https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_10.conda#e675fabcf81499adc7edf58124fb1e01",
++      "https://conda.anaconda.org/conda-forge/linux-64/c-ares-1.34.9-hebe6cf0_0.conda#78b505af04bf7a87ca957ef0cb5946f5",
++      "https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.10.19-hbd8a1cb_0.conda#a1d1bf676059d2863f000d5e2777743f",
++      "https://conda.anaconda.org/pytorch/noarch/cpuonly-2.0-0.tar.bz2#1cf3a59ef90a4078c253e3b02c272065",
++      "https://conda.anaconda.org/conda-forge/linux-64/curl-7.88.1-hdc1c0ab_1.conda#2016c398f234cfa354ea704c6731b5d5",
++      "https://conda.anaconda.org/bioconda/linux-64/diamond-2.0.15-hb97b32f_1.tar.bz2#6951be09685f9979086684bfcef47932",
++      "https://conda.anaconda.org/bioconda/linux-64/entrez-direct-26.0-h1079eea_0.conda#eb37fd2fbf2bc8192c550999a3bbc5c3",
++      "https://conda.anaconda.org/conda-forge/linux-64/icu-70.1-h27087fc_0.tar.bz2#87473a15119779e021c314249d4b4aed",
++      "https://conda.anaconda.org/conda-forge/linux-64/keyutils-1.6.3-h7cc23a3_1.conda#ba55d1b89fd7775e67de8291029b4059",
++      "https://conda.anaconda.org/conda-forge/linux-64/krb5-1.20.1-h81ceb04_0.conda#89a41adce7106749573d883b2f657d78",
++      "https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.46.1-bootstrap_ha15bf96_3.conda#e82d33173910cc8da8da4e51d732ff3e",
++      "https://conda.anaconda.org/conda-forge/linux-64/libblas-3.9.0-12_linux64_mkl.tar.bz2#7c015ce76785c39d15c0f93c30cbb644",
++      "https://conda.anaconda.org/conda-forge/linux-64/libcblas-3.9.0-12_linux64_mkl.tar.bz2#4491ca8c3b6436e3377635d86faa8c44",
++      "https://conda.anaconda.org/conda-forge/linux-64/libcurl-7.88.1-hdc1c0ab_1.conda#3d1189864d1c0ed2a5919cb067b5903d",
++      "https://conda.anaconda.org/conda-forge/linux-64/libedit-3.1.20260512-pl5321h373387f_0.conda#27dbd7e2984b8fe48e069379636ccfdd",
++      "https://conda.anaconda.org/conda-forge/linux-64/libev-4.33-h280c20c_3.conda#7bc31538d6e3fb349e897353969237ec",
++      "https://conda.anaconda.org/conda-forge/linux-64/libffi-3.7.0-h81df57d_1.conda#6525a0b06aa4fd390795f0740636a9dd",
++      "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda#735629b400b70eeab21a2ba8f5b1c2ce",
++      "https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-16.2.0-h69a702a_7.conda#2005515ac9340f816fb2ac7e83afe553",
++      "https://conda.anaconda.org/conda-forge/linux-64/libgfortran-16.2.0-h69a702a_7.conda#3a8d285f5f22138ef826ad54cf267e73",
++      "https://conda.anaconda.org/conda-forge/linux-64/libgfortran-ng-16.2.0-h69a702a_7.conda#a31f744c0c83d31dacf9c01b2e3c12a2",
++      "https://conda.anaconda.org/conda-forge/linux-64/libgfortran5-16.2.0-h6b99dfc_7.conda#7719ed7be38ad8c492c4bd5cc2bce0c4",
++      "https://conda.anaconda.org/conda-forge/linux-64/libhwloc-2.9.1-hd6dc26d_0.conda#a3ede1b8e47f993ff1fe3908b23bb307",
++      "https://conda.anaconda.org/conda-forge/linux-64/libiconv-1.18-h0cb94f2_3.conda#f92233bf33e24a25668bb2119e2c51f9",
++      "https://conda.anaconda.org/conda-forge/linux-64/libidn2-2.3.8-hfac485b_1.conda#842a81de672ddcf476337c8bde3cad33",
++      "https://conda.anaconda.org/conda-forge/linux-64/liblapack-3.9.0-12_linux64_mkl.tar.bz2#bb8ef22697afa520822f579c3b72d2e0",
++      "https://conda.anaconda.org/conda-forge/linux-64/liblapacke-3.9.0-12_linux64_mkl.tar.bz2#2ee2c73c1b7343665bc43c42d025f00d",
++      "https://conda.anaconda.org/conda-forge/linux-64/liblzma-5.8.3-hb03c661_1.conda#1390b7c5ac0b1d8e447bc5efa6d3c8c2",
++      "https://conda.anaconda.org/conda-forge/linux-64/liblzma-devel-5.8.3-hb03c661_1.conda#6d83d6a332c19424e9e66b69b180ec11",
++      "https://conda.anaconda.org/conda-forge/linux-64/libnghttp2-1.58.0-h47da74e_1.conda#700ac6ea6d53d5510591c4344d5c989a",
++      "https://conda.anaconda.org/conda-forge/linux-64/libnsl-2.0.1-hb9d3cd8_1.conda#d864d34357c3b65a4b731f78c0801dc4",
++      "https://conda.anaconda.org/conda-forge/linux-64/libsqlite-3.46.0-hde9e2c9_0.conda#18aa975d2094c34aef978060ae7da7d8",
++      "https://conda.anaconda.org/conda-forge/linux-64/libssh2-1.11.0-h0841786_0.conda#1f5a58e686b13bcfde88b93f547d23fe",
++      "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda#9b6707e0caca917fa6ea9ee473f37a5d",
++      "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-16.2.0-hdf11a46_7.conda#25a23bde5e26d548374f3e02b4669670",
++      "https://conda.anaconda.org/conda-forge/linux-64/libunistring-0.9.10-h7f98852_0.tar.bz2#7245a044b4a1980ed83196176b78b73a",
++      "https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.42.4-hcfc3c73_0.conda#54a948337e66706380ff24d6b5fde63f",
++      "https://conda.anaconda.org/conda-forge/linux-64/libuv-1.52.1-h280c20c_1.conda#01c4ed87826af55996768af6dbc936b4",
++      "https://conda.anaconda.org/conda-forge/linux-64/libxcrypt-4.4.38-h280c20c_0.conda#f7a7ff5a6ab331e037abd34f379a631d",
++      "https://conda.anaconda.org/conda-forge/linux-64/libxml2-2.10.3-hca2bb57_4.conda#bb808b654bdc3c783deaf107a2ffb503",
++      "https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.2.13-h4ab18f5_6.conda#27329162c0dc732bcf67a4e0cd488125",
++      "https://conda.anaconda.org/conda-forge/linux-64/llvm-openmp-23.1.4-h7148c6a_0.conda#ad441557f951f09d7e4c79731a6a34dc",
++      "https://conda.anaconda.org/conda-forge/linux-64/mkl-2021.4.0-h8d4b97c_729.tar.bz2#584dc18ddedfda6273c25a728389189e",
++      "https://conda.anaconda.org/conda-forge/linux-64/mkl-devel-2021.4.0-ha770c72_730.tar.bz2#b3b6612363b1a888a06195890d9175ce",
++      "https://conda.anaconda.org/conda-forge/linux-64/mkl-include-2021.4.0-h8d4b97c_729.tar.bz2#36681f8545e25efcb7dfec9335757822",
++      "https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda#ee6c0cd80a60961a1f48aa3e0b91f986",
++      "https://conda.anaconda.org/conda-forge/linux-64/numpy-1.23.4-py39h3d75532_1.tar.bz2#ba4f1c0466d4ba7f53090c150fc88434",
++      "https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.5-h781a0a9_0.conda#5a51a2ea653f120240b1a9bf76e0aae9",
++      "https://conda.anaconda.org/conda-forge/linux-64/pandas-1.5.2-py39h2ad29b5_2.conda#5fb2814013a84e9a59d7a9ddf803c6b4",
++      "https://conda.anaconda.org/conda-forge/linux-64/pcre-8.45-h9c3ff4c_0.tar.bz2#c05d1820a6d34ff07aaaab7a9b7eddaa",
++      "https://conda.anaconda.org/conda-forge/linux-64/perl-5.32.1-10_h7cc23a3_perl5.conda#dfa988f7a513f0f441ba36d128b5d327",
++      "https://conda.anaconda.org/bioconda/noarch/perl-archive-tar-3.14-pl5321hcbfc158_0.conda#290aa04cc6fe79133433eb72de48edc0",
++      "https://conda.anaconda.org/conda-forge/noarch/perl-carp-1.50-pl5321hd8ed1ab_0.tar.bz2#bdddc03e28019b902da71b722f2288d7",
++      "https://conda.anaconda.org/conda-forge/noarch/perl-common-sense-3.75-pl5321hd8ed1ab_0.tar.bz2#ef70dc77e8b10bbb62f5e843b401ef0e",
++      "https://conda.anaconda.org/conda-forge/linux-64/perl-compress-raw-bzip2-2.214-pl5321hda65f42_0.conda#1ec33b9f74a71c17cc5579e35027832a",
++      "https://conda.anaconda.org/conda-forge/linux-64/perl-compress-raw-zlib-2.214-pl5321h4dac143_0.conda#943e7033e6f709adf0d89a3af51ab81b",
++      "https://conda.anaconda.org/conda-forge/linux-64/perl-encode-3.24-pl5321hb03c661_0.conda#35776d4c5766e9d98754d1e7530c2961",
++      "https://conda.anaconda.org/conda-forge/noarch/perl-exporter-5.74-pl5321hd8ed1ab_0.tar.bz2#fd2eac4e35f8c970870a3961c1df3e29",
++      "https://conda.anaconda.org/conda-forge/noarch/perl-exporter-tiny-1.002002-pl5321hd8ed1ab_0.tar.bz2#48d709826875be1f2c108d3d1d8efec7",
++      "https://conda.anaconda.org/conda-forge/noarch/perl-extutils-makemaker-7.70-pl5321hd8ed1ab_0.conda#ec3e57ed34f7765bfc7054a05868ce5d",
++      "https://conda.anaconda.org/bioconda/linux-64/perl-io-compress-2.216-pl5321h503566f_0.conda#0784cb3c120f934a5fe61961c8238330",
++      "https://conda.anaconda.org/bioconda/noarch/perl-io-zlib-1.15-pl5321hdfd78af_1.tar.bz2#db92645dabe9467115729e4479841b5d",
++      "https://conda.anaconda.org/bioconda/noarch/perl-json-4.11-pl5321hdfd78af_0.conda#56411755d21870a9ec16c76fd7b66dba",
++      "https://conda.anaconda.org/bioconda/linux-64/perl-json-xs-4.04-pl5321h9948957_0.conda#7916b2e794393b3389535ba750f489da",
++      "https://conda.anaconda.org/bioconda/noarch/perl-list-moreutils-0.430-pl5321hdfd78af_0.tar.bz2#7f04c79d216d0f8e7b6d5a51de4aafa0",
++      "https://conda.anaconda.org/bioconda/linux-64/perl-list-moreutils-xs-0.430-pl5321h7b50bb2_5.tar.bz2#9192770eb08524038c3fcf24e915b10c",
++      "https://conda.anaconda.org/conda-forge/noarch/perl-parent-0.243-pl5321hd8ed1ab_0.conda#314caa3b72d65f8078d426c6721dcacc",
++      "https://conda.anaconda.org/conda-forge/linux-64/perl-pathtools-3.75-pl5321hb9d3cd8_2.conda#03d88c89dfac8a26adcdeff242f94007",
++      "https://conda.anaconda.org/conda-forge/linux-64/perl-scalar-list-utils-1.70-pl5321hb03c661_0.conda#046486011bf7674e3c2f2a1513ac4f3d",
++      "https://conda.anaconda.org/conda-forge/linux-64/perl-storable-3.15-pl5321hb9d3cd8_2.conda#212f63a5c7c753ecf0a74c349b9270c5",
++      "https://conda.anaconda.org/bioconda/noarch/perl-types-serialiser-1.01-pl5321hdfd78af_0.tar.bz2#cfc65753e827bbef80c00eaa395f6ae7",
++      "https://conda.anaconda.org/conda-forge/noarch/pip-25.2-pyh8b19718_0.conda#dfce4b2af4bfe90cdcaf56ca0b28ddf5",
++      "https://conda.anaconda.org/bioconda/linux-64/prodigal-2.6.3-h7b50bb2_10.tar.bz2#66cc94ede7d4cd483a0412adaf9532ce",
++      "https://conda.anaconda.org/conda-forge/linux-64/python-3.9.15-hba424b6_0_cpython.conda#7b9485fce17fac2dd4aca6117a9936c2",
++      "https://conda.anaconda.org/conda-forge/noarch/python-dateutil-2.9.0.post0-pyhe01879c_2.conda#5b8d21249ff20967101ffa321cab24e8",
++      "https://conda.anaconda.org/conda-forge/noarch/python_abi-3.9-9_cp39.conda#9615f53c60b6d766f740be806484bad7",
++      "https://conda.anaconda.org/pytorch/linux-64/pytorch-1.11.0-py3.9_cpu_0.tar.bz2#d272501b0cb9814eccca2358d5ee22bd",
++      "https://conda.anaconda.org/pytorch/noarch/pytorch-mutex-1.0-cpu.tar.bz2#49565ed726991fd28d08a39885caa88d",
++      "https://conda.anaconda.org/conda-forge/noarch/pytz-2025.2-pyhd8ed1ab_0.conda#bc8e3267d44011051f2eb14d22fb0960",
++      "https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-hd6e31c0_1.conda#69c01c781e7c8190bbdaf79e3848c5ca",
++      "https://conda.anaconda.org/conda-forge/noarch/setuptools-80.9.0-pyhff2d567_0.conda#4de79c071274a53dcaf2a8c749d1499e",
++      "https://conda.anaconda.org/conda-forge/noarch/six-1.17.0-pyhe01879c_1.conda#3339e3b65d58accf4ca4fb8748ab16b3",
++      "https://conda.anaconda.org/conda-forge/linux-64/tbb-2021.9.0-hf52228f_0.conda#f495e42d3d2020b025705625edf35490",
++      "https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h4845f30_101.conda#d453b98d9c83e71da0741bb0ff4d76bc",
++      "https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.14.1-pyhe01879c_0.conda#e523f4f1e980ed7a4240d7e27e9ec81f",
++      "https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda#fcb489df604d100968b737f2cb6076c6",
++      "https://conda.anaconda.org/conda-forge/linux-64/wget-1.21.4-hda4d442_0.conda#361e96b664eac64a33c20dfd11affbff",
++      "https://conda.anaconda.org/conda-forge/noarch/wheel-0.45.1-pyhd8ed1ab_1.conda#75cb7132eb58d97896e173ef12ac9986",
++      "https://conda.anaconda.org/conda-forge/linux-64/xz-5.8.3-ha02ee65_1.conda#36a079606b3aaf9d726211825f182452",
++      "https://conda.anaconda.org/conda-forge/linux-64/xz-gpl-tools-5.8.3-ha02ee65_1.conda#137db930adb0b3c5407485e0e1a50cfa",
++      "https://conda.anaconda.org/conda-forge/linux-64/xz-tools-5.8.3-hb03c661_1.conda#10d693a2db6e8339e4eebcb3a3dae88d",
++      "https://conda.anaconda.org/conda-forge/linux-64/zlib-1.2.13-h4ab18f5_6.conda#559d338a4234c2ad6e676f460a093e67",
++      "https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.6-ha6fb4c9_0.conda#4d056880988120e29d75bfff282e0f45"
++    ],
++    "core_versions": {
++      "python": "3.9.15",
++      "pytorch": "1.11.0",
++      "numpy": "1.23.4",
++      "pandas": "1.5.2",
++      "biopython": "1.80",
++      "diamond": "2.0.15",
++      "blast": "2.13.0",
++      "prodigal": "2.6.3",
++      "mkl": "2021.4.0"
++    }
++  },
++  "compatibility": {
++    "torch_cpu_original_sha256": "03f6d083201ea0e3dc4c7d6308548fec0b59917e9894ebaf6075ef1399143388",
++    "torch_cpu_private_sha256": "928c4d73d10de98d88ad8a455c4a1809c3a359963c4690037688cb99843bad22",
++    "change": "GNU_STACK PF_X only; no machine-code/model change; private per-task preload; never modifies shared Conda cache"
++  },
++  "container": {
++    "base_digest": "docker.io/mambaorg/micromamba@sha256:b61105e17d910735a6cc3db188d349c67623306560328495424ddac551785599",
++    "build": "containers/plasme/Dockerfile",
++    "package_lock": "containers/plasme/conda-linux-64.lock",
++    "procps": "2:4.0.4-9"
++  },
++  "limitations": [
++    "Runtime/database lock, not scientific sensitivity or specificity certification",
++    "Local no-hit/error-propagation source fixes are recorded by the runtime; no model or threshold changes"
++  ]
++}
+--- /dev/null
++++ b/tests/prepare_plasme_database.py
+@@ -0,0 +1,76 @@
++#!/usr/bin/env python3
++"""Verify the complete official PLASMe archive and build its full local indexes."""
++import argparse
++import hashlib
++import json
++from pathlib import Path, PurePosixPath
++import subprocess
++import zipfile
++
++SIZE=13632339031
++MD5='b32263ad4fb20c04044700170b1609ef'
++
++
++def digest(path,algorithm='sha256'):
++    result=hashlib.new(algorithm)
++    with path.open('rb') as stream:
++        for chunk in iter(lambda:stream.read(1024*1024),b''):result.update(chunk)
++    return result.hexdigest()
++
++
++def extract(archive,directory):
++    files=[]
++    with zipfile.ZipFile(archive) as z:
++        for member in z.infolist():
++            path=PurePosixPath(member.filename)
++            if path.is_absolute() or '..' in path.parts:raise ValueError('Unsafe archive member')
++            target=directory.joinpath(*path.parts)
++            if member.is_dir():target.mkdir(parents=True,exist_ok=True);continue
++            target.parent.mkdir(parents=True,exist_ok=True)
++            if target.exists():raise ValueError('Refusing to replace existing archive member: '+str(target))
++            result=hashlib.sha256()
++            with z.open(member) as source,target.open('xb') as output:
++                for chunk in iter(lambda:source.read(1024*1024),b''):output.write(chunk);result.update(chunk)
++            if target.stat().st_size!=member.file_size:raise ValueError('Incomplete archive member')
++            files.append({'path':member.filename,'bytes':member.file_size,'crc32':hex(member.CRC),'sha256':result.hexdigest()})
++    return files
++
++
++def main():
++    p=argparse.ArgumentParser(description=__doc__)
++    p.add_argument('--archive',type=Path,required=True)
++    p.add_argument('--outdir',type=Path,required=True)
++    p.add_argument('--python',type=Path,required=True)
++    p.add_argument('--threads',type=int,default=2)
++    a=p.parse_args();archive=a.archive.resolve();out=a.outdir.resolve();python=a.python.resolve()
++    if out.exists():raise ValueError('Choose a new output directory')
++    if a.threads<1:raise ValueError('threads must be positive')
++    assert archive.stat().st_size==SIZE and digest(archive,'md5')==MD5
++    archive_sha=digest(archive)
++    out.mkdir(parents=True)
++    print('Full archive size/upstream MD5 verified; extracting every member',flush=True)
++    files=extract(archive,out);db=out/'DB'
++    assert len(files)==41 and len(list((db/'trans_model').glob('*.pt')))==36
++    nested=extract(db/'plsdb.zip',db)
++    commands=[[str(python.parent/'diamond'),'makedb','--in','plsdb_Mar30.fna.aa','-d','plsdb_Mar30','-p',str(a.threads)],
++              [str(python.parent/'makeblastdb'),'-in','plsdb_Mar30.fna','-dbtype','nucl','-out','plsdb_Mar30']]
++    runs=[]
++    for i,command in enumerate(commands):
++        print('Building full',Path(command[0]).name,'index',flush=True)
++        with (out/f'build-{i}.stdout').open('w') as stdout,(out/f'build-{i}.stderr').open('w') as stderr:
++            result=subprocess.run(command,cwd=db,stdout=stdout,stderr=stderr)
++        if result.returncode:raise RuntimeError('Database builder failed: '+str(command))
++        runs.append({'command':command,'exit':result.returncode})
++    indexes=[q for q in db.glob('plsdb_Mar30.*') if q.is_file() and q.suffix not in ['.zip','.fna','.aa','.p2a']]
++    assert (db/'plsdb_Mar30.dmnd').stat().st_size>0
++    for suffix in ['nin','nhr','nsq']:assert any(q.stat().st_size for q in db.glob('plsdb_Mar30*.'+suffix))
++    receipt={'pass':True,'full_database':True,'zenodo_record':'8046934','archive_bytes':SIZE,'archive_md5':MD5,
++             'archive_sha256':archive_sha,'archive_members':files,'nested_sequence_members':nested,
++             'index_files':[{'path':q.name,'bytes':q.stat().st_size,'sha256':digest(q)} for q in indexes],
++             'runs':runs,'database':str(db),'source_sha256':digest(Path(__file__).resolve()),
++             'scope':'Complete official models/reference proteins/DNA; indexes built with pinned DIAMOND/BLAST; no model or biological accuracy claim'}
++    (out/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
++    print('Prepared full DB with36 models and full indexes:',db,flush=True)
++
++
++if __name__=='__main__':main()
+--- a/tests/run_detection_selection.py
++++ b/tests/run_detection_selection.py
+@@ -45,13 +45,17 @@
+ '''
+ 
+ 
+-def run_checks(base):
++def run_checks(base, python):
+     fixture = base / 'fixtures'
+     fixture.mkdir()
+     sequences = {'S1': 'ACGT' * 300, 'S.2': 'GCGC' * 350}
+     for sid, dna in sequences.items():
+         (fixture / (sid + '.fasta')).write_text('>' + sid + '_contig\n' + dna + '\n')
+     (fixture / 'db').mkdir()
++    for name in ['plsdb_Mar30.dmnd','plsdb_taxon.tsv','plas_overlap.csv','plas_chrom_thres.csv','plsdb_Mar30.clusters.p2a',
++                 'plsdb_Mar30.nin','plsdb_Mar30.nhr','plsdb_Mar30.nsq']:
++        (fixture/'db'/name).write_text('INTERFACE_OBSERVER_ONLY_NOT_A_REAL_DATABASE\n')
++    (fixture/'db/trans_model').mkdir()
+     for name in ['annotations', 'model']:
+         (fixture / name).write_text('INTERFACE_OBSERVER_ONLY\n')
+     observer_bin = base / 'observer-bin'
+@@ -60,6 +64,8 @@
+         script = observer_bin / tool
+         script.write_text(OBSERVER)
+         script.chmod(0o755)
++    for name in ['bio_script.py','trans_data.py','trans_model.py']:
++        (observer_bin/name).write_text('# Explicit classifier CLI observer\n')
+     config = base / 'config'
+     config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\n"
+                       "params.publish_dir_mode='copy'\nparams.consensus_method='weighted_vote'\n"
+@@ -71,14 +77,14 @@
+         p.mkdir()
+         params = {'fixture_dir': str(fixture), 'outdir': str(p / 'out'), 'plasmid_detection_tools': tools,
+                   'genomad_db': str(fixture / 'db'), 'platon_db': str(fixture / 'db'),
+-                  'plasme_db': str(fixture / 'db'), 'plasx_annotations': str(fixture / 'annotations'),
++                  'plasme_db': str(fixture / 'db'), 'plasme_dir':str(observer_bin), 'plasx_annotations': str(fixture / 'annotations'),
+                   'plasx_model': str(fixture / 'model')}
+         (p / 'params.json').write_text(json.dumps(params))
+         command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run',
+                    str(ROOT / 'tests/nextflow/detection_selection.nf'), '-params-file', str(p / 'params.json'),
+                    '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
+         env = os.environ.copy()
+-        env['PATH'] = str(observer_bin) + ':' + str(ROOT / 'bin') + ':' + env['PATH']
++        env['PATH'] = str(observer_bin) + ':' + str(python.parent) + ':' + str(ROOT / 'bin') + ':' + env['PATH']
+         result = subprocess.run(command, env=env, capture_output=True, text=True)
+         (p / 'stdout.log').write_text(result.stdout)
+         (p / 'stderr.log').write_text(result.stderr)
+@@ -112,7 +118,8 @@
+ if __name__ == '__main__':
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--work-dir', required=True)
++    parser.add_argument('--python',required=True,type=Path,help='Actual pinned PLASMe CPU Python environment; classifier remains an explicit observer')
+     args = parser.parse_args()
+     base = Path(args.work_dir).resolve()
+     base.mkdir(parents=True, exist_ok=True)
+-    raise SystemExit(0 if run_checks(base) else 1)
++    raise SystemExit(0 if run_checks(base,args.python.resolve()) else 1)
+--- /dev/null
++++ b/tests/run_plasme_boundaries.py
+@@ -0,0 +1,94 @@
++#!/usr/bin/env python3
++"""Real fixed PLASMe function boundaries; tiny BLAST reference, no model inference."""
++import argparse
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import random
++import shutil
++import subprocess
++import sys
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def main():
++    p=argparse.ArgumentParser(description=__doc__)
++    p.add_argument('--work-dir',type=Path,required=True)
++    p.add_argument('--source-dir',type=Path,required=True)
++    p.add_argument('--python',type=Path,required=True)
++    a=p.parse_args();base=a.work_dir.resolve();base.mkdir(parents=True,exist_ok=False)
++    source=a.source_dir.resolve();python=a.python.resolve()
++    spec=importlib.util.spec_from_file_location('runtime',ROOT/'bin/plasme_runtime.py')
++    runtime=importlib.util.module_from_spec(spec);spec.loader.exec_module(runtime)
++    sources={str(q):sha(q) for q in [source/'PLASMe.py',source/'bio_script.py',ROOT/'bin/plasme_runtime.py',Path(__file__).resolve()]}
++    fixture=base/'fixture';fixture.mkdir()
++    rng=random.Random(240067)
++    (fixture/'reference.fna').write_text('>R\n'+''.join(rng.choices('ACGT',k=6000))+'\n')
++    (fixture/'query.fna').write_text('>no_hit\n'+'N'*1000+'\n')
++    (fixture/'worker.fna').write_text('>worker\n'+'ACGT'*500+'\n')
++    (fixture/'taxonomy.tsv').write_text('R Enterobacterales\n')
++    (fixture/'overlap.tsv').write_text('R\n')
++    env={**os.environ,'PATH':str(python.parent)+os.pathsep+os.environ['PATH']}
++    result=subprocess.run([str(python.parent/'makeblastdb'),'-in',str(fixture/'reference.fna'),'-dbtype','nucl','-out',str(fixture/'reference')],env=env,capture_output=True,text=True)
++    (base/'makeblastdb.log').write_text(result.stdout+result.stderr);assert result.returncode==0
++    shim=fixture/'shim';shim.mkdir()
++    fake=shim/'prodigal'
++    fake.write_text('#!/usr/bin/env python3\nfrom pathlib import Path\nimport sys\na=sys.argv\n'
++                    'Path(a[a.index("-a")+1]).write_text(">worker_1\\nMFAKEPARTIAL*\\n")\n'
++                    'Path(a[a.index("-o")+1]).write_text("# explicit partial-output failure observer\\n")\n'
++                    'raise SystemExit(7)\n')
++    fake.chmod(0o755)
++    cases=[('before-no-hit',False,'predict',False),('fixed-no-hit',True,'predict',False),
++           ('fixed-bad-db',True,'predict',True),('before-worker-failure',False,'worker',False),
++           ('fixed-worker-failure',True,'worker',False)]
++    runs=[]
++    for name,patched,mode,bad_db in cases:
++        d=base/name;d.mkdir()
++        program=source/'PLASMe.py';patch={'applied':False}
++        if patched:
++            previous=Path.cwd()
++            try:
++                os.chdir(d);program,patch=runtime.prepare_program(source);program=program.resolve()
++            finally:os.chdir(previous)
++            assert patch['applied']
++        if mode=='predict':
++            db=fixture/('missing-db' if bad_db else 'reference')
++            script=('from pathlib import Path\nimport sys\nsys.path.insert(0,'+repr(str(program.parent))+')\nimport PLASMe\n'
++                    'PLASMe.predict(contig_path='+repr(str(fixture/'query.fna'))+',ref_plas_db_path='+repr(str(db))+',ref_tax_path='+repr(str(fixture/'taxonomy.tsv'))+
++                    ',temp_dir="temp",out_path="candidates.csv",ref_ol_path='+repr(str(fixture/'overlap.tsv'))+',db_dir="no_models_exist",min_cov=0.0,num_threads=1)\n'
++                    'PLASMe.plasme_output("candidates.csv","temp/blastn.csv",'+repr(str(fixture/'query.fna'))+',0.9,0.9,0.5,"result.fasta")\n')
++            caseenv=env
++        else:
++            shutil.copyfile(fixture/'worker.fna',d/'worker.fna')
++            script='import sys\nsys.path.insert(0,'+repr(str(program.parent))+')\nimport bio_script\nbio_script.run_multi_prodigal("worker.fna",threads=1)\n'
++            caseenv={**env,'PATH':str(shim)+os.pathsep+env['PATH']}
++        (d/'call.py').write_text(script)
++        result=subprocess.run([str(python),str(d/'call.py')],cwd=d,env=caseenv,capture_output=True,text=True)
++        (d/'stdout.log').write_text(result.stdout);(d/'stderr.log').write_text(result.stderr)
++        if name=='before-no-hit':assert result.returncode!=0 and 'range() arg 3 must not be zero' in result.stderr
++        elif name=='fixed-no-hit':
++            assert result.returncode==0,result.stderr
++            assert (d/'result.fasta').read_bytes()==b''
++            assert (d/'result.fasta_report.csv').read_text()=='contig\tlength\treference\torder\tevidence\tscore\tamb_region\n'
++            assert (d/'candidates.csv').read_text()=='order,query,identity,coverage,PLASMe,overlap\n'
++        elif name=='before-worker-failure':
++            assert result.returncode==0,result.stderr
++            assert 'MFAKEPARTIAL' in (d/'worker.fna.aa').read_text()
++        else:
++            assert result.returncode!=0 and 'CalledProcessError' in result.stderr,result.stderr
++            if bad_db:assert not (d/'candidates.csv').exists()
++        runs.append({'case':name,'exit':result.returncode,'patch':patch,'external_scope':'real BLAST' if mode=='predict' else 'explicit partial-output Prodigal failure observer'})
++        assert sources=={name:sha(Path(name)) for name in sources}
++        (base/'run.json').write_text(json.dumps({'pass':len(runs)==len(cases),'runs':runs,'source_sha256':sources,
++          'limitations':['Tiny unit-boundary reference only; not the full PLASMe database or any model/biological classification validation',
++                         'Prodigal failure is explicitly simulated; BLAST no-hit and invalid DB use real pinned2.13.0']},indent=2)+'\n')
++        print('PASS',name,flush=True)
++
++
++if __name__=='__main__':main()
+--- a/tests/run_plasme_interface.py
++++ b/tests/run_plasme_interface.py
+@@ -21,7 +21,7 @@
+ from pathlib import Path
+ import pandas as pd
+ from Bio import SeqIO
+-source=Path(os.environ['PLASME_WRITER_SOURCE'])
++source=Path(__file__).with_name('pinned_PLASMe.py')
+ tree=ast.parse(source.read_text())
+ functions=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in ['plasme_cmd','merge_ranges','plasme_output']]
+ assert len(functions)==3
+@@ -42,7 +42,7 @@
+ '''
+ 
+ 
+-def run_checks(base, python, module, cases):
++def run_checks(base, python, module, cases, podman=False, conda=False):
+     cached = json.loads((ROOT / 'docs/tool-audit/evidence/score-tools-upstream.json').read_text())
+     source = next(s for s in cached['sources'] if s['key'] == 'plasme-cli')
+     data = source['content'].encode()
+@@ -54,9 +54,17 @@
+     shim = scripts / 'PLASMe.py'
+     shim.write_text('#!' + str(python) + '\n' + SHIM)
+     shim.chmod(0o755)
++    (scripts/'pinned_PLASMe.py').write_bytes(data)
+     fixture = base / 'fixtures'
+     fixture.mkdir()
+     (fixture / "db directory's").mkdir()
++    database = fixture / "db directory's"
++    for name in ['plsdb_Mar30.dmnd','plsdb_taxon.tsv','plas_overlap.csv','plas_chrom_thres.csv','plsdb_Mar30.clusters.p2a',
++                 'plsdb_Mar30.nin','plsdb_Mar30.nhr','plsdb_Mar30.nsq']:
++        (database/name).write_text('WRITER_OBSERVER_ONLY_NOT_A_REAL_DATABASE\n')
++    (database/'trans_model').mkdir()
++    for name in ['bio_script.py','trans_data.py','trans_model.py']:
++        (scripts/name).write_text('# Explicit writer observer; no classifier or weights\n')
+     sequences = {cid: 'ACGT' * (300 + i) for i, cid in enumerate(['blast', 'transformer', 'both', 'tie', 'low'])}
+     fasta = ''.join('>' + cid + ' description\n' + seq + '\n' for cid, seq in sequences.items()).encode()
+     mapping = {'PLAIN': 'fa', 'GZIP': 'fa.gz', 'UPPER': 'fa.GZ', 'NEGATIVE': 'fa',
+@@ -70,6 +78,12 @@
+                       "params.consensus_weights='genomad:0,plasme:1'\nprocess.executor='local'\n"
+                       "process.cpus=1\nprocess.memory='1 GB'\nconda.enabled=false\n"
+                       "docker.enabled=false\nsingularity.enabled=false\n")
++    if podman:
++        with config.open('a') as stream:
++            stream.write("podman.enabled=true\nprocess { withName: 'PLASMID_CONSENSUS|PLASMID_STRUCTURE' { container=null } }\n")
++    if conda:
++        with config.open('a') as stream:
++            stream.write("conda.enabled=true\nconda.useMicromamba=true\nconda.cacheDir="+repr(str(base/'conda-cache'))+"\nprocess { withName: 'PLASMID_CONSENSUS|PLASMID_STRUCTURE' { conda=null } }\n")
+     probe = base / 'probe.nf'
+     probe.write_text("""nextflow.enable.dsl=2
+ include { PLASME } from 'MODULE'
+@@ -77,7 +91,7 @@
+ include { PLASMID_STRUCTURE } from 'STRUCTURE'
+ workflow {
+     assemblies=Channel.fromList(params.inputs).map { row -> tuple([id:row.id],file(row.path)) }
+-    PLASME(assemblies,Channel.value(file(params.db)))
++    PLASME(assemblies,Channel.value(file(params.db)),Channel.value(file(params.source)))
+     inputs=PLASME.out.predictions.join(assemblies).map { meta,pred,assembly ->
+         tuple(meta,assembly,file("${params.fixture_dir}/${meta.id}.genomad.tsv"),[pred])
+     }
+@@ -96,12 +110,11 @@
+         p = base / case
+         p.mkdir()
+         (p / 'params.json').write_text(json.dumps({'inputs': [{'id': sid, 'path': str(fixture / (sid + " input's." + mapping[sid]))} for sid in ids],
+-                                                 'db': str(fixture / "db directory's"), 'fixture_dir': str(fixture), 'outdir': str(p / 'out')}))
++                                                 'db': str(fixture / "db directory's"), 'source':str(scripts), 'fixture_dir': str(fixture), 'outdir': str(p / 'out')}))
+         command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(probe),
+                    '-params-file', str(p / 'params.json'), '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
+         env = os.environ.copy()
+-        env['PATH'] = str(scripts) + ':' + str(ROOT / 'bin') + ':' + env['PATH']
+-        env['PLASME_WRITER_SOURCE'] = str(base / 'PLASMe.py')
++        env['PATH'] = str(scripts) + ':' + str(python.parent) + ':' + str(ROOT / 'bin') + ':' + env['PATH']
+         result = subprocess.run(command, env=env, capture_output=True, text=True)
+         (p / 'stdout.log').write_text(result.stdout)
+         (p / 'stderr.log').write_text(result.stderr)
+@@ -142,7 +155,10 @@
+     parser.add_argument('--python', required=True, type=Path)
+     parser.add_argument('--module', type=Path, default=ROOT / 'modules/detection/plasme')
+     parser.add_argument('--cases', default='')
++    parser.add_argument('--podman',action='store_true',help='PLASME image only; R consumers remain native and classifier is still an explicit writer observer')
++    parser.add_argument('--conda',action='store_true',help='Create the actual PLASME Conda environment; R consumers remain native and classifier is still a writer observer')
+     args = parser.parse_args()
+     args.work_dir = args.work_dir.resolve()
+     args.work_dir.mkdir(parents=True, exist_ok=True)
+-    raise SystemExit(0 if run_checks(args.work_dir, args.python.resolve(), args.module.resolve(), args.cases.split(',') if args.cases else []) else 1)
++    if args.podman and args.conda:parser.error('Choose only one isolated backend')
++    raise SystemExit(0 if run_checks(args.work_dir, args.python.resolve(), args.module.resolve(), args.cases.split(',') if args.cases else [],args.podman,args.conda) else 1)
+--- /dev/null
++++ b/tests/run_plasme_native.py
+@@ -0,0 +1,96 @@
++#!/usr/bin/env python3
++"""Run the real configured PLASMe source through its original production node."""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import shlex
++import shutil
++import subprocess
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def sha(path):
++    with path.open('rb') as stream:
++        result=hashlib.sha256()
++        for chunk in iter(lambda:stream.read(1024*1024),b''):result.update(chunk)
++        return result.hexdigest()
++
++
++def main():
++    p=argparse.ArgumentParser(description=__doc__)
++    p.add_argument('--work-dir',type=Path,required=True)
++    p.add_argument('--source-dir',type=Path,required=True)
++    p.add_argument('--database',type=Path,required=True)
++    p.add_argument('--assembly',type=Path,required=True)
++    p.add_argument('--python',type=Path,required=True)
++    p.add_argument('--backend',choices=['native','conda','podman'],default='native')
++    p.add_argument('--conda-cache',type=Path)
++    p.add_argument('--expect',choices=['positive','no-hit'],required=True)
++    p.add_argument('--sample-id',default='plasmid')
++    p.add_argument('--require-transformer',action='store_true')
++    a=p.parse_args();base=a.work_dir.resolve();base.mkdir(parents=True,exist_ok=False)
++    source,db,assembly,python=map(lambda q:q.resolve(),[a.source_dir,a.database,a.assembly,a.python])
++    production=['modules/detection/plasme.nf','bin/plasme_runtime.py','bin/normalize_plasme_outputs.py',
++                'envs/plasme.yml','tests/nextflow/plasme_native.nf','tests/run_plasme_native.py']
++    sources={str(ROOT/n):sha(ROOT/n) for n in production}
++    sources.update({str(source/n):sha(source/n) for n in ['PLASMe.py','bio_script.py','trans_data.py','trans_model.py']})
++    before=sha(assembly)
++    config=base/'native.config'
++    text="process.executor='local'\nprocess.cpus=1\nprocess.memory='6 GB'\ntrace.fields='task_id,hash,name,status,exit,workdir'\n"
++    text+="params.publish_dir_mode='copy'\nparams.plasme_container=null\ndocker.enabled=false\nsingularity.enabled=false\n"
++    text+='podman.enabled='+str(a.backend=='podman').lower()+'\nconda.enabled='+str(a.backend=='conda').lower()+'\n'
++    if a.backend=='conda':
++        cache=(a.conda_cache or base/'conda-cache').resolve()
++        text+='conda.useMicromamba=true\nconda.cacheDir='+repr(str(cache))+'\n'
++    config.write_text(text)
++    params={'outdir':str(base/'out'),'source_dir':str(source),'database':str(db),'assembly':str(assembly),'sample_id':a.sample_id}
++    pf=base/'params.json';pf.write_text(json.dumps(params))
++    command=[shutil.which('nextflow') or 'nextflow','-C',str(config),'run',str(ROOT/'tests/nextflow/plasme_native.nf'),
++             '-params-file',str(pf),'-work-dir',str(base/'work'),'-with-trace',str(base/'trace.tsv'),'-ansi-log','false']
++    env={**os.environ,'PATH':str(python.parent)+os.pathsep+os.environ['PATH']}
++    result=subprocess.run(command,cwd=base,env=env,capture_output=True,text=True)
++    (base/'console.log').write_text(result.stdout+result.stderr)
++    with (base/'trace.tsv').open() as stream:tasks=list(csv.DictReader(stream,delimiter='\t'))
++    assert result.returncode==0 and len(tasks)==1 and tasks[0]['status']=='COMPLETED',result.stdout+result.stderr
++    work=Path(tasks[0]['workdir']);out=base/'out/04_plasmid_detection/plasme'
++    runtime=json.loads((out/(a.sample_id+'.plasme_runtime.json')).read_text())
++    assert runtime['local_source_patch']['applied'] and runtime['exit_code']==0
++    assert runtime['versions']['torch']=='1.11.0'
++    with (out/(a.sample_id+'.plasme.tsv')).open() as stream:rows=list(csv.DictReader(stream,delimiter='\t'))
++    with (out/(a.sample_id+'.plasme_report.csv')).open() as stream:raw=list(csv.DictReader(stream,delimiter='\t'))
++    assert {r['contig_id'] for r in rows}=={r['contig'] for r in raw}
++    assert all(r['classification']=='plasmid' for r in rows)
++    predicted=(out/(a.sample_id+'.plasme.fasta')).read_text()
++    if a.expect=='no-hit':
++        assert rows==[] and raw==[] and predicted=='' and runtime['candidate_records']==0
++    else:
++        assert rows and predicted.startswith('>') and runtime['candidate_records']>0
++    if a.require_transformer:assert runtime['transformer_scores']>0
++    # Independent parser: do not reuse the producer's FASTA/report normalizer.
++    reader=('import gzip,json,sys,hashlib\nfrom Bio import SeqIO\n'
++            'a,b=sys.argv[1:];s=gzip.open(a,"rt") if a.lower().endswith(".gz") else open(a)\n'
++            'source=SeqIO.to_dict(SeqIO.parse(s,"fasta"));s.close()\n'
++            'pred=SeqIO.to_dict(SeqIO.parse(b,"fasta"))\n'
++            'assert set(pred)<=set(source)\n'
++            'assert all(str(v.seq)==str(source[k].seq) for k,v in pred.items())\n'
++            'print(json.dumps({"ids":sorted(pred),"lengths":{k:len(v.seq) for k,v in pred.items()},'
++            '"DNA_sha256":{k:hashlib.sha256(str(v.seq).encode()).hexdigest() for k,v in pred.items()}}))\n')
++    reference=subprocess.run([str(python),'-c',reader,str(assembly),str(out/(a.sample_id+'.plasme.fasta'))],capture_output=True,text=True)
++    assert reference.returncode==0,reference.stderr
++    independent=json.loads(reference.stdout)
++    assert set(independent['ids'])=={r['contig_id'] for r in rows}
++    assert sha(assembly)==before
++    assert all(sha(Path(name))==value for name,value in sources.items())
++    receipt={'pass':True,'command':command,'backend':a.backend,'expect':a.expect,'transformer_required':a.require_transformer,
++             'rows':rows,'runtime':runtime,'independent_BioPython':independent,'tasks':tasks,'source_sha256':sources,'assembly_sha256':before,
++             'limitations':['Tool/node and output contracts only; not scientific sensitivity/specificity or complete platform certification',
++                            'Database identity must be supplied by the corresponding separate locked preparation receipt']}
++    (base/'run.json').write_text(json.dumps(receipt,indent=2)+'\n')
++    print('PASS',a.backend,a.expect,'calls',len(rows),'Transformer scores',runtime['transformer_scores'],flush=True)
++
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/tests/test_plasme_runtime.py
+@@ -0,0 +1,119 @@
++import argparse
++import hashlib
++import importlib.util
++import os
++from pathlib import Path
++import struct
++import tempfile
++import unittest
++from unittest.mock import patch
++
++ROOT=Path(__file__).resolve().parents[1]
++spec=importlib.util.spec_from_file_location('runtime',ROOT/'bin/plasme_runtime.py')
++runtime=importlib.util.module_from_spec(spec);spec.loader.exec_module(runtime)
++
++
++def elf(path,flags=7,stacks=1):
++    header=bytearray(64)
++    header[:6]=b'\x7fELF\x02\x01'
++    struct.pack_into('<Q',header,32,64)
++    struct.pack_into('<HH',header,54,56,stacks)
++    body=b''.join(struct.pack('<II',0x6474e551,flags)+b'\0'*48 for _ in range(stacks))
++    path.write_bytes(bytes(header)+body+b'unchanged executable code payload')
++
++
++class RuntimeTests(unittest.TestCase):
++    def setUp(self):
++        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
++        self.root=Path(self.temp.name)
++        self.source=self.root/'source';self.source.mkdir()
++        for name in ['PLASMe.py','bio_script.py','trans_data.py','trans_model.py']:(self.source/name).write_text('# fixture only\n')
++        self.db=self.root/'db';self.db.mkdir()
++        self.resources=['plsdb_Mar30.dmnd','plsdb_taxon.tsv','plas_overlap.csv','plas_chrom_thres.csv','plsdb_Mar30.clusters.p2a',
++                        'plsdb_Mar30.nin','plsdb_Mar30.nhr','plsdb_Mar30.nsq']
++        for name in self.resources:(self.db/name).write_text('VALIDATION_FIXTURE_NOT_REAL_DATABASE\n')
++        (self.db/'trans_model').mkdir()
++        self.assembly=self.root/'input.fasta';self.assembly.write_text('>fixture\nACGT\n')
++        self.args=argparse.Namespace(source_dir=str(self.source),database=str(self.db),assembly=str(self.assembly),
++                output=str(self.root/'output.fasta'),threads=1,runtime_record=str(self.root/'runtime.json'))
++
++    def test_only_stack_permission_changes_and_cache_hardlink_is_preserved(self):
++        cache=self.root/'cache.so';elf(cache)
++        installed=self.root/'installed.so';os.link(cache,installed)
++        before=cache.read_bytes();record=runtime.clear_stack(installed)
++        expected=bytearray(before);struct.pack_into('<I',expected,68,6)
++        self.assertEqual(installed.read_bytes(),bytes(expected))
++        self.assertEqual(cache.read_bytes(),before)
++        self.assertNotEqual(cache.stat().st_ino,installed.stat().st_ino)
++        self.assertEqual((record['flags_before'],record['flags_after']),(7,6))
++
++    def test_already_nonexecutable_stack_is_unchanged(self):
++        path=self.root/'library.so';elf(path,flags=6)
++        before=path.read_bytes();inode=path.stat().st_ino
++        record=runtime.clear_stack(path)
++        self.assertEqual(path.read_bytes(),before);self.assertEqual(path.stat().st_ino,inode)
++        self.assertEqual(record['before_sha256'],record['after_sha256'])
++
++    def test_invalid_elf_is_rejected_without_writing(self):
++        path=self.root/'library.so';path.write_bytes(b'not an ELF library')
++        with self.assertRaises(ValueError):runtime.clear_stack(path)
++        self.assertEqual(path.read_bytes(),b'not an ELF library')
++
++    def test_missing_or_ambiguous_stack_headers_are_rejected(self):
++        path=self.root/'library.so'
++        for count in [0,2]:
++            with self.subTest(count=count):
++                elf(path,stacks=count);before=path.read_bytes()
++                with self.assertRaisesRegex(ValueError,'one GNU_STACK'):runtime.clear_stack(path)
++                self.assertEqual(path.read_bytes(),before)
++
++    def test_missing_source_members_stop_before_runtime(self):
++        for path in self.source.iterdir():
++            data=path.read_bytes();path.unlink()
++            with self.subTest(name=path.name):
++                with self.assertRaisesRegex(ValueError,'Missing PLASMe source'):runtime.run(self.args)
++            path.write_bytes(data)
++
++    def test_missing_assembly_stops_before_runtime(self):
++        self.assembly.unlink()
++        with self.assertRaisesRegex(ValueError,'input assembly'):runtime.run(self.args)
++
++    def test_missing_resources_stop_before_runtime(self):
++        for name in self.resources:
++            path=self.db/name;data=path.read_bytes();path.unlink()
++            with self.subTest(name=name):
++                with self.assertRaisesRegex(ValueError,'Missing prepared PLASMe'):runtime.run(self.args)
++            path.write_bytes(data)
++
++    def test_empty_resources_are_not_accepted(self):
++        path=self.db/'plsdb_Mar30.dmnd';path.write_bytes(b'')
++        with self.assertRaisesRegex(ValueError,'Missing prepared PLASMe'):runtime.run(self.args)
++
++    def test_missing_model_directory_stops_before_runtime(self):
++        (self.db/'trans_model').rmdir()
++        with self.assertRaisesRegex(ValueError,'model directory'):runtime.run(self.args)
++
++    def test_nonpositive_threads_are_rejected(self):
++        for value in [0,-1]:
++            self.args.threads=value
++            with self.subTest(value=value):
++                with self.assertRaisesRegex(ValueError,'threads must be positive'):runtime.run(self.args)
++
++    def test_existing_outputs_refuse_stale_reuse(self):
++        for suffix in ['', '_report.csv']:
++            path=Path(self.args.output+suffix);path.touch()
++            with self.subTest(suffix=suffix):
++                with self.assertRaisesRegex(ValueError,'refusing stale result'):runtime.run(self.args)
++            path.unlink()
++
++    def test_absent_executable_is_not_an_empty_prediction(self):
++        with patch.object(runtime.shutil,'which',return_value=None):
++            with self.assertRaisesRegex(ValueError,'Missing PLASMe executable'):runtime.run(self.args)
++
++    def test_absent_torch_is_not_an_empty_prediction(self):
++        with patch.object(runtime.importlib.util,'find_spec',return_value=None):
++            with self.assertRaisesRegex(ValueError,'pinned PyTorch'):runtime.runtime_environment(self.root/'private')
++        self.assertFalse((self.root/'private').exists())
++
++
++if __name__=='__main__':unittest.main()

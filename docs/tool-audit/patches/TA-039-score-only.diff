@@ -1,0 +1,589 @@
+diff --git a/bin/sequence_similarity_link.R b/bin/sequence_similarity_link.R
+--- a/bin/sequence_similarity_link.R
++++ b/bin/sequence_similarity_link.R
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env Rscript
+-# Link plasmid contigs to first-level MAG FASTA files by sequence composition.
++# Score plasmid/MAG sequence composition; uncalibrated host linking is disabled.
+ #
+ # TETRA per Teeling et al. (2004), doi:10.1186/1471-2105-5-163:
+ # sum every overlapping ACGT di/tri/tetranucleotide on BOTH strands of each
+@@ -9,8 +9,8 @@
+ # This is an independent implementation of the published formula, not an exact
+ # port of pyani (which has different sequence-end handling and sparse defaults).
+ # Undefined/zero variance profiles are ineligible, not fabricated correlations.
+-# A threshold selects exploratory candidates; it is not a host probability.
+-# The legacy default 0.7 is UNCALIBRATED for this corrected method.
++# No host links are emitted: the independent source-host threshold benchmark
++# failed its acceptance criteria. Scores are composition similarities only.
+ 
+ suppressPackageStartupMessages({
+   library(Biostrings)
+@@ -100,7 +100,7 @@
+   if (!("host-genomes" %in% seen)) values[["host-genomes"]] <- NULL
+   if (!("taxonomy" %in% seen)) values[["taxonomy"]] <- NULL
+   if (!("sample-id" %in% seen)) values[["sample-id"]] <- ""
+-  if (!("min-similarity" %in% seen)) values[["min-similarity"]] <- "0.7"
++  if (!("min-similarity" %in% seen)) values[["min-similarity"]] <- NULL
+   values
+ }
+ 
+@@ -283,9 +283,10 @@
+ }
+ 
+ run <- function(args) {
+-  min_similarity <- parse_float(args[["min-similarity"]], "--min-similarity")
+-  if (!is.finite(min_similarity) || min_similarity < 0 || min_similarity > 1) {
+-    die("--min-similarity must be between 0 and 1")
++  if (!is.null(args[["min-similarity"]])) {
++    legacy <- parse_float(args[["min-similarity"]], "--min-similarity")
++    if (!is.finite(legacy) || legacy < 0 || legacy > 1) die("--min-similarity must be between 0 and 1")
++    cat("--min-similarity is deprecated and ignored; uncalibrated host links are disabled\n", file=stderr())
+   }
+   have_mags <- !is.null(args[["host-genomes"]]) && nzchar(args[["host-genomes"]])
+   if (have_mags) {
+@@ -300,7 +301,6 @@
+ 
+   plasmids <- read_fasta(args[["plasmid-contigs"]])
+   participating <- Filter(function(r) nchar(r$seq) >= 1000L, plasmids)
+-  collected <- list()
+   scored <- list()
+   plasmid_profiles <- list()
+   if (length(bins)) {
+@@ -310,44 +310,19 @@
+       for (bname in names(bins)) {
+         score <- similarity(pz, bins[[bname]])
+         status <- if (is.finite(score)) "complete256" else "ineligible_profile"
++        tax_string <- if (bname %in% names(taxonomy)) taxonomy[bname][[1L]] else "NA"
+         scored[[length(scored) + 1L]] <- data.frame(plasmid_id = rec$name,
+           host_id = bname, sample_id = args[["sample-id"]], method = METHOD,
+           score = if (is.finite(score)) sprintf("%.17g", score) else "",
+-          profile_status = status, threshold = min_similarity,
+-          threshold_pass = is.finite(score) && score >= min_similarity,
+-          threshold_status = "uncalibrated", stringsAsFactors = FALSE)
+-        if (is.finite(score) && score >= min_similarity) {
+-          tax_string <- if (bname %in% names(taxonomy)) taxonomy[bname][[1L]] else "NA"
+-          collected[[length(collected) + 1L]] <- list(
+-            plasmid_id = rec$name,
+-            host_id = bname,
+-            sample_id = args[["sample-id"]],
+-            score = score,
+-            supporting_data = sprintf("taxonomy=%s;method=%s;dimensions=256;threshold=%.17g;threshold_status=uncalibrated", tax_string, METHOD, min_similarity)
+-          )
+-        }
+-      }
+-    }
+-  }
+-
+-  cols <- c("plasmid_id", "host_id", "sample_id", "evidence_type", "score", "supporting_data")
++          profile_status = status, host_taxonomy = tax_string,
++          threshold_status = "not_applied_uncalibrated",
++          association_status = "disabled_uncalibrated", stringsAsFactors = FALSE)
++      }
++    }
++  }
++
+   df <- data.frame(plasmid_id = character(), host_id = character(), sample_id = character(),
+                    evidence_type = character(), score = character(), supporting_data = character())
+-  if (length(collected)) {
+-    pls <- vapply(collected, function(r) r$plasmid_id, character(1))
+-    hos <- vapply(collected, function(r) r$host_id, character(1))
+-    scs <- vapply(collected, function(r) r$score, numeric(1))
+-    ord <- order(pls, -scs, hos, method = "radix")
+-    df <- data.frame(
+-      plasmid_id = pls[ord],
+-      host_id = hos[ord],
+-      sample_id = vapply(collected, function(r) r$sample_id, character(1))[ord],
+-      evidence_type = "sequence_similarity",
+-      score = sprintf("%.17g", scs[ord]),
+-      supporting_data = vapply(collected, function(r) r$supporting_data, character(1))[ord],
+-      stringsAsFactors = FALSE
+-    )
+-  }
+   tryCatch(
+     write.table(df, file = args[["out"]], sep = "\t", quote = FALSE, row.names = FALSE),
+     error = function(e) die(conditionMessage(e))
+@@ -355,21 +330,24 @@
+   if (!is.null(args[["out-scores"]])) {
+     score_table <- if (length(scored)) do.call(rbind, scored) else data.frame(
+       plasmid_id=character(), host_id=character(), sample_id=character(), method=character(),
+-      score=character(), profile_status=character(), threshold=numeric(),
+-      threshold_pass=logical(), threshold_status=character())
++      score=character(), profile_status=character(), host_taxonomy=character(),
++      threshold_status=character(), association_status=character())
+     if (nrow(score_table)) score_table <- score_table[order(score_table$plasmid_id, score_table$host_id, method="radix"), ]
+     write.table(score_table, args[["out-scores"]], sep="\t", quote=FALSE, row.names=FALSE)
+   }
+   if (!is.null(args[["out-profile-status"]])) {
+     jsonlite::write_json(list(method=METHOD, dimensions=256L, strands="both",
+-      boundaries="sum_per_record_counts_before_expectations", threshold=min_similarity,
+-      threshold_status="uncalibrated", ineligible="undefined variance or constant full vector; no fabricated score",
++      boundaries="sum_per_record_counts_before_expectations",
++      threshold_status="not_applied_uncalibrated", host_links_enabled=FALSE,
++      association_status="disabled_uncalibrated",
++      association_reason="independent source-host threshold benchmark failed acceptance; composition scores are not host assignments",
++      ignored_min_similarity=args[["min-similarity"]], ineligible="undefined variance or constant full vector; no fabricated score",
+       sample_id=args[["sample-id"]],
+       mag_profiles=lapply(bins, profile_status), plasmid_profiles=plasmid_profiles,
+       short_plasmids=vapply(Filter(function(r) nchar(r$seq) < 1000L, plasmids), function(r) r$name, character(1))),
+       args[["out-profile-status"]], auto_unbox=TRUE, pretty=TRUE)
+   }
+-  cat(sprintf("method=%s; dimensions=256; threshold_status=uncalibrated; complete MAG profiles=%d/%d\n",
++  cat(sprintf("method=%s; dimensions=256; host_links=disabled_uncalibrated; complete MAG profiles=%d/%d\n",
+       METHOD, sum(vapply(bins, profile_status, character(1)) == "complete256"), length(bins)), file=stderr())
+   mag_path <- if (have_mags) args[["host-genomes"]] else "not provided"
+   cat(sprintf(
+diff --git a/modules/linking/sequence.nf b/modules/linking/sequence.nf
+--- a/modules/linking/sequence.nf
++++ b/modules/linking/sequence.nf
+@@ -1,5 +1,5 @@
+ /*
+- * Sequence similarity host-plasmid linking (TETRA tetranucleotide z-scores;
++ * Sequence composition scoring (uncalibrated host links disabled) (TETRA tetranucleotide z-scores;
+  * pipeline step: host_plasmid_link_sequence, implemented by
+  * bin/sequence_similarity_link.R). Reads the actual staged MAG
+  * directory; GTDB-Tk taxonomy is attached when available. Missing optional
+@@ -39,7 +39,6 @@
+         --plasmid-contigs ${shellQuote.call(plasmid_contigs)} \\
+         ${binsArg} ${taxArg} \\
+         --sample-id ${shellQuote.call(meta.id)} \\
+-        --min-similarity ${params.link_min_similarity} \\
+         --out-scores ${shellQuote.call("${meta.id}.sequence_scores.tsv")} \\
+         --out-profile-status ${shellQuote.call("${meta.id}.sequence_method.json")} \\
+         --out ${shellQuote.call("${meta.id}.sequence_links.tsv")}
+diff --git a/subworkflows/host_linking.nf b/subworkflows/host_linking.nf
+--- a/subworkflows/host_linking.nf
++++ b/subworkflows/host_linking.nf
+@@ -27,6 +27,7 @@
+     main:
+     ch_report_events = Channel.empty()
+     ch_links = Channel.empty()
++    ch_sequence_scores = Channel.empty()
+ 
+     if (params.host_plasmid_linking) {
+         if (selectedTools(params.host_linking_optional_methods).contains('crispr')) {
+@@ -43,7 +44,7 @@
+             ch_report_events = ch_report_events.mix(reportEvidence([channels: LINK_COABUNDANCE.out], '07_host_prediction', 'LINK_COABUNDANCE'))
+             ch_links = ch_links.mix(LINK_COABUNDANCE.out.links)
+         }
+-        // sequence similarity: needs MAG bins
++        // Sequence composition scores only; failed calibration disables host links.
+         if (selectedTools(params.host_linking_methods).contains('sequence')) {
+             ch_seq_in = ch_plasmids
+                 .map { meta, contigs -> tuple(meta, [contigs]) }
+@@ -55,7 +56,7 @@
+                 .map { meta, payload, tax -> tuple(meta, payload[0], payload[1], tax ?: []) }
+             LINK_SEQUENCE(ch_seq_in)
+             ch_report_events = ch_report_events.mix(reportEvidence([channels: LINK_SEQUENCE.out], '07_host_prediction', 'LINK_SEQUENCE'))
+-            ch_links = ch_links.mix(LINK_SEQUENCE.out.links.map { meta, f -> f })
++            ch_sequence_scores = LINK_SEQUENCE.out.scores
+         }
+         // long-read bridge evidence
+         if (selectedTools(params.host_linking_methods).contains('long_read') && has_long_reads) {
+@@ -80,4 +81,5 @@
+     emit:
+     report_events = ch_report_events
+     links = ch_links
++    sequence_scores = ch_sequence_scores
+ }
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -329,10 +329,12 @@
+   不能计算完整向量的低复杂度输入不产生伪造的零分或关联。
+   `sequence_scores.tsv` 保留所有比较（含未过阈值和无法评分），
+   `sequence_method.json` 记录方法与可评分状态；旧关联分数需要重算。
+-  当前 `--link_min_similarity 0.7` 仍为**未校准的历史阈值**，候选关联不是
+-  宿主概率。阈值校准工具及分组隔离要求见
+-  [TETRA 方法与校准](docs/tool-audit/contracts/tetra-sequence-method.md)；
+-  人工算例的阈值不用于替换默认值。
++  55份来源的独立分组留出基准未通过阈值验收，因此**停用TETRA宿主链接**。
++  `sequence_links.tsv`仅保留空表头，不进入统一宿主关联通道；分数不是宿主归属或概率。
++  旧 `link_min_similarity` 参数不再用于此节点；直接脚本的 `--min-similarity`
++  仅兼容旧调用，明确提示忽略，不能重新启用链接。分类信息保留在分数表的
++  `host_taxonomy`列，不输出阈值通过标记。方法、基准失败与结果迁移见
++  [TETRA 方法与校准](docs/tool-audit/contracts/tetra-sequence-method.md)。
+ - 长读桥接通过 Rsamtools 解析 SAM/BAM，要求同一 read 有 primary 与
+   supplementary 记录，支持质粒与非质粒 contig 连接；默认 MAPQ≥20，并过滤
+   secondary、QC-fail、duplicate、paired 等标记。桥接仍可能来自嵌合、重复或
+diff --git a/assets/plasmid_report.Rmd b/assets/plasmid_report.Rmd
+--- a/assets/plasmid_report.Rmd
++++ b/assets/plasmid_report.Rmd
+@@ -44,6 +44,8 @@
+ 
+ ## Limitations
+ 
++- TETRA composition scores are not host assignments. Uncalibrated TETRA host links are disabled after the source-host benchmark failed acceptance.
++
+ - Sequence-based circularity is predictive and should be confirmed from the assembly graph or read support.
+ - The circular count represents candidates, not confirmed topology. Terminal inverted repeats alone do not establish circularity; a negative circularity call does not confirm linearity.
+ - Plasmid calls are predictions from automated classifiers; confirm biologically important hits manually.
+diff --git a/tests/test_sequence_similarity_link.py b/tests/test_sequence_similarity_link.py
+--- a/tests/test_sequence_similarity_link.py
++++ b/tests/test_sequence_similarity_link.py
+@@ -1,4 +1,5 @@
+ import csv
++import json
+ import gzip
+ import subprocess
+ import sys
+@@ -21,6 +22,8 @@
+         self.root = Path(self.temp.name)
+         self.plasmids = self.root / "S1.plasmid_contigs.fasta"
+         self.out = self.root / "links.tsv"
++        self.scores = self.root / "scores.tsv"
++        self.method = self.root / "method.json"
+ 
+     def tearDown(self):
+         self.temp.cleanup()
+@@ -34,15 +37,16 @@
+     def run_cli(self, *extra):
+         return subprocess.run(
+             ["Rscript", str(SCRIPT), "--plasmid-contigs", str(self.plasmids),
+-             "--sample-id", "S1", "--out", str(self.out), *map(str, extra)],
++             "--sample-id", "S1", "--out", str(self.out),
++             "--out-scores", str(self.scores), "--out-profile-status", str(self.method), *map(str, extra)],
+             text=True, capture_output=True, check=False,
+         )
+ 
+     def rows(self):
+-        with self.out.open() as fh:
++        with self.scores.open() as fh:
+             return list(csv.DictReader(fh, delimiter="\t"))
+ 
+-    def test_matching_nested_bin_links_and_taxonomy_is_attached(self):
++    def test_matching_nested_bin_scores_and_taxonomy_without_host_links(self):
+         self.fasta(self.plasmids, [("p1", MATCHING)])
+         mag_dir = self.root / "mag_bins" / "S1.metabat2_bins"
+         self.fasta(mag_dir / "bin.1.fa", [("contig", MATCHING)])
+@@ -56,8 +60,20 @@
+         self.assertEqual(rows[0]["sample_id"], "S1")
+         self.assertEqual(rows[0]["host_id"], "bin.1")
+         self.assertAlmostEqual(float(rows[0]["score"]), 1.0, places=3)
+-        self.assertIn("d__Bacteria", rows[0]["supporting_data"])
++        self.assertIn("d__Bacteria", rows[0]["host_taxonomy"])
+         self.assertIn("valid bins: 1", result.stderr)
++        with self.out.open() as stream:
++            self.assertEqual(list(csv.DictReader(stream, delimiter="\t")), [])
++        info = json.loads(self.method.read_text())
++        self.assertFalse(info['host_links_enabled'])
++        self.assertEqual(info['association_status'], 'disabled_uncalibrated')
++        self.assertNotIn('threshold_pass', rows[0])
++        # Even a legacy zero cutoff cannot reactivate host associations.
++        result = self.run_cli('--host-genomes', mag_dir, '--min-similarity', 0)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        with self.out.open() as stream:
++            self.assertEqual(list(csv.DictReader(stream, delimiter="\t")), [])
++        self.assertIn('deprecated and ignored', result.stderr)
+ 
+     def test_missing_taxonomy_uses_na(self):
+         self.fasta(self.plasmids, [("p1", MATCHING)])
+@@ -65,7 +81,7 @@
+         self.fasta(mag_dir / "bin.1.fa", [("c1", MATCHING)])
+         result = self.run_cli("--host-genomes", mag_dir)
+         self.assertEqual(result.returncode, 0, result.stderr)
+-        self.assertIn("taxonomy=NA", self.rows()[0]["supporting_data"])
++        self.assertEqual("NA", self.rows()[0]["host_taxonomy"])
+ 
+     def test_no_mag_argument_writes_header_and_reports_skip(self):
+         self.fasta(self.plasmids, [("p1", MATCHING)])
+@@ -126,7 +142,7 @@
+         result = self.run_cli("--host-genomes", mag_dir)
+         self.assertEqual(result.returncode, 0, result.stderr)
+         self.assertIn("candidate FASTA files: 3", result.stderr)
+-        # The TETRA linker emits every bin above the threshold, not only the best.
++        # Every compared MAG is scored; no threshold selects host assignments.
+         self.assertEqual(len(self.rows()), 3)
+ 
+     def test_duplicate_host_ids_fail(self):
+@@ -157,7 +173,8 @@
+         self.fasta(mag_dir / "bin.1.fa", [("c1", "C" * 1200)])
+         result = self.run_cli("--host-genomes", mag_dir)
+         self.assertEqual(result.returncode, 0, result.stderr)
+-        self.assertEqual(self.rows(), [])
++        self.assertEqual(len(self.rows()), 1)
++        self.assertEqual(self.rows()[0]["score"], "")
+         self.assertIn("valid bins: 1", result.stderr)
+         self.assertIn("links: 0", result.stderr)
+ 
+@@ -169,12 +186,14 @@
+         result = self.run_cli('--host-genomes', mag_dir, '--min-similarity', '0',
+                               '--out-scores', scores)
+         self.assertEqual(result.returncode, 0, result.stderr)
+-        self.assertEqual(self.rows(), [])
++        with self.out.open() as stream:
++            self.assertEqual(list(csv.DictReader(stream, delimiter="\t")), [])
+         with scores.open() as stream:
+             row = next(csv.DictReader(stream, delimiter='\t'))
+         self.assertEqual(row['score'], '')
+         self.assertEqual(row['profile_status'], 'ineligible_profile')
+-        self.assertEqual(row['threshold_pass'], 'FALSE')
++        self.assertNotIn('threshold_pass', row)
++        self.assertEqual(row['association_status'], 'disabled_uncalibrated')
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tests/run_tetra_sequence.py b/tests/run_tetra_sequence.py
+--- a/tests/run_tetra_sequence.py
++++ b/tests/run_tetra_sequence.py
+@@ -66,12 +66,12 @@
+         out=base/'out/07_host_prediction/linking/sequence';scores=list(csv.DictReader((out/(sid+'.sequence_scores.tsv')).open(),delimiter='\t'));assert len(scores)==12
+         actual={row['plasmid_id']+'|'+row['host_id']:row for row in scores};assert actual.keys()==expected[sid].keys()
+         for key,value in expected[sid].items():
+-            row=actual[key];assert row['sample_id']==sid and row['method']=='tetra_markov256_v1' and row['threshold_status']=='uncalibrated'
+-            if value is None:assert row['score']=='' and row['profile_status']=='ineligible_profile' and row['threshold_pass']=='FALSE'
++            row=actual[key];assert row['sample_id']==sid and row['method']=='tetra_markov256_v1' and row['threshold_status']=='not_applied_uncalibrated' and row['association_status']=='disabled_uncalibrated' and row['host_taxonomy']=='d__Controlled_input'
++            if value is None:assert row['score']=='' and row['profile_status']=='ineligible_profile' and 'threshold_pass' not in row
+             else:assert math.isclose(float(row['score']),value,rel_tol=1e-10,abs_tol=1e-10),(sid,key,row['score'],value)
+-        links=list(csv.DictReader((out/(sid+'.sequence_links.tsv')).open(),delimiter='\t'));assert {x['plasmid_id']+'|'+x['host_id'] for x in links}=={key for key,value in expected[sid].items() if value is not None and value>=.7}
+-        assert all('taxonomy=d__Controlled_input;' in row['supporting_data'] for row in links)
+-        info=json.loads((out/(sid+'.sequence_method.json')).read_text());assert info['dimensions']==256 and info['method']=='tetra_markov256_v1' and info['threshold_status']=='uncalibrated';assert info['short_plasmids']=='too_short';assert info['mag_profiles']=={h:'complete256' for h in ['full','fragmented','reverse']};assert info['plasmid_profiles']['homopolymer']=='undefined_markov_variance';observed[sid]=scores
++        links=list(csv.DictReader((out/(sid+'.sequence_links.tsv')).open(),delimiter='\t'));assert not links, 'Uncalibrated scores must never emit host associations'
++        assert all('threshold_pass' not in row for row in scores)
++        info=json.loads((out/(sid+'.sequence_method.json')).read_text());assert info['dimensions']==256 and info['method']=='tetra_markov256_v1' and info['threshold_status']=='not_applied_uncalibrated' and info['host_links_enabled'] is False;assert info['short_plasmids']=='too_short';assert info['mag_profiles']=={h:'complete256' for h in ['full','fragmented','reverse']};assert info['plasmid_profiles']['homopolymer']=='undefined_markov_variance';observed[sid]=scores
+     # Actual legacy-folded numeric counterexample. This only reads frozen script definitions.
+     old=base/'legacy-probe.R';old.write_text('''args <- commandArgs(TRUE); e<-parse(args[1]); for(x in e[-length(e)])eval(x)
+ a<-read_fasta(args[2])[[1]]$seq;b<-read_fasta(args[3])[[1]]$seq
+@@ -84,7 +84,7 @@
+     cmag=base/'counter-MAG';cmag.mkdir();(cmag/'candidate.fa').write_text('>candidate\n'+bb+'\n')
+     ccmd=['Rscript',str(ROOT/'bin/sequence_similarity_link.R'),'--plasmid-contigs',str(base/'a.fa'),'--host-genomes',str(cmag),'--out',str(base/'counter.links.tsv'),'--out-scores',str(base/'counter.scores.tsv'),'--min-similarity','0.7'];cr=subprocess.run(ccmd,text=True,capture_output=True,check=True);crow=list(csv.DictReader((base/'counter.scores.tsv').open(),delimiter='\t'));assert len(crow)==1 and math.isclose(float(crow[0]['score']),newscore,abs_tol=1e-10);assert not list(csv.DictReader((base/'counter.links.tsv').open(),delimiter='\t'))
+     assert source_sha=={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in source_names};assert hashes=={str(q.relative_to(fixture)):hashlib.sha256(q.read_bytes()).hexdigest() for q in fixture.rglob('*') if q.is_file()}
+-    record={'pass':True,'command':cmd,'exit':r.returncode,'tasks':tasks,'source_sha256':source_sha,'fixture_sha256':hashes,'expected':expected,'observed':observed,'legacy_counterexample':{'command':oldcmd,'score':oldscore,'current_expected':newscore,'current_cli_command':ccmd,'threshold':.7,'legacy_passes_current_rejects':True},'limitations':['locked real DNA with explicit self/fragment/unrelated controls and independent scalar math, not known biological plasmid-host associations','not host accuracy or threshold calibration; legacy cutoff remains uncalibrated','native local R/Biostrings/Nextflow; no image/nf-test framework/full platform claim']};(base/'run.json').write_text(json.dumps(record,indent=2,allow_nan=False)+'\n');print('PASS2 native LINK_SEQUENCE tasks;24 independent pair scores; legacy threshold crossing',oldscore,newscore)
++    record={'pass':True,'command':cmd,'exit':r.returncode,'tasks':tasks,'source_sha256':source_sha,'fixture_sha256':hashes,'expected':expected,'observed':observed,'legacy_counterexample':{'command':oldcmd,'score':oldscore,'current_expected':newscore,'current_cli_command':ccmd,'threshold':.7,'legacy_passes_current_rejects':True},'limitations':['locked real DNA with explicit self/fragment/unrelated controls and independent scalar math, not known biological plasmid-host associations','not host accuracy or threshold calibration; uncalibrated host links are disabled','native local R/Biostrings/Nextflow; no image/nf-test framework/full platform claim']};(base/'run.json').write_text(json.dumps(record,indent=2,allow_nan=False)+'\n');print('PASS2 native LINK_SEQUENCE tasks;24 independent pair scores; legacy threshold crossing',oldscore,newscore)
+ 
+ 
+ if __name__=='__main__':main()
+diff --git a/tests/run_sequence_taxonomy_input.py b/tests/run_sequence_taxonomy_input.py
+--- a/tests/run_sequence_taxonomy_input.py
++++ b/tests/run_sequence_taxonomy_input.py
+@@ -19,12 +19,13 @@
+         module=args.before_dir.resolve()/'modules/linking/sequence' if old else ROOT/'modules/linking/sequence';probe=d/'probe.nf';probe.write_text(f"nextflow.enable.dsl=2\ninclude {{ LINK_SEQUENCE }} from '{module}'\nworkflow {{\nLINK_SEQUENCE(Channel.of(tuple([id:'S',group:'kept'],file('{fixture}/plasmids.fa'),[file('{mag}')],["+','.join("file('"+str(t)+"')" for t in tax)+"])))\n}\n")
+         config=d/'native.config';config.write_text(f"params.outdir='{d}/out'\nparams.publish_dir_mode='copy'\nparams.link_min_similarity=0.7\nprocess.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\n")
+         cmd=[shutil.which('nextflow') or 'nextflow','-C',str(config),'run',str(probe),'-work-dir',str(d/'work'),'-with-trace',str(d/'trace.tsv'),'-ansi-log','false'];env=os.environ.copy();env['PATH']=str(args.before_dir.resolve()/'bin' if old else ROOT/'bin')+':'+env['PATH'];r=subprocess.run(cmd,text=True,capture_output=True,env=env);(d/'console.log').write_text(r.stdout+r.stderr);assert r.returncode==0,r.stdout+r.stderr
+-        tasks=list(csv.DictReader((d/'trace.tsv').open(),delimiter='\t'));assert len(tasks)==1 and tasks[0]['status']=='COMPLETED' and tasks[0]['exit']=='0';after={str(p.relative_to(fixture)):hashlib.sha256(p.read_bytes()).hexdigest() for p in fixture.rglob('*') if p.is_file()};links=list(csv.DictReader((d/'out/07_host_prediction/linking/sequence/S.sequence_links.tsv').open(),delimiter='\t'));assert len(links)==(2 if multiple else 1)
++        tasks=list(csv.DictReader((d/'trace.tsv').open(),delimiter='\t'));assert len(tasks)==1 and tasks[0]['status']=='COMPLETED' and tasks[0]['exit']=='0';after={str(p.relative_to(fixture)):hashlib.sha256(p.read_bytes()).hexdigest() for p in fixture.rglob('*') if p.is_file()};links=list(csv.DictReader((d/'out/07_host_prediction/linking/sequence/S.sequence_links.tsv').open(),delimiter='\t'));assert len(links)==(1 if old else 0)
+         if old:
+             assert (fixture/'taxonomy.tsv').stat().st_size==0 and after['taxonomy.tsv']!=hashes['taxonomy.tsv'];assert 'taxonomy=NA;' in links[0]['supporting_data']
+         else:
+             assert after==hashes,'Source input mutation';expected={'host1':'d__MARKER_ONE','host2':'d__MARKER_TWO'}
+-            for row in links:assert 'taxonomy='+expected[row['host_id']]+';' in row['supporting_data']
++            scores=list(csv.DictReader((d/'out/07_host_prediction/linking/sequence/S.sequence_scores.tsv').open(),delimiter='\t'));assert len(scores)==len(tax)
++            for row in scores:assert row['host_taxonomy']==expected[row['host_id']] and row['association_status']=='disabled_uncalibrated'
+         runs.append({'case':name,'command':cmd,'exit':r.returncode,'tasks':tasks,'before_hashes':hashes,'after_hashes':after,'links':links,'source_mutation_expected':old})
+     assert source_sha=={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in sources};(base/'run.json').write_text(json.dumps({'pass':True,'runs':runs,'source_sha256':source_sha,'limitations':['before intentionally mutates disposable fixture only; exact frozen module and R definitions','self-match controlled interface DNA/taxonomy labels; not known-host or taxonomy biological benchmark','native local R/Biostrings; image/remote executor/nf-test framework not executed']},indent=2)+'\n');print('PASS frozen before1/current2 native nodes; input identity and exact taxonomy labels')
+ 
+diff --git a/tests/run_module_regressions.py b/tests/run_module_regressions.py
+--- a/tests/run_module_regressions.py
++++ b/tests/run_module_regressions.py
+@@ -258,16 +258,20 @@
+     assert_true(table.exists(), "sequence module did not publish its TSV")
+     with table.open() as fh:
+         rows = list(csv.DictReader(fh, delimiter="\t"))
+-    assert_true(len(rows) == 1 and rows[0]["sample_id"] == sample and rows[0]["host_id"] == "bin.1",
+-                "nested MetaBAT2 bin directory did not produce the expected link")
+-    assert_true(abs(float(rows[0]["score"]) - 1.0) < 0.001, "matching sequences did not score near one")
++    assert_true(not rows, "Uncalibrated TETRA emitted host links")
++    with (table.parent / f"{sample}.sequence_scores.tsv").open() as fh:
++        scores = list(csv.DictReader(fh, delimiter="\t"))
++    assert_true(len(scores) == 1 and scores[0]["sample_id"] == sample and scores[0]["host_id"] == "bin.1",
++                "nested MetaBAT2 bin directory did not produce the expected composition score")
++    assert_true(abs(float(scores[0]["score"]) - 1.0) < 0.001, "matching sequences did not score near one")
++    assert_true(scores[0]["association_status"] == "disabled_uncalibrated", "Missing score-only state")
+     scripts = command_files(work)
+     command = next((path.read_text() for path in scripts if "sequence_similarity_link.R" in path.read_text()), "")
+     assert_true("--host-genomes mag_bins" in command,
+                 "sequence .command.sh does not pass the staged MAG directory")
+     assert_true("${params.outdir}" not in command and "mag_bins/*.fa" not in command,
+                 "sequence task command searched a publish directory or a glob")
+-    print("sequence: real module staged nested MAG directory and emitted expected association")
++    print("sequence: real module staged nested MAG directory and scored without host links")
+ 
+ 
+ def suite_sample_ids(base):
+@@ -334,7 +338,8 @@
+     ]
+     for name, params in scenarios:
+         out, work, trace = base / f"out-{name}", base / f"work-{name}", base / f"trace-{name}.trace"
+-        run_nf(base, "link_sequence_optional.nf", fixture, out, work, trace, params)
++        execution = run_nf(base, "link_sequence_optional.nf", fixture, out, work, trace, params)
++        assert_true("OPTIONAL_LINK\t" not in execution.stdout, "TETRA leaked into unified host links")
+         task_statuses = trace_statuses(trace, "LINK_SEQUENCE")
+         if name == "no-plasmids":
+             assert_true(not task_statuses, "empty plasmid channel scheduled LINK_SEQUENCE")
+@@ -346,10 +351,15 @@
+         assert_true(not (table_dir / "S4.sequence_links.tsv").exists(), "taxonomy-only S4 was not filtered")
+         assert_true(len(task_statuses) == 2, f"{name}: expected two plasmid sample tasks, got {task_statuses}")
+         if name in ("default", "trimmed-list", "trimmed-string"):
+-            s1 = (table_dir / "S1.sequence_links.tsv").read_text()
+-            s2 = (table_dir / "S2.sequence_links.tsv").read_text()
+-            assert_true("sequence_similarity" in s1 and "sequence_similarity" not in s2,
++            def scored(sample):
++                with (table_dir / f"{sample}.sequence_scores.tsv").open() as stream:
++                    return list(csv.DictReader(stream, delimiter="\t"))
++            s1, s2 = scored("S1"), scored("S2")
++            assert_true(len(s1) == 1 and not s2,
+                         "present MAG and absent MAG did not take distinct expected branches")
++        for sid in ["S1", "S2"]:
++            with (table_dir / f"{sid}.sequence_links.tsv").open() as stream:
++                assert_true(not list(csv.DictReader(stream, delimiter="\t")), "Uncalibrated link file is nonempty")
+     for key in ("duplicate_keys", "duplicate_mag_keys", "duplicate_taxonomy_keys"):
+         duplicate = run_nf(base, "link_sequence_optional.nf", fixture, base / f"out-{key}",
+                            base / f"work-{key}", base / f"trace-{key}.trace",
+diff --git a/tests/run_mag_routing.py b/tests/run_mag_routing.py
+--- a/tests/run_mag_routing.py
++++ b/tests/run_mag_routing.py
+@@ -160,9 +160,11 @@
+                     if link_dirs:
+                         staged = {q.name: fasta(q) for q in (link_dirs[0] / 'mag_bins').glob('*')} if (link_dirs[0] / 'mag_bins').exists() else {}
+                         checks[sid + '_native_link_staged_DNA'] = staged == expected_bins
+-                        rows = list(csv.DictReader((link_dirs[0] / (sid + '.sequence_links.tsv')).open(), delimiter='\t'))
++                        links = list(csv.DictReader((link_dirs[0] / (sid + '.sequence_links.tsv')).open(), delimiter='\t'))
++                        checks[sid + '_uncalibrated_host_links_disabled'] = not links
++                        rows = list(csv.DictReader((link_dirs[0] / (sid + '.sequence_scores.tsv')).open(), delimiter='\t'))
+                         expected_hosts = {n.removesuffix('.gz').removesuffix('.fa') for n in expected_bins}
+-                        checks[sid + '_native_link_rows'] = len(rows) == 3 * len(expected_hosts) and {r['host_id'] for r in rows} == expected_hosts and all(r['sample_id'] == sid and r['plasmid_id'] in seqs for r in rows)
++                        checks[sid + '_native_score_rows'] = len(rows) == 3 * len(expected_hosts) and {r['host_id'] for r in rows} == expected_hosts and all(r['sample_id'] == sid and r['plasmid_id'] in seqs for r in rows)
+                     if 'das_tool' in selected:
+                         inputs = [json.loads(q.read_text()) for q in (p / 'work').rglob('observer-DAS-inputs.json') if json.loads(q.read_text())['sample'] == sid]
+                         checks[sid + '_all_available_binners'] = len(inputs) == bool(expected_bins) and (not inputs or set(inputs[0]['tables']) == {sid + '.' + b + '.tsv' for b in available & {'metabat2', 'concoct', 'semibin'}})
+@@ -170,7 +172,7 @@
+                 checks['no_dropped_or_duplicate_consumer_tasks'] = consumer_count == expected_consumer_count
+         runs.append({'case': name, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
+         print(name, checks, flush=True)
+-        source_names = ['main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'conf/nfcore_mag.config', 'modules/nf-core/gtdbtk/classifywf/main.nf', 'bin/normalize_gtdb_bins.py', 'modules/nf-core/semibin/singleeasybin/main.nf', 'bin/semibin_output_state.py', 'tests/nextflow/mag_selection.nf', 'tests/mag_interface_observer.py', 'tests/run_mag_routing.py']
++        source_names = ['main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'conf/nfcore_mag.config', 'modules/nf-core/gtdbtk/classifywf/main.nf', 'bin/normalize_gtdb_bins.py', 'modules/nf-core/semibin/singleeasybin/main.nf', 'bin/semibin_output_state.py', 'tests/nextflow/mag_selection.nf', 'tests/mag_interface_observer.py', 'tests/run_mag_routing.py', 'subworkflows/host_linking.nf', 'modules/linking/sequence.nf', 'bin/sequence_similarity_link.R']
+         receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in source_names}, 'limitations': ['explicit synthetic binner/DAS/CheckM/GTDB observers, fake BAM/db inputs; no tool inference or scientific accuracy claim', 'actual original workflow + gzip/converter helper + native R host linking; per-sample bin identity/DNA/metadata/multiplicity checks', 'GTDB observer verifies private normalized staging and unchanged final-bin identities, not the actual classifier; separate real2.7.2 parser/selection tests, no image/nf-test framework/full platform']}
+         if mag_host:
+             receipt['source_sha256']['subworkflows/mag_host.nf'] = hashlib.sha256(mag_host.read_bytes()).hexdigest()
+diff --git a/tests/r_mock/run_r_mock_tests.sh b/tests/r_mock/run_r_mock_tests.sh
+--- a/tests/r_mock/run_r_mock_tests.sh
++++ b/tests/r_mock/run_r_mock_tests.sh
+@@ -148,11 +148,12 @@
+ # ---------- 7. sequence_similarity_link.R ----------
+ Rscript "$BIN/sequence_similarity_link.R" --plasmid-contigs S1.plasmid_contigs.fasta \
+   --host-genomes mag_bins --taxonomy taxonomy.tsv --sample-id S1 \
+-  --min-similarity 0.7 --out sequence_links.tsv 2>seq.err
++  --min-similarity 0.7 --out sequence_links.tsv --out-scores sequence_scores.tsv 2>seq.err
+ check "sequence_similarity_link exits 0" test $? -eq 0
+-check_grep "identical sequence links to bin.1" sequence_links.tsv $'	bin.1	'
+-check_grep "taxonomy attached" sequence_links.tsv "d__Bacteria"
+-check_grep "TETRA method label" sequence_links.tsv "method=tetra_markov256_v1"
++check_grep "identical sequence scores bin.1" sequence_scores.tsv $'	bin.1	'
++check_grep "taxonomy attached" sequence_scores.tsv "d__Bacteria"
++check_grep "TETRA method label" sequence_scores.tsv "tetra_markov256_v1"
++check "uncalibrated host links disabled" test "$(wc -l < sequence_links.tsv)" -eq 1
+ 
+ # ---------- 8. longread_bridge_link.R ----------
+ Rscript "$BIN/longread_bridge_link.R" --sam alignments.sam --plasmid-contigs S1.plasmid_contigs.fasta \
+diff --git a/bin/generate_report.R b/bin/generate_report.R
+--- a/bin/generate_report.R
++++ b/bin/generate_report.R
+@@ -78,7 +78,9 @@
+   "Sequence-based circularity is predictive and should be confirmed from ",
+   "the assembly graph or read support. The circular count represents candidates, ",
+   "not confirmed topology. Terminal inverted repeats alone do not establish ",
+-  "circularity; an unsupported call has unknown topology, not confirmed linearity.")
++  "circularity; an unsupported call has unknown topology, not confirmed linearity. ",
++  "TETRA composition scores are not host assignments; uncalibrated TETRA host links ",
++  "are disabled after the source-host benchmark failed acceptance.")
+ 
+ # Reporting has no published-directory discovery mode. Every measurement is
+ # an explicit current-execution input, with sample membership checked first.
+diff --git a/tests/test_generate_report.py b/tests/test_generate_report.py
+--- a/tests/test_generate_report.py
++++ b/tests/test_generate_report.py
+@@ -78,6 +78,9 @@
+         markdown = (self.output / "report.md").read_text()
+         html = (self.output / "report.html").read_text()
+         self.assertIn("- Samples: 3", markdown)
++        self.assertIn("TETRA composition scores are not host assignments", markdown)
++        self.assertIn("uncalibrated TETRA host links are disabled", markdown)
++        self.assertIn("uncalibrated TETRA host links are disabled", html)
+         for sample, (contigs, circular, tool) in expected.items():
+             line = f"| {sample} | {contigs} | {circular} | {tool} |"
+             self.assertIn(line, markdown)
+diff --git a/tests/run_tetra_scores_only.py b/tests/run_tetra_scores_only.py
+--- /dev/null
++++ b/tests/run_tetra_scores_only.py
+@@ -0,0 +1,81 @@
++#!/usr/bin/env python3
++"""Before/current native score-only contract; synthetic self-match is not host truth."""
++import argparse
++import csv
++import hashlib
++import json
++import math
++from pathlib import Path
++import random
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def rows(path):
++    with path.open() as stream:
++        return list(csv.DictReader(stream, delimiter='\t'))
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--before', type=Path, required=True)
++    args = parser.parse_args()
++    base = args.output.resolve(); base.mkdir(parents=True, exist_ok=False)
++    rng = random.Random(390402026)
++    dna = ''.join(rng.choices('ACGT', k=4000))
++    fasta = base / 'plasmid.fa'; fasta.write_text('>self_math_control\n' + dna + '\n')
++    mags = base / 'bins'; mags.mkdir()
++    (mags / 'candidate.fna').write_text('>synthetic_chromosome\n' + dna + '\n')
++    taxonomy = base / 'taxonomy.tsv'
++    taxonomy.write_text('user_genome\tclassification\ncandidate\td__INTERFACE_MARKER\n')
++    inputs = {str(p.relative_to(base)): sha(p) for p in [fasta, mags / 'candidate.fna', taxonomy]}
++    sources = ['bin/sequence_similarity_link.R', 'modules/linking/sequence.nf',
++               'subworkflows/host_linking.nf', 'tests/run_tetra_scores_only.py']
++    hashes = {p: sha(ROOT / p) for p in sources}
++    runs = []
++    for name, old, cutoff in [('before', True, None), ('current', False, None),
++                              ('legacy-zero', False, '0'), ('legacy-one', False, '1')]:
++        folder = base / name; folder.mkdir()
++        script = args.before.resolve() if old else ROOT / 'bin/sequence_similarity_link.R'
++        cmd = ['Rscript', str(script), '--plasmid-contigs', str(fasta), '--host-genomes', str(mags),
++               '--taxonomy', str(taxonomy), '--sample-id', 'A__B.v1', '--out', str(folder / 'links.tsv'),
++               '--out-scores', str(folder / 'scores.tsv'), '--out-profile-status', str(folder / 'method.json')]
++        if cutoff is not None: cmd += ['--min-similarity', cutoff]
++        proc = subprocess.run(cmd, text=True, capture_output=True)
++        (folder / 'stdout.log').write_text(proc.stdout); (folder / 'stderr.log').write_text(proc.stderr)
++        assert proc.returncode == 0, proc.stderr
++        scores = rows(folder / 'scores.tsv'); links = rows(folder / 'links.tsv')
++        assert len(scores) == 1 and math.isclose(float(scores[0]['score']), 1, rel_tol=0, abs_tol=1e-12)
++        assert scores[0]['sample_id'] == 'A__B.v1' and scores[0]['host_id'] == 'candidate'
++        method = json.loads((folder / 'method.json').read_text())
++        if old:
++            assert len(links) == 1 and links[0]['evidence_type'] == 'sequence_similarity'
++        else:
++            assert scores[0]['score'] == runs[0]['scores'][0]['score'], 'Composition score changed'
++            assert not links
++            assert scores[0]['host_taxonomy'] == 'd__INTERFACE_MARKER'
++            assert scores[0]['association_status'] == 'disabled_uncalibrated'
++            assert 'threshold_pass' not in scores[0] and 'threshold' not in scores[0]
++            assert method['host_links_enabled'] is False
++            assert method['threshold_status'] == 'not_applied_uncalibrated'
++            if cutoff is not None: assert 'deprecated and ignored' in proc.stderr
++        runs.append({'case': name, 'command': cmd, 'exit_code': proc.returncode,
++                     'scores': scores, 'links': links, 'method': method})
++    assert inputs == {str(p.relative_to(base)): sha(p) for p in [fasta, mags / 'candidate.fna', taxonomy]}
++    assert hashes == {p: sha(ROOT / p) for p in sources}
++    payload = {'pass': True, 'runs': runs, 'source_sha256': hashes, 'inputs_sha256': inputs,
++               'before_sha256': sha(args.before.resolve()),
++               'limitations': ['Synthetic full-rank self-match is an exact mathematical control, not a known host assignment or host accuracy benchmark.',
++                               'Score-only suppression is intentional after failed independent threshold acceptance; no scientific threshold is claimed valid.']}
++    (base / 'run.json').write_text(json.dumps(payload, indent=2) + '\n')
++    print('PASS: unchanged self-match score1; original link removed; legacy cutoffs0/1 cannot enable links')
++
++
++if __name__ == '__main__':
++    main()

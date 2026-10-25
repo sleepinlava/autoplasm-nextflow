@@ -1,0 +1,10 @@
+group	commit	subject
+01-assembly-qc	9d36a98f8e7a516f4c7376a6a22eb1fb4124d7ee	fix(assembly): enforce QC, assembly and Recycler output contracts
+02-detection-typing	65108a8a70f4561a807ad22d8579661cbc2a06d5	fix(detection): validate classifier and COPLA runtime contracts
+03-optional-binning	8a396f05ddea90804071bbaab775e077b8768245	fix(binning): lock gplas and PlasMAAG execution boundaries
+04-annotation-host	817c29c66476e45dbdef8bbb834aec918bd538bc	fix(annotation): enforce CARD and HOTSPOT resource contracts
+05-mag-interfaces	ced1024b12ae504c6dcef330aa18eacf1bd833cd	fix(mag): preserve bin membership and explicit result states
+06-approved-methods-integration	cfcb329270e4823745c553d3c4e98b5fe546343c	feat(methods)!: integrate approved scientific workflow changes
+07-tests	3e84f66331342027f062eccc077affe09b25cc1f	test(audit): strengthen semantic, native and failure regressions
+08-repository-hygiene	b02671b7516343e9f92ed6d5d92408c02ba24b32	chore(repo): exclude audit runtime and test scratch artifacts
+09-audit-evidence	SELF	docs(audit): checkpoint findings, evidence and remaining work

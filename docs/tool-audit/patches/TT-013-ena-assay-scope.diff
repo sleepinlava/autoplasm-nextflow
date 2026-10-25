@@ -1,0 +1,109 @@
+diff --git a/tests/nf-test/nodes-cross-sample-ena.nf.test b/tests/nf-test/nodes-cross-sample-ena.nf.test
+--- a/tests/nf-test/nodes-cross-sample-ena.nf.test
++++ b/tests/nf-test/nodes-cross-sample-ena.nf.test
+@@ -1,17 +1,20 @@
+-// P4 real multi-sample integration: ENA PRJNA848809 sugarbeet bacteriome,
++// Legacy execution fixture: ENA PRJNA848809 sugarbeet 16S amplicons,
+ // day 6, 3 infected vs 3 control runs (locked in ena-multisample.lock.json,
+ // prepared by prepare_data.py --dataset ena-multi; ENA_TEST_DATA points there).
+ // geNomad test database still comes from AUTOPLASM_TEST_DATA (real-nodes).
+-// Drives shared quantification / STATISTICS_INPUTS / DIVERSITY / DESeq2 /
+-// NETWORK_PREPARE / FASTSPAR / REPORT on genuine biological replicates.
++// ENA's WGS label conflicts with its experiment design and the original paper
++// (doi:10.3390/ijms23158073, section 4.2: 16S PCR). This is unsuitable for
++// shotgun plasmid validation or a biological negative-control claim.
++// Retain the shared-quantification/statistics/report execution assertions;
++// full P4 still requires an appropriate nonempty shotgun cohort (TT-003/013).
+ // network_min_samples is lowered from the production default (20) to 6 to
+ // exercise the code path; this tests execution, not statistical power.
+ // Backend: podman. No snapshots; assertions are structural contracts.
+ nextflow_pipeline {
+-    name 'P4 ENA real multi-sample cross-sample stats'
++    name 'Legacy ENA 16S execution contracts (not shotgun P4)'
+     script '../../main.nf'
+     config './ena.config'
+-    tag 'P4'
++    tag 'legacy-16s-execution'
+     tag 'ena-multi'
+     tag 'backend-podman'
+ 
+diff --git a/tests/nf-test/ena-multisample.lock.json b/tests/nf-test/ena-multisample.lock.json
+--- a/tests/nf-test/ena-multisample.lock.json
++++ b/tests/nf-test/ena-multisample.lock.json
+@@ -1,6 +1,14 @@
+ {
+   "schema_version": 1,
+   "source": "ENA PRJNA848809 (Sugarbeet leaf bacteriome, BCTV infected vs control, day 6)",
++  "documented_assay": "16S rRNA PCR amplicon sequencing; not shotgun plasmid validation",
++  "assay_evidence": {
++    "experiment": "https://www.ebi.ac.uk/ena/browser/api/xml/SRX15688496",
++    "publication": "https://doi.org/10.3390/ijms23158073",
++    "publication_section": "4.2 Genomic DNA Extraction, PCR Amplification, and 16S rRNA Sequencing",
++    "metadata_conflict": "ENA LIBRARY_STRATEGY=WGS and LIBRARY_SELECTION=RANDOM conflict with the explicit 16S experiment design and paper",
++    "validation_scope": "legacy execution contracts only; no plasmid absence, abundance, differential or network biological claim"
++  },
+   "ena_groups": {
+     "SRR19638267": "infected",
+     "SRR19638268": "infected",
+diff --git a/tests/nf-test/ena.config b/tests/nf-test/ena.config
+--- a/tests/nf-test/ena.config
++++ b/tests/nf-test/ena.config
+@@ -1,7 +1,8 @@
+-// ENA multi-sample overlay: real low-biomass leaf bacteriome runs assemble to
++// Legacy ENA 16S amplicon execution overlay (not shotgun P4): runs assemble to
+ // short contigs only (e.g. SRR19638270: 28 contigs >=200 bp, 0 >=500 bp).
+ // QUAST's default --min-contig 500 would exit 4 on such real assemblies, so
+-// this test profile lowers the threshold to keep QUAST's real statistics.
++// this historical test profile lowers the threshold to keep QUAST statistics.
++// Short assemblies do not establish low biomass; see TT-013 and the data lock.
+ // Production config (conf/nfcore_qc_assembly.config) is unchanged.
+ includeConfig './integration.config'
+ 
+diff --git a/tests/nf-test/README.md b/tests/nf-test/README.md
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -9,7 +9,7 @@
+ | P1 | 现有 nf-core fastp、fastqc、samtools/sort、megahit 完整测试 | 保留上游断言及快照；分别统计真实运行与 stub |
+ | P2 | Illumina、assembly、ONT、hybrid、HiFi 核心流程 | 真实工具运行成功，trace 无失败；共识、结构、组装评估、丰度和报告符合契约 |
+ | P3 | 单节点真实小数据（`nodes-*.nf.test`，详见 [COVERAGE.md](COVERAGE.md)） | process/workflow 成功 + 输出契约断言；断言用上游固定事实 |
+-| P4 | ENA 真实多样本（PRJNA848809，3 感染 vs 3 对照）跨样本统计 | 全链路到多样性/差异/DESeq2/网络/报告，分组来自真实样本元数据 |
++| P4 | 适用的真实 shotgun 多样本与非空质粒统计链路（待验收） | 实际拟合、网络资格与报告；旧 PRJNA848809 为 16S 扩增子，不认证此范围 |
+ 
+ P0/P2 使用 `P0`/`P2` tag，P2 还可按平台 tag 筛选。P1 直接选择已有文件，
+ 没有为了添加 tag 修改上游测试。缺失程序、数据库或网络导致的失败必须报告为环境阻塞，
+@@ -137,7 +137,7 @@
+   --dataset real-nodes --outdir results/nf-test/real-nodes-data
+ export AUTOPLASM_TEST_DATA="$PWD/results/nf-test/real-nodes-data"
+ 
+-# ENA 真实多样本（PRJNA848809，d6 期 3 感染 vs 3 对照，官方 md5 锁定）
++# 历史 ENA 16S 执行 fixture（PRJNA848809，官方 md5 锁定；不认证 shotgun P4）
+ uv run --project tests/nf-test --locked --no-sync python tests/nf-test/prepare_data.py \
+   --dataset ena-multi --outdir results/nf-test/ena-multi
+ export ENA_TEST_DATA="$PWD/results/nf-test/ena-multi"
+@@ -185,7 +185,7 @@
+   --profile podman --ci --junitxml results/nf-test/w3-platon.xml --log results/nf-test/w3-platon.log
+ ```
+ 
+-P4（ENA 跨样本全链路；quast 阈值为真实低生物量样本下调到 200，见 ena.config 注释）：
++历史 ENA 执行用例（16S 扩增子；独立 tag 为 `legacy-16s-execution`，不计 shotgun P4；QUAST 阈值 200，见 ena.config）：
+ 
+ ```bash
+ "$NFT_BIN" test -c tests/nf-test.config tests/nf-test/nodes-cross-sample-ena.nf.test \
+diff --git a/docs/tool-audit/contracts/ena-assay-scope.md b/docs/tool-audit/contracts/ena-assay-scope.md
+new file mode 100644
+--- /dev/null
++++ b/docs/tool-audit/contracts/ena-assay-scope.md
+@@ -0,0 +1,13 @@
++# ENA 历史用例的实验类型与验收范围（TT-013）
++
++2026-10-25；原始响应和变更前来源保存在 `results/tool-audit/20261025-p4-assay-audit/`。
++
++PRJNA848809 的 portal 表将 12 个 run 标为 WGS/METAGENOMIC/RANDOM，但所有 experiment title 均指向 16S。抽查 SRR19638267 对应 SRX15688496 的原始 XML，实验设计也明确为 16S。对应原始论文（DOI 10.3390/ijms23158073）第 4.2 节描述 341F/805R 引物 PCR；第 4.5 节将数据关联到该 BioProject。因此，不能单凭结构化 WGS 字段把这组数据认定为适用的 shotgun 质粒验证数据。
++
++来源：[ENA 原始实验](https://www.ebi.ac.uk/ena/browser/api/xml/SRX15688496)、[作者论文](https://www.mdpi.com/1422-0067/23/15/8073)。XML 首次获取失败后重试成功；USDA 论文下载超时保留，不伪造本地全文。论文方法与项目关联通过公开论文检索核对。
++
++原用例仍可显式运行，名称和 tag 改为历史 16S 执行契约，移出 P4 tag；生产科学方法不变。`when` 参数、整个 `then` 断言块、六个分组及十二个下载文件/MD5 均保持原样；独立核对十二个 MD5 与当前 ENA 官方表完全一致。数据锁增加实验类型、来源和冲突说明。QUAST 阈值 200 保留为历史配置，不再把短组装解释为低生物量。
++
++该用例不能认证质粒缺失、质粒丰度、差异或网络的生物学结论，也不能满足真实非空 shotgun P4。TT-003 仍需适用的真实数据、实际非空统计与完整部署验证；不通过降低门槛、复制技术样本或制造质粒阳性来关闭。已有受控原生统计用例仍只认证其数值和执行范围。
++
++`evidence-check.json` 核对实际 run→experiment、原始说明、十二 MD5 和断言字节不变。nf-test dry discovery 单列记录，只证明用例能被发现，不表示实际执行或方法通过。TT-013 的范围修正待与统一来源/补丁验收一起接受；此前 receipt 保持冻结。

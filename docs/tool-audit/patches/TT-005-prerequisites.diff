@@ -1,0 +1,2030 @@
+--- a/modules/nf-core/blast/blastn/tests/main.nf.test
++++ b/modules/nf-core/blast/blastn/tests/main.nf.test
+@@ -12,7 +12,7 @@
+ 
+     setup {
+         run("BLAST_MAKEBLASTDB") {
+-            script "../../makeblastdb/main.nf"
++            script "tests/nf-test/prerequisites/nf-core/blast/makeblastdb/main.nf"
+             process {
+                 """
+                 input[0] = [ [id:'test2'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true) ]
+--- a/modules/nf-core/eggnogmapper/tests/main.nf.test
++++ b/modules/nf-core/eggnogmapper/tests/main.nf.test
+@@ -15,7 +15,7 @@
+     test("sarscov2 - proteome - diamond") {
+         setup {
+             run("DIAMOND_MAKEDB") {
+-                script "../../diamond/makedb/main.nf"
++                script "tests/nf-test/prerequisites/nf-core/diamond/makedb/main.nf"
+                 process {
+                     """
+                     input[0] = [ [id:'dmnd_db'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
+@@ -56,7 +56,7 @@
+     test("sarscov2 - proteome - mmseqs") {
+         setup {
+             run("MMSEQS_CREATEDB") {
+-                script "../../mmseqs/createdb/main.nf"
++                script "tests/nf-test/prerequisites/nf-core/mmseqs/createdb/main.nf"
+                 process {
+                     """
+                     input[0] = [ [id:'mmseqs_db'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
+@@ -94,7 +94,7 @@
+     test("sarscov2 - proteome - no_search") {
+         setup {
+             run("DIAMOND_MAKEDB") {
+-                script "../../diamond/makedb/main.nf"
++                script "tests/nf-test/prerequisites/nf-core/diamond/makedb/main.nf"
+                 process {
+                     """
+                     input[0] = [ [id:'dmnd_db'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
+@@ -146,7 +146,7 @@
+         options '-stub'
+         setup {
+             run("DIAMOND_MAKEDB") {
+-                script "../../diamond/makedb/main.nf"
++                script "tests/nf-test/prerequisites/nf-core/diamond/makedb/main.nf"
+                 process {
+                     """
+                     input[0] = [ [id:'dmnd_db'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
+--- a/modules/nf-core/genomad/endtoend/tests/main.nf.test
++++ b/modules/nf-core/genomad/endtoend/tests/main.nf.test
+@@ -13,7 +13,7 @@
+ 
+     setup {
+         run("UNTAR") {
+-            script "../../../untar/main.nf"
++            script "tests/nf-test/prerequisites/nf-core/untar/main.nf"
+             process {
+                 """
+                 input[0] = [
+--- a/modules/nf-core/gtdbtk/classifywf/tests/main.nf.test
++++ b/modules/nf-core/gtdbtk/classifywf/tests/main.nf.test
+@@ -13,7 +13,7 @@
+ 
+     setup {
+         run("UNTAR") {
+-            script "../../../untar/main.nf"
++            script "tests/nf-test/prerequisites/nf-core/untar/main.nf"
+             process {
+             """
+             input[0] = [
+--- a/modules/nf-core/hifiadapterfilt/hifiadapterfilt/tests/main.nf.test
++++ b/modules/nf-core/hifiadapterfilt/hifiadapterfilt/tests/main.nf.test
+@@ -12,7 +12,7 @@
+ 
+     setup {
+         run("HIFIADAPTERFILT_DOWNLOADDB") {
+-            script "../../downloaddb/main.nf"
++            script "tests/nf-test/prerequisites/nf-core/hifiadapterfilt/downloaddb/main.nf"
+         }
+     }
+ 
+--- a/modules/nf-core/kraken2/kraken2/tests/main.nf.test
++++ b/modules/nf-core/kraken2/kraken2/tests/main.nf.test
+@@ -10,7 +10,7 @@
+ 
+     setup {
+         run("UNTAR") {
+-            script "modules/nf-core/untar/main.nf"
++            script "tests/nf-test/prerequisites/nf-core/untar/main.nf"
+             process {
+                 """
+                 input[0] = Channel.of([
+--- a/modules/nf-core/macsyfinder/search/tests/main.nf.test
++++ b/modules/nf-core/macsyfinder/search/tests/main.nf.test
+@@ -56,7 +56,7 @@
+ 
+         setup {
+             run("PIGZ_COMPRESS") {
+-                script "../../../pigz/compress/main.nf"
++                script "tests/nf-test/prerequisites/nf-core/pigz/compress/main.nf"
+                 process {
+                     """
+                     input[0] = [
+--- a/modules/nf-core/metabat2/metabat2/tests/main.nf.test
++++ b/modules/nf-core/metabat2/metabat2/tests/main.nf.test
+@@ -27,7 +27,7 @@
+         }
+ 
+         run("GUNZIP") {
+-            script "../../../gunzip/main.nf"
++            script "tests/nf-test/prerequisites/nf-core/gunzip/main.nf"
+             process {
+                 """
+                 input[0] = METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.out.depth
+--- a/modules/nf-core/metaphlan/metaphlan/tests/main.nf.test
++++ b/modules/nf-core/metaphlan/metaphlan/tests/main.nf.test
+@@ -12,7 +12,7 @@
+ 
+     setup {
+         run("UNTAR") {
+-            script "modules/nf-core/untar/main.nf"
++            script "tests/nf-test/prerequisites/nf-core/untar/main.nf"
+             process {
+                 """
+                 input[0] = Channel.of([
+--- a/modules/nf-core/rgi/main/tests/main.nf.test
++++ b/modules/nf-core/rgi/main/tests/main.nf.test
+@@ -13,7 +13,7 @@
+ 
+     setup {
+         run("UNTAR") {
+-            script "modules/nf-core/untar/main.nf"
++            script "tests/nf-test/prerequisites/nf-core/untar/main.nf"
+             process {
+             """
+             file('https://card.mcmaster.ca/latest/data', checkIfExists: true).copyTo('card-data.tar.bz2')
+@@ -27,7 +27,7 @@
+         }
+ 
+         run("RGI_CARDANNOTATION") {
+-            script "modules/nf-core/rgi/cardannotation"
++            script "tests/nf-test/prerequisites/nf-core/rgi/cardannotation/main.nf"
+             process {
+                 """
+                 input[0] = UNTAR.out.untar.map{ it[1] }
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -497,3 +497,9 @@
+ 必须使用提供生产配置的原生或Conda overlay，不再使用无依赖的Python容器冒充PlasX。P3断言同时检查两任务、三类注释、原生运行记录、样本状态域及标准库独立计数/logistic算术；不把本次自动输出更新成“独立生物真值”快照。`tests/run_plasx_native.py --workflow <有execution.json的冷运行目录> --source <官方源码> --model <原模型> --output <新核验目录>`可单独核对既有执行，`--prefix <原生环境>`另执行未修改官方predict对照；`--products`只验证产物，不能代替执行证据。整个组装0基因目前原生明确失败，排除支持；无COG/Pfam命中及未评分contig另行核验。
+ 
+ 本批仍按receipt和JUnit决定验收，不能仅凭新增P3文件或资源准备成功宣称通过。更多范围、官方预计算表与当前自动注释的差异及失败尝试见`docs/tool-audit/contracts/plasx-native.md`。
++
++## 固定的上游测试前置模块
++
++`prerequisites/`保存8类测试专用helper，按各consumer在`modules.json`中的固定commit获取；24个代码/环境/metadata文件、原MIT许可和完整来源见`source-lock.json`。10个vendored suite的14处setup引用现在指向此目录，生产工具版本和模块登记保持不变。更新consumer后须同步核对这些来源。
++
++`docs/tool-audit/scripts/check_vendored_prerequisites.py`检查literal路径、源文件Git blob和consumer版本。实际nf-test `--dryRun`只执行发现：它打印的PASSED不能算已执行测试。真实归档I/O另由`tests/run_upstream_prerequisites.py`对固定FASTA、匹配版本的工具prefix、meta和CRC错误传播检查；这不认证其他需要模型/数据库的P1用例。原HiFi下载模块使用master数据库，实际运行前需另外固定其数据身份。完整范围见`docs/tool-audit/contracts/vendored-prerequisites.md`。
+--- /dev/null
++++ b/docs/tool-audit/scripts/check_vendored_prerequisites.py
+@@ -0,0 +1,69 @@
++#!/usr/bin/env python3
++"""Resolve literal vendored test scripts and verify pinned test-only helpers."""
++import argparse
++import csv
++from collections import Counter
++import hashlib
++import json
++from pathlib import Path
++import re
++
++ROOT = Path(__file__).resolve().parents[3]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--table', type=Path)
++    args = parser.parse_args()
++    rows = []
++    for suite in sorted((ROOT / 'modules/nf-core').rglob('*.nf.test')):
++        text = re.sub(r'/\*.*?\*/', '', suite.read_text(), flags=re.S)
++        text = re.sub(r'(?m)^\s*//.*$', '', text)
++        for match in re.finditer(r'\bscript\s+([\"\x27])([^\n]*?)\1', text):
++            reference = match[2]
++            resolved = None
++            if '$' not in reference:
++                for base in [suite.parent / reference, ROOT / reference]:
++                    candidates = [base, Path(str(base) + '.nf'), base / 'main.nf']
++                    resolved = next((p.resolve() for p in candidates if p.is_file()), None)
++                    if resolved is not None:
++                        break
++            state = 'dynamic' if '$' in reference else 'resolved' if resolved else 'missing'
++            rows.append(dict(suite=str(suite.relative_to(ROOT)), script_reference=reference,
++                             resolved_path=str(resolved.relative_to(ROOT)) if resolved else '', state=state,
++                             limitation='Literal-path resolution only; native execution and test assertion validity are separate'))
++    helper_root = ROOT / 'tests/nf-test/prerequisites'
++    lock = json.loads((helper_root / 'source-lock.json').read_text())
++    helpers = []
++    for entry in lock['files']:
++        path = ROOT / entry['path']
++        data = path.read_bytes()
++        sha = hashlib.sha256(data).hexdigest()
++        blob = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
++        ok = not path.is_symlink() and sha == entry['sha256'] and all(blob == ref['git_blob'] for ref in entry['source_refs'])
++        helpers.append(dict(path=entry['path'], sha256=sha, git_blob=blob, source_ref_count=len(entry['source_refs']), matches=ok))
++    modules = json.loads((ROOT / 'modules.json').read_text())['repos']['https://github.com/nf-core/modules.git']['modules']['nf-core']
++    expected = Counter((x['suite'], 'tests/nf-test/prerequisites/nf-core/' + x['dependency'] + '/main.nf') for x in lock['consumers'])
++    observed = Counter((x['suite'], x['script_reference']) for x in rows if x['script_reference'].startswith('tests/nf-test/prerequisites/'))
++    revisions = all(modules[x['consumer']]['git_sha'] == x['revision'] for x in lock['consumers'])
++    license_ok = hashlib.sha256((helper_root / lock['license']['path']).read_bytes()).hexdigest() == lock['license']['sha256']
++    missing = [x for x in rows if x['state'] == 'missing']
++    result = dict(rows=rows, helper_files=helpers, missing_literal_scripts=missing,
++                  dynamic_reference_count=sum(x['state'] == 'dynamic' for x in rows),
++                  expected_setup_reference_count=sum(expected.values()), actual_setup_reference_count=sum(observed.values()),
++                  consumer_revisions_match=revisions, setup_references_match=expected == observed,
++                  license_matches=license_ok,
++                  scope='Current vendored test literal scripts plus24 fixed upstream helper definitions/environment/metadata and14 consumer setup references. No native P1 or scientific accuracy certification.')
++    result['pass'] = not missing and all(x['matches'] for x in helpers) and revisions and expected == observed and license_ok
++    args.output.write_text(json.dumps(result, indent=2) + '\n')
++    if args.table:
++        with args.table.open('w') as stream:
++            writer = csv.DictWriter(stream, fieldnames=list(rows[0]), delimiter='\t', lineterminator='\n')
++            writer.writeheader(); writer.writerows(rows)
++    print(f'{len(rows)} literal references; {len(missing)} missing; {len(helpers)} helper files; {sum(expected.values())} setup references')
++    return 0 if result['pass'] else 1
++
++
++if __name__ == '__main__':
++    raise SystemExit(main())
+--- /dev/null
++++ b/tests/nextflow/upstream_archive_prerequisites.nf
+@@ -0,0 +1,17 @@
++nextflow.enable.dsl=2
++include { UNTAR as UNTAR_NESTED; UNTAR as UNTAR_FLAT } from '../nf-test/prerequisites/nf-core/untar/main'
++include { GUNZIP } from '../nf-test/prerequisites/nf-core/gunzip/main'
++include { PIGZ_COMPRESS } from '../nf-test/prerequisites/nf-core/pigz/compress/main'
++
++workflow {
++    GUNZIP(Channel.value(tuple([id:'decoded', group:'preserved'], file(params.gzip, checkIfExists:true))))
++    GUNZIP.out.gunzip.view { meta, result -> "DECODED=${meta.id}:${meta.group}:${result}" }
++    if (params.execute_other_tools) {
++        PIGZ_COMPRESS(Channel.value(tuple([id:'compressed', group:'preserved'], file(params.fasta, checkIfExists:true))))
++        UNTAR_NESTED(Channel.value(tuple([id:'nested', group:'preserved'], file(params.nested_archive, checkIfExists:true))))
++        UNTAR_FLAT(Channel.value(tuple([id:'flat', group:'preserved'], file(params.flat_archive, checkIfExists:true))))
++        PIGZ_COMPRESS.out.archive.view { meta, result -> "COMPRESSED=${meta.id}:${meta.group}:${result}" }
++        UNTAR_NESTED.out.untar.view { meta, result -> "NESTED=${meta.id}:${meta.group}:${result}" }
++        UNTAR_FLAT.out.untar.view { meta, result -> "FLAT=${meta.id}:${meta.group}:${result}" }
++    }
++}
+--- /dev/null
++++ b/tests/nf-test/prerequisites/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) Philip Ewels
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+--- /dev/null
++++ b/tests/nf-test/prerequisites/README.md
+@@ -0,0 +1,5 @@
++# Fixed upstream test prerequisites
++
++These eight helpers are used only by setup blocks in ten vendored test suites (fourteen references). Files match the exact consumer commits recorded in source-lock.json; the identical UNTAR definitions are shared. Production module versions and modules.json remain unchanged. Upstream MIT license is included.
++
++Discovery and definition availability do not certify native execution, databases, snapshots, tool accuracy, or container readiness. In particular the original HiFi downloader uses a moving database URL; validate and lock its actual data before a native scientific test.
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/blast/makeblastdb/environment.yml
+@@ -0,0 +1,7 @@
++---
++# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/environment-schema.json
++channels:
++  - conda-forge
++  - bioconda
++dependencies:
++  - bioconda::blast=2.17.0
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/blast/makeblastdb/main.nf
+@@ -0,0 +1,58 @@
++process BLAST_MAKEBLASTDB {
++    tag "$meta.id"
++    label 'process_medium'
++
++    conda "${moduleDir}/environment.yml"
++    container "${ workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container ?
++        'https://community-cr-prod.seqera.io/docker/registry/v2/blobs/sha256/0c/0c86cbb145786bf5c24ea7fb13448da5f7d5cd124fd4403c1da5bc8fc60c2588/data':
++        'community.wave.seqera.io/library/blast:2.17.0--d4fb881691596759' }"
++
++    input:
++    tuple val(meta), path(fasta)
++    path(taxid_map)
++
++    output:
++    tuple val(meta), path("${prefix}"), emit: db
++    tuple val("${task.process}"), val("makeblastdb"), eval("makeblastdb -version 2>&1 | sed 's/^.*makeblastdb: //; s/ .*\$//'"), topic: versions, emit: versions_makeblastdb
++
++    when:
++    task.ext.when == null || task.ext.when
++
++    script:
++    def args           = task.ext.args ?: ''
++    prefix             = task.ext.prefix ?: "${meta.id}"
++    def is_compressed  = fasta.getExtension() == "gz" ? true : false
++    def fasta_name     = is_compressed ? fasta.getBaseName() : fasta
++    def taxid_map_cmd  = taxid_map ? "-taxid_map ${taxid_map}" : ""
++    """
++    if [ "${is_compressed}" == "true" ]; then
++        gzip -c -d ${fasta} > ${fasta_name}
++    fi
++
++    makeblastdb \\
++        -in ${fasta_name} \\
++        -out ${prefix}/${fasta_name} \\
++        ${args} \\
++        ${taxid_map_cmd}
++
++    """
++
++    stub:
++    prefix             = task.ext.prefix ?: "${meta.id}"
++    def is_compressed  = fasta.getExtension() == "gz" ? true : false
++    def fasta_name     = is_compressed ? fasta.getBaseName() : fasta
++    """
++    touch ${fasta_name}.fasta
++    touch ${fasta_name}.fasta.ndb
++    touch ${fasta_name}.fasta.nhr
++    touch ${fasta_name}.fasta.nin
++    touch ${fasta_name}.fasta.njs
++    touch ${fasta_name}.fasta.not
++    touch ${fasta_name}.fasta.nsq
++    touch ${fasta_name}.fasta.ntf
++    touch ${fasta_name}.fasta.nto
++    mkdir ${prefix}
++    mv ${fasta_name}* ${prefix}
++
++    """
++}
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/blast/makeblastdb/meta.yml
+@@ -0,0 +1,74 @@
++name: blast_makeblastdb
++description: Builds a BLAST database
++keywords:
++  - fasta
++  - blast
++  - database
++tools:
++  - blast:
++      description: |
++        BLAST finds regions of similarity between biological sequences.
++      homepage: https://blast.ncbi.nlm.nih.gov/Blast.cgi
++      documentation: https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Web&PAGE_TYPE=Blastdocs
++      doi: 10.1016/S0022-2836(05)80360-2
++      licence:
++        - "US-Government-Work"
++      identifier: ""
++input:
++  - - meta:
++        type: map
++        description: |
++          Groovy Map containing sample information
++          e.g. [ id:'test', single_end:false ]
++    - fasta:
++        type: file
++        description: Input fasta file
++        pattern: "*.{fa,fasta,fa.gz,fasta.gz}"
++        ontologies:
++          - edam: http://edamontology.org/format_1929
++  - taxid_map:
++      type: file
++      description: taxID mapping files are tab-delimited text files used to map custom sequence IDs to NCBI taxonomic identifiers (taxIDs) during the creation of a BLAST database
++      pattern: "*.txt"
++      ontologies:
++        - edam: http://edamontology.org/format_2330
++output:
++  db:
++    - - meta:
++          type: map
++          description: |
++            Groovy Map containing sample information
++            e.g. [ id:'test', single_end:false ]
++      - ${prefix}:
++          type: directory
++          description: Output directory containing blast database files
++          pattern: "*"
++  versions_makeblastdb:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - makeblastdb:
++          type: string
++          description: The name of the tool
++      - "makeblastdb -version 2>&1 | sed 's/^.*makeblastdb: //; s/ .*\\$//'":
++          type: eval
++          description: The expression to obtain the version of the tool
++topics:
++  versions:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - makeblastdb:
++          type: string
++          description: The name of the tool
++      - "makeblastdb -version 2>&1 | sed 's/^.*makeblastdb: //; s/ .*\\$//'":
++          type: eval
++          description: The expression to obtain the version of the tool
++authors:
++  - "@joseespinosa"
++  - "@drpatelh"
++maintainers:
++  - "@joseespinosa"
++  - "@drpatelh"
++  - "@vagkaratzas"
++  - "@DLBPointon"
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/diamond/makedb/environment.yml
+@@ -0,0 +1,7 @@
++---
++# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/environment-schema.json
++channels:
++  - conda-forge
++  - bioconda
++dependencies:
++  - bioconda::diamond=2.2.1
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/diamond/makedb/main.nf
+@@ -0,0 +1,56 @@
++process DIAMOND_MAKEDB {
++    tag "${meta.id}"
++    label 'process_medium'
++
++    conda "${moduleDir}/environment.yml"
++    container "${workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container
++        ? 'https://depot.galaxyproject.org/singularity/diamond:2.2.1--he361c42_0'
++        : 'quay.io/biocontainers/diamond:2.2.1--he361c42_0'}"
++
++    input:
++    tuple val(meta), path(fasta)
++    path taxonmap
++    path taxonnodes
++    path taxonnames
++
++    output:
++    tuple val(meta), path("*.dmnd"), emit: db
++    tuple val("${task.process}"), val('diamond'), eval("diamond --version | sed 's/diamond version //g'"), emit: versions_diamond, topic: versions
++
++    when:
++    task.ext.when == null || task.ext.when
++
++    script:
++    def args = task.ext.args ?: ''
++    def prefix = task.ext.prefix ?: "${meta.id}"
++    def is_compressed = fasta.getExtension() == "gz" ? true : false
++    def fasta_name = is_compressed ? fasta.getBaseName() : fasta
++    def insert_taxonmap = taxonmap ? "--taxonmap ${taxonmap}" : ""
++    def insert_taxonnodes = taxonnodes ? "--taxonnodes ${taxonnodes}" : ""
++    def insert_taxonnames = taxonnames ? "--taxonnames ${taxonnames}" : ""
++
++    """
++    if [ "${is_compressed}" == "true" ]; then
++        gzip -c -d ${fasta} > ${fasta_name}
++    fi
++
++    diamond \\
++        makedb \\
++        --threads ${task.cpus} \\
++        --in  ${fasta_name} \\
++        -d ${prefix} \\
++        ${args} \\
++        ${insert_taxonmap} \\
++        ${insert_taxonnodes} \\
++        ${insert_taxonnames}
++    """
++
++    stub:
++    def args = task.ext.args ?: ''
++    def prefix = task.ext.prefix ?: "${meta.id}"
++
++    """
++    echo "${args}"
++    touch ${prefix}.dmnd
++    """
++}
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/diamond/makedb/meta.yml
+@@ -0,0 +1,88 @@
++name: diamond_makedb
++description: Builds a DIAMOND database
++keywords:
++  - fasta
++  - diamond
++  - index
++  - database
++tools:
++  - diamond:
++      description: Accelerated BLAST compatible local sequence aligner
++      homepage: https://github.com/bbuchfink/diamond
++      documentation: https://github.com/bbuchfink/diamond/wiki
++      tool_dev_url: https://github.com/bbuchfink/diamond
++      doi: "10.1038/s41592-021-01101-x"
++      licence:
++        - "GPL v3.0"
++      identifier: biotools:diamond
++input:
++  - - meta:
++        type: map
++        description: |
++          Groovy Map containing sample information
++          e.g. [ id:'test', single_end:false ]
++    - fasta:
++        type: file
++        description: Input fasta file
++        pattern: "*.{fa,fasta,fa.gz,fasta.gz}"
++        ontologies:
++          - edam: http://edamontology.org/format_1929 # FASTA
++  - taxonmap:
++      type: file
++      description: Optional mapping file of NCBI protein accession numbers to
++        taxon ids (gzip compressed), required for taxonomy functionality.
++      pattern: "*.gz"
++      ontologies:
++        - edam: http://edamontology.org/format_3989 # GZIP
++  - taxonnodes:
++      type: file
++      description: Optional NCBI taxonomy nodes.dmp file, required for taxonomy
++        functionality.
++      pattern: "*.dmp"
++      ontologies: []
++  - taxonnames:
++      type: file
++      description: Optional NCBI taxonomy names.dmp file, required for taxonomy
++        functionality.
++      pattern: "*.dmp"
++      ontologies: []
++output:
++  db:
++    - - meta:
++          type: map
++          description: |
++            Groovy Map containing sample information
++            e.g. [ id:'test', single_end:false ]
++      - "*.dmnd":
++          type: file
++          description: File of the indexed DIAMOND database
++          pattern: "*.dmnd"
++          ontologies: []
++  versions_diamond:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - diamond:
++          type: string
++          description: The name of the tool
++      - diamond --version | sed 's/diamond version //g':
++          type: eval
++          description: The expression to obtain the version of the tool
++topics:
++  versions:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - diamond:
++          type: string
++          description: The name of the tool
++      - diamond --version | sed 's/diamond version //g':
++          type: eval
++          description: The expression to obtain the version of the tool
++authors:
++  - "@spficklin"
++maintainers:
++  - "@spficklin"
++  - "@vagkaratzas"
++  - "@jfy133"
++  - "@sofstam"
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/gunzip/environment.yml
+@@ -0,0 +1,12 @@
++---
++# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/environment-schema.json
++channels:
++  - conda-forge
++  - bioconda
++dependencies:
++  - conda-forge::coreutils=9.5
++  - conda-forge::grep=3.11
++  - conda-forge::gzip=1.13
++  - conda-forge::lbzip2=2.5
++  - conda-forge::sed=4.8
++  - conda-forge::tar=1.34
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/gunzip/main.nf
+@@ -0,0 +1,47 @@
++process GUNZIP {
++    tag "${archive}"
++    label 'process_single'
++
++    conda "${moduleDir}/environment.yml"
++    container "${workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container
++        ? 'https://community-cr-prod.seqera.io/docker/registry/v2/blobs/sha256/52/52ccce28d2ab928ab862e25aae26314d69c8e38bd41ca9431c67ef05221348aa/data'
++        : 'community.wave.seqera.io/library/coreutils_grep_gzip_lbzip2_pruned:838ba80435a629f8'}"
++
++    input:
++    tuple val(meta), path(archive)
++
++    output:
++    tuple val(meta), path("${gunzip}"), emit: gunzip
++    tuple val("${task.process}"), val('gunzip'), eval('gunzip --version 2>&1 | head -1 | sed "s/^.*(gzip) //; s/ Copyright.*//"'), topic: versions, emit: versions_gunzip
++
++    when:
++    task.ext.when == null || task.ext.when
++
++    script:
++    def args = task.ext.args ?: ''
++    def nameWithoutGz = archive.extension == 'gz' ? archive.baseName : archive.name
++	def extension = file(nameWithoutGz).extension
++	def name = file(nameWithoutGz).baseName
++    def prefix = task.ext.prefix ?: name
++    gunzip = prefix + ".${extension}"
++    """
++    # Not calling gunzip itself because it creates files
++    # with the original group ownership rather than the
++    # default one for that user / the work directory
++    gzip \\
++        -cd \\
++        ${args} \\
++        ${archive} \\
++        > ${gunzip}
++    """
++
++    stub:
++    def nameWithoutGz = archive.extension == 'gz' ? archive.baseName : archive.name
++	def extension = file(nameWithoutGz).extension
++	def name = file(nameWithoutGz).baseName
++    def prefix = task.ext.prefix ?: name
++    gunzip = prefix + ".${extension}"
++    """
++    touch ${gunzip}
++    """
++}
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/gunzip/meta.yml
+@@ -0,0 +1,68 @@
++name: gunzip
++description: Compresses and decompresses files.
++keywords:
++  - gunzip
++  - compression
++  - decompression
++tools:
++  - gunzip:
++      description: |
++        gzip is a file format and a software application used for file compression and decompression.
++      documentation: https://www.gnu.org/software/gzip/manual/gzip.html
++      licence: ["GPL-3.0-or-later"]
++      identifier: ""
++input:
++  - - meta:
++        type: map
++        description: |
++          Optional groovy Map containing meta information
++          e.g. [ id:'test', single_end:false ]
++    - archive:
++        type: file
++        description: File to be compressed/uncompressed
++        pattern: "*.*"
++        ontologies: []
++output:
++  gunzip:
++    - - meta:
++          type: file
++          description: Compressed/uncompressed file
++          pattern: "*.*"
++          ontologies: []
++      - ${gunzip}:
++          type: file
++          description: Compressed/uncompressed file
++          pattern: "*.*"
++          ontologies: []
++  versions_gunzip:
++    - - ${task.process}:
++          type: string
++          description: The process the versions were collected from
++      - gunzip:
++          type: string
++          description: The tool name
++      - gunzip --version 2>&1 | head -1 | sed "s/^.*(gzip) //; s/ Copyright.*//":
++          type: eval
++          description: The expression to obtain the version of the tool
++
++topics:
++  versions:
++    - - ${task.process}:
++          type: string
++          description: The process the versions were collected from
++      - gunzip:
++          type: string
++          description: The tool name
++      - gunzip --version 2>&1 | head -1 | sed "s/^.*(gzip) //; s/ Copyright.*//":
++          type: eval
++          description: The expression to obtain the version of the tool
++
++authors:
++  - "@joseespinosa"
++  - "@drpatelh"
++  - "@jfy133"
++maintainers:
++  - "@joseespinosa"
++  - "@drpatelh"
++  - "@jfy133"
++  - "@gallvp"
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/hifiadapterfilt/downloaddb/environment.yml
+@@ -0,0 +1,8 @@
++---
++# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/environment-schema.json
++channels:
++  - conda-forge
++  - bioconda
++dependencies:
++  # renovate: datasource=conda depName=bioconda/hifiadapterfilt
++  - bioconda::hifiadapterfilt=3.0.0
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/hifiadapterfilt/downloaddb/main.nf
+@@ -0,0 +1,45 @@
++process HIFIADAPTERFILT_DOWNLOADDB {
++    label 'process_single'
++
++    conda "${moduleDir}/environment.yml"
++    container "${ workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container ?
++        'https://depot.galaxyproject.org/singularity/hifiadapterfilt:3.0.0--hdfd78af_0':
++        'quay.io/biocontainers/hifiadapterfilt:3.0.0--hdfd78af_0' }"
++
++    output:
++    path("DB"), emit: db
++    tuple val("${task.process}"), val('hifiadapterfilt'), eval("hifiadapterfilt.sh --version 2>&1 | head -1"), topic: versions, emit: versions_hifiadapterfilt
++
++    when:
++    task.ext.when == null || task.ext.when
++
++    script:
++    """
++    mkdir -p DB
++
++    # Download all pre-built BLAST database files for PacBio adapter sequences
++    # (NGB00972.1 Blunt Adapter, NGB00973.1 C2 Primer) from the HiFiAdapterFilt repo
++    for file in pacbio_vectors_db pacbio_vectors_db.ndb pacbio_vectors_db.nhr \\
++                pacbio_vectors_db.nin pacbio_vectors_db.nog pacbio_vectors_db.nos \\
++                pacbio_vectors_db.not pacbio_vectors_db.nsq pacbio_vectors_db.ntf \\
++                pacbio_vectors_db.nto; do
++        wget -q -O DB/\${file} \\
++            https://raw.githubusercontent.com/sheinasim-USDA/HiFiAdapterFilt/master/DB/\${file}
++    done
++    """
++
++    stub:
++    """
++    mkdir -p DB
++    touch DB/pacbio_vectors_db
++    touch DB/pacbio_vectors_db.ndb
++    touch DB/pacbio_vectors_db.nhr
++    touch DB/pacbio_vectors_db.nin
++    touch DB/pacbio_vectors_db.nog
++    touch DB/pacbio_vectors_db.nos
++    touch DB/pacbio_vectors_db.not
++    touch DB/pacbio_vectors_db.nsq
++    touch DB/pacbio_vectors_db.ntf
++    touch DB/pacbio_vectors_db.nto
++    """
++}
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/hifiadapterfilt/downloaddb/meta.yml
+@@ -0,0 +1,61 @@
++name: hifiadapterfilt_downloaddb
++description: |
++  Downloads the pre-built PacBio adapter BLAST database from the HiFiAdapterFilt
++  GitHub repository. The database contains two adapter sequences: NGB00972.1
++  (Pacific Biosciences Blunt Adapter, 45 bp) and NGB00973.1 (C2 Primer, 35 bp).
++  This module is consumed by hifiadapterfilt/hifiadapterfilt as a prerequisite to
++  provide the BLAST database for adapter detection.
++keywords:
++  - pacbio
++  - hifi
++  - adapter
++  - blast
++  - database
++  - download
++tools:
++  - hifiadapterfilt:
++      description: |
++        HiFiAdapterFilt uses BLAST to identify and remove adapter sequences
++        from PacBio HiFi reads, producing adapter-filtered FASTQ output along
++        with detailed statistics.
++      homepage: https://github.com/sheinasim/HiFiAdapterFilt
++      documentation: https://github.com/sheinasim/HiFiAdapterFilt
++      tool_dev_url: https://github.com/sheinasim/HiFiAdapterFilt
++      licence:
++        - "MIT"
++      identifier: biotools:HiFiAdapterFilt
++input: []
++output:
++  db:
++    - DB:
++        type: directory
++        description: |
++          Directory containing the pre-built BLAST nucleotide database for PacBio
++          adapter sequences. Contains pacbio_vectors_db.* files (NGB00972.1 Blunt
++          Adapter and NGB00973.1 C2 Primer).
++        pattern: "DB"
++  versions_hifiadapterfilt:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - hifiadapterfilt:
++          type: string
++          description: The name of the tool
++      - hifiadapterfilt.sh --version 2>&1 | head -1:
++          type: eval
++          description: The expression to obtain the version of the tool
++topics:
++  versions:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - hifiadapterfilt:
++          type: string
++          description: The name of the tool
++      - hifiadapterfilt.sh --version 2>&1 | head -1:
++          type: eval
++          description: The expression to obtain the version of the tool
++authors:
++  - "@vagkaratzas"
++maintainers:
++  - "@vagkaratzas"
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/mmseqs/createdb/environment.yml
+@@ -0,0 +1,7 @@
++---
++# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/environment-schema.json
++channels:
++  - conda-forge
++  - bioconda
++dependencies:
++  - bioconda::mmseqs2=18.8cc5c
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/mmseqs/createdb/main.nf
+@@ -0,0 +1,57 @@
++process MMSEQS_CREATEDB {
++    tag "${meta.id}"
++    label 'process_low'
++
++    conda "${moduleDir}/environment.yml"
++    container "${workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container
++        ? 'https://community-cr-prod.seqera.io/docker/registry/v2/blobs/sha256/fe/fe49c17754753d6cd9a31e5894117edaf1c81e3d6053a12bf6dc8f3af1dffe23/data'
++        : 'community.wave.seqera.io/library/mmseqs2:18.8cc5c--af05c9a98d9f6139'}"
++
++    input:
++    tuple val(meta), path(sequence)
++
++    output:
++    tuple val(meta), path("${prefix}/"), emit: db
++    tuple val("${task.process}"), val('mmseqs'), eval('mmseqs version'), topic: versions, emit: versions_mmseqs
++
++    when:
++    task.ext.when == null || task.ext.when
++
++    script:
++    def args = task.ext.args ?: ''
++    prefix = task.ext.prefix ?: "${meta.id}"
++    def is_compressed = sequence.getExtension() == "gz" ? true : false
++    def sequence_name = is_compressed ? sequence.getBaseName() : sequence
++    """
++    if [ "${is_compressed}" == "true" ]; then
++        gzip -c -d ${sequence} > ${sequence_name}
++    fi
++
++    mkdir -p ${prefix}
++
++    mmseqs \\
++        createdb \\
++        ${sequence_name} \\
++        ${prefix}/${prefix} \\
++        ${args}
++
++    """
++
++    stub:
++    def args = task.ext.args ?: ''
++    prefix = task.ext.prefix ?: "${meta.id}"
++    """
++    echo ${args}
++    mkdir -p ${prefix}
++
++    touch ${prefix}/${prefix}
++    touch ${prefix}/${prefix}.dbtype
++    touch ${prefix}/${prefix}.index
++    touch ${prefix}/${prefix}.lookup
++    touch ${prefix}/${prefix}.source
++    touch ${prefix}/${prefix}_h
++    touch ${prefix}/${prefix}_h.dbtype
++    touch ${prefix}/${prefix}_h.index
++
++    """
++}
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/mmseqs/createdb/meta.yml
+@@ -0,0 +1,69 @@
++name: "mmseqs_createdb"
++description: Create an MMseqs database from an existing FASTA/Q file
++keywords:
++  - protein sequence
++  - databases
++  - clustering
++  - searching
++  - indexing
++  - mmseqs2
++tools:
++  - "mmseqs":
++      description: "MMseqs2: ultra fast and sensitive sequence search and clustering
++        suite"
++      homepage: "https://github.com/soedinglab/MMseqs2"
++      documentation: "https://mmseqs.com/latest/userguide.pdf"
++      tool_dev_url: "https://github.com/soedinglab/MMseqs2"
++      doi: "10.1093/bioinformatics/btw006"
++      licence:
++        - "GPL v3"
++      identifier: biotools:mmseqs
++input:
++  - - meta:
++        type: map
++        description: |
++          Groovy Map containing sample information
++          e.g. `[ id:'test', single_end:false ]`
++    - sequence:
++        type: file
++        description: Input sequences in FASTA/Q (zipped or unzipped) format to
++          parse into an mmseqs database
++        pattern: "*.{fasta,fasta.gz,fa,fa.gz,fna,fna.gz,fastq,fastq.gz,fq,fq.gz}"
++        ontologies:
++          - edam: http://edamontology.org/format_1930 # FASTQ
++output:
++  db:
++    - - meta:
++          type: map
++          description: |
++            Groovy Map containing sample information
++            e.g. `[ id:'test', single_end:false ]`
++      - ${prefix}/:
++          type: directory
++          description: The created MMseqs2 database
++  versions_mmseqs:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - mmseqs:
++          type: string
++          description: The name of the tool
++      - mmseqs version:
++          type: eval
++          description: The expression to obtain the version of the tool
++topics:
++  versions:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - mmseqs:
++          type: string
++          description: The name of the tool
++      - mmseqs version:
++          type: eval
++          description: The expression to obtain the version of the tool
++authors:
++  - "@Joon-Klaps"
++maintainers:
++  - "@Joon-Klaps"
++  - "@vagkaratzas"
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/pigz/compress/environment.yml
+@@ -0,0 +1,7 @@
++---
++# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/environment-schema.json
++channels:
++  - conda-forge
++  - bioconda
++dependencies:
++  - pigz=2.8
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/pigz/compress/main.nf
+@@ -0,0 +1,34 @@
++process PIGZ_COMPRESS {
++    tag "$meta.id"
++    label 'process_low'
++
++    conda "${moduleDir}/environment.yml"
++    container "${ workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container ?
++        'https://depot.galaxyproject.org/singularity/pigz:2.8':
++        'quay.io/biocontainers/pigz:2.8' }"
++
++    input:
++    tuple val(meta), path(raw_file)
++
++    output:
++    tuple val(meta), path("$archive"), emit: archive
++    tuple val("${task.process}"), val('pigz'), eval('pigz --version 2>&1 | sed "s/^.*pigz[[:space:]]*//"'), emit: versions_pigz, topic: versions
++
++    when:
++    task.ext.when == null || task.ext.when
++
++    script:
++    def args = task.ext.args ?: ''
++    archive = raw_file.toString() + ".gz"
++    """
++    # Note: needs --stdout for pigz to avoid the following issue:
++    #   pigz: skipping: ${raw_file} is a symbolic link
++    pigz --processes $task.cpus --stdout --force ${args} ${raw_file} > ${archive}
++    """
++
++    stub:
++    archive = raw_file.toString() + ".gz"
++    """
++    touch ${archive}
++    """
++}
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/pigz/compress/meta.yml
+@@ -0,0 +1,64 @@
++name: "pigz_compress"
++description: Compresses files with pigz.
++keywords:
++  - compress
++  - gzip
++  - parallelized
++tools:
++  - "pigz":
++      description: "Parallel implementation of the gzip algorithm."
++      homepage: "https://zlib.net/pigz/"
++      documentation: "https://zlib.net/pigz/pigz.pdf"
++      licence: ["Zlib"]
++      identifier: ""
++input:
++  - - meta:
++        type: map
++        description: |
++          Groovy Map containing sample information
++          e.g. `[ id:'sample1', single_end:false ]`
++    - raw_file:
++        type: file
++        description: File to be compressed
++        pattern: "*.*"
++        ontologies: []
++output:
++  archive:
++    - - meta:
++          type: map
++          description: |
++            Groovy Map containing sample information
++            e.g. `[ id:'sample1', single_end:false ]`
++      - $archive:
++          type: file
++          description: The compressed file
++          pattern: "*.gz"
++          ontologies:
++            - edam: http://edamontology.org/format_3989 # GZIP format
++  versions_pigz:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - pigz:
++          type: string
++          description: The name of the tool
++      - pigz --version 2>&1 | sed "s/^.*pigz[[:space:]]*//":
++          type: eval
++          description: The expression to obtain the version of the tool
++
++topics:
++  versions:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - pigz:
++          type: string
++          description: The name of the tool
++      - pigz --version 2>&1 | sed "s/^.*pigz[[:space:]]*//":
++          type: eval
++          description: The expression to obtain the version of the tool
++
++authors:
++  - "@leoisl"
++maintainers:
++  - "@leoisl"
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/rgi/cardannotation/environment.yml
+@@ -0,0 +1,8 @@
++---
++# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/environment-schema.json
++channels:
++  - conda-forge
++  - bioconda
++dependencies:
++  - bioconda::kma=1.6.11
++  - bioconda::rgi=6.0.8
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/rgi/cardannotation/main.nf
+@@ -0,0 +1,51 @@
++process RGI_CARDANNOTATION {
++    label 'process_medium'
++
++    conda "${moduleDir}/environment.yml"
++    container "${ workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container
++        ? 'https://community-cr-prod.seqera.io/docker/registry/v2/blobs/sha256/3f/3f452c8e124ee58ab6b26442d15401c57d471cb753f53921570dc484df4e7620/data'
++        : 'community.wave.seqera.io/library/rgi_kma:e905ecb8305e2609' }"
++
++    input:
++    path card
++
++    output:
++    path ("card_database_processed"), emit: db
++    env 'RGI_VERSION', emit: tool_version
++    env 'DB_VERSION', emit: db_version
++    tuple val("${task.process}"), val('rgi'), eval("rgi main --version"),  emit: versions_rgi, topic: versions
++    tuple val("${task.process}"), val('rgi-database'), eval("echo \$DB_VERSION"),  emit: versions_db , topic: versions
++    tuple val("${task.process}"), val('kma'), eval("kma -v | sed 's/KMA-//'"),  emit: versions_kma, topic: versions
++
++    when:
++    task.ext.when == null || task.ext.when
++
++    script:
++    def args = task.ext.args ?: ''
++
++    """
++    rgi card_annotation \\
++        -i ${card}/card.json \\
++        ${args}
++
++    DB_VERSION=\$(ls card_database_*_all.fasta | sed "s/card_database_v\\([0-9].*[0-9]\\).*/\\1/")
++
++    mkdir card_database_processed
++    mv card*.fasta card_database_processed
++    cp ${card}/* card_database_processed
++
++    RGI_VERSION=\$(rgi main --version)
++    """
++
++    stub:
++    """
++    touch card.fasta
++    touch card_all.fasta
++
++    mkdir card_database_processed
++    mv card*.fasta card_database_processed
++
++    RGI_VERSION=\$(rgi main --version)
++    DB_VERSION=stub_version
++    """
++}
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/rgi/cardannotation/meta.yml
+@@ -0,0 +1,108 @@
++name: rgi_cardannotation
++description: Preprocess the CARD database for RGI to predict antibiotic resistance from protein or nucleotide data
++keywords:
++  - bacteria
++  - fasta
++  - antibiotic resistance
++tools:
++  - rgi:
++      description: This module preprocesses the downloaded Comprehensive Antibiotic Resistance Database (CARD) which can then be used as input for RGI.
++      homepage: https://card.mcmaster.ca
++      documentation: https://github.com/arpcard/rgi
++      tool_dev_url: https://github.com/arpcard/rgi
++      doi: "10.1093/nar/gkz935"
++      licence:
++        - "https://card.mcmaster.ca/about"
++      identifier: ""
++input:
++  - card:
++      type: directory
++      description: Directory containing the CARD database
++      pattern: "*/"
++output:
++  db:
++    - card_database_processed:
++        type: directory
++        description: Directory containing the processed CARD database files
++        pattern: "*/"
++  tool_version:
++    - RGI_VERSION:
++        type: string
++        description: The version of the tool in string format (useful for downstream tools such as hAMRronization)
++  db_version:
++    - DB_VERSION:
++        type: string
++        description: The version of the used database in string format (useful for downstream tools such as hAMRronization)
++  versions_rgi:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - rgi:
++          type: string
++          description: The name of the tool
++      - rgi main --version:
++          type: eval
++          description: The expression to obtain the version of the tool
++
++  versions_db:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - rgi-database:
++          type: string
++          description: The name of the tool
++      - echo \$DB_VERSION:
++          type: eval
++          description: The expression to obtain the version of the tool
++
++  versions_kma:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - kma:
++          type: string
++          description: The name of the tool
++      - kma -v | sed 's/KMA-//':
++          type: eval
++          description: The expression to obtain the version of the tool
++
++topics:
++  versions:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - rgi:
++          type: string
++          description: The name of the tool
++      - rgi main --version:
++          type: eval
++          description: The expression to obtain the version of the tool
++
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - rgi-database:
++          type: string
++          description: The name of the tool
++      - echo \$DB_VERSION:
++          type: eval
++          description: The expression to obtain the version of the tool
++
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - kma:
++          type: string
++          description: The name of the tool
++      - kma -v | sed 's/KMA-//':
++          type: eval
++          description: The expression to obtain the version of the tool
++
++authors:
++  - "@rpetit3"
++  - "@jfy133"
++  - "@jasmezz"
++maintainers:
++  - "@rpetit3"
++  - "@jfy133"
++  - "@jasmezz"
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/untar/environment.yml
+@@ -0,0 +1,12 @@
++---
++# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/environment-schema.json
++channels:
++  - conda-forge
++  - bioconda
++dependencies:
++  - conda-forge::coreutils=9.5
++  - conda-forge::grep=3.11
++  - conda-forge::gzip=1.13
++  - conda-forge::lbzip2=2.5
++  - conda-forge::sed=4.8
++  - conda-forge::tar=1.34
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/untar/main.nf
+@@ -0,0 +1,75 @@
++process UNTAR {
++    tag "${archive}"
++    label 'process_single'
++
++    conda "${moduleDir}/environment.yml"
++    container "${workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container
++        ? 'https://community-cr-prod.seqera.io/docker/registry/v2/blobs/sha256/52/52ccce28d2ab928ab862e25aae26314d69c8e38bd41ca9431c67ef05221348aa/data'
++        : 'community.wave.seqera.io/library/coreutils_grep_gzip_lbzip2_pruned:838ba80435a629f8'}"
++
++    input:
++    tuple val(meta), path(archive)
++
++    output:
++    tuple val(meta), path("${prefix}"), emit: untar
++    tuple val("${task.process}"), val('untar'), eval('tar --version 2>&1 | head -1 | sed "s/tar (GNU tar) //; s/ Copyright.*//"'), emit: versions_untar, topic: versions
++
++    when:
++    task.ext.when == null || task.ext.when
++
++    script:
++    def args = task.ext.args ?: ''
++    def args2 = task.ext.args2 ?: ''
++    prefix = task.ext.prefix ?: (meta.id ? "${meta.id}" : archive.baseName.toString().replaceFirst(/\.tar$/, ""))
++
++    """
++    mkdir ${prefix}
++
++    ## Ensures --strip-components only applied when top level of tar contents is a directory
++    ## If just files or multiple directories, place all in prefix
++    if [[ \$(tar -taf ${archive} | grep -o -P "^.*?\\/" | uniq | wc -l) -eq 1 ]]; then
++        tar \\
++            -C ${prefix} --strip-components 1 \\
++            -xavf \\
++            ${args} \\
++            ${archive} \\
++            ${args2}
++    else
++        tar \\
++            -C ${prefix} \\
++            -xavf \\
++            ${args} \\
++            ${archive} \\
++            ${args2}
++    fi
++
++    """
++
++    stub:
++    prefix = task.ext.prefix ?: (meta.id ? "${meta.id}" : archive.toString().replaceFirst(/\.[^\.]+(.gz)?$/, ""))
++    """
++    mkdir ${prefix}
++    ## Dry-run untaring the archive to get the files and place all in prefix
++    if [[ \$(tar -taf ${archive} | grep -o -P "^.*?\\/" | uniq | wc -l) -eq 1 ]]; then
++        for i in `tar -tf ${archive}`;
++        do
++            if [[ \$(echo "\${i}" | grep -E "/\$") == "" ]];
++            then
++                touch \${i}
++            else
++                mkdir -p \${i}
++            fi
++        done
++    else
++        for i in `tar -tf ${archive}`;
++        do
++            if [[ \$(echo "\${i}" | grep -E "/\$") == "" ]];
++            then
++                touch ${prefix}/\${i}
++            else
++                mkdir -p ${prefix}/\${i}
++            fi
++        done
++    fi
++    """
++}
+--- /dev/null
++++ b/tests/nf-test/prerequisites/nf-core/untar/meta.yml
+@@ -0,0 +1,73 @@
++name: untar
++description: Extract files from tar, tar.gz, tar.bz2, tar.xz archives
++keywords:
++  - untar
++  - uncompress
++  - extract
++tools:
++  - untar:
++      description: |
++        Extract tar, tar.gz, tar.bz2, tar.xz files.
++      documentation: https://www.gnu.org/software/tar/manual/
++      licence: ["GPL-3.0-or-later"]
++      identifier: ""
++input:
++  - - meta:
++        type: map
++        description: |
++          Groovy Map containing sample information
++          e.g. [ id:'test', single_end:false ]
++    - archive:
++        type: file
++        description: File to be untarred
++        pattern: "*.{tar,tar.gz,tar.bz2,tar.xz}"
++        ontologies:
++          - edam: http://edamontology.org/format_3981 # TAR format
++          - edam: http://edamontology.org/format_3989 # GZIP format
++output:
++  untar:
++    - - meta:
++          type: map
++          description: |
++            Groovy Map containing sample information
++            e.g. [ id:'test', single_end:false ]
++          pattern: "*/"
++      - ${prefix}:
++          type: map
++          description: |
++            Groovy Map containing sample information
++            e.g. [ id:'test', single_end:false ]
++          pattern: "*/"
++  versions_untar:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - untar:
++          type: string
++          description: The name of the tool
++      - tar --version 2>&1 | head -1 | sed "s/tar (GNU tar) //; s/ Copyright.*//":
++          type: eval
++          description: The expression to obtain the version of the tool
++
++topics:
++  versions:
++    - - ${task.process}:
++          type: string
++          description: The name of the process
++      - untar:
++          type: string
++          description: The name of the tool
++      - tar --version 2>&1 | head -1 | sed "s/tar (GNU tar) //; s/ Copyright.*//":
++          type: eval
++          description: The expression to obtain the version of the tool
++
++authors:
++  - "@joseespinosa"
++  - "@drpatelh"
++  - "@matthdsm"
++  - "@jfy133"
++maintainers:
++  - "@joseespinosa"
++  - "@drpatelh"
++  - "@matthdsm"
++  - "@jfy133"
+--- /dev/null
++++ b/tests/nf-test/prerequisites/source-lock.json
+@@ -0,0 +1,475 @@
++{
++  "repository": "https://github.com/nf-core/modules",
++  "purpose": "Test-only setup dependencies at each consumer revision; identical UNTAR resources deduplicated with all source refs retained",
++  "files": [
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/blast/makeblastdb/main.nf",
++      "sha256": "ebbd176b2576c9ff2829befff85ce557e6998f2e200fd2c4273a216b8e667ecf",
++      "source_refs": [
++        {
++          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
++          "repository_path": "modules/nf-core/blast/makeblastdb/main.nf",
++          "git_blob": "2622c1d9f68ff9f22128877d324ee08bca1de28b",
++          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/blast/makeblastdb/main.nf"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/blast/makeblastdb/environment.yml",
++      "sha256": "a0841732bc7ffff781e52e678422dfc5a95228cbbf34db1a283a6fc675df41d7",
++      "source_refs": [
++        {
++          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
++          "repository_path": "modules/nf-core/blast/makeblastdb/environment.yml",
++          "git_blob": "0a7e8e60447c5e9212838f491c5ddb87191eca84",
++          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/blast/makeblastdb/environment.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/blast/makeblastdb/meta.yml",
++      "sha256": "1dbe7b3a302dc85fb8ffc03702f3da5e6333a39e562785130d957c6cf4a5934b",
++      "source_refs": [
++        {
++          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
++          "repository_path": "modules/nf-core/blast/makeblastdb/meta.yml",
++          "git_blob": "b8f2f1fc0873853426b4933929e87b696d2a0036",
++          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/blast/makeblastdb/meta.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/diamond/makedb/main.nf",
++      "sha256": "f7a0162060b35a508605803ea63a48ff44766a558e45a428be7262cabf15487f",
++      "source_refs": [
++        {
++          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
++          "repository_path": "modules/nf-core/diamond/makedb/main.nf",
++          "git_blob": "cf81d1d6fd60a94374409bf0b2e09a3d675c8f89",
++          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/diamond/makedb/main.nf"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/diamond/makedb/environment.yml",
++      "sha256": "ece01836508b72c5aea7814ce785b3119a326dd4195861bed33fde7c8380e524",
++      "source_refs": [
++        {
++          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
++          "repository_path": "modules/nf-core/diamond/makedb/environment.yml",
++          "git_blob": "5dc13ad057b240bb12dd7252f50490eb385aa568",
++          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/diamond/makedb/environment.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/diamond/makedb/meta.yml",
++      "sha256": "bc4f153d08f63b57f8b9d07452e41d1620fc5cd2a4435c605bda8e2eab2edac2",
++      "source_refs": [
++        {
++          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
++          "repository_path": "modules/nf-core/diamond/makedb/meta.yml",
++          "git_blob": "90558eec526c377ceae8ca3fbc107f28b7482e71",
++          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/diamond/makedb/meta.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/mmseqs/createdb/main.nf",
++      "sha256": "96c34baf4e71ed14f092c777994b969e3ef14192ee560d37252663a3a110fbb8",
++      "source_refs": [
++        {
++          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
++          "repository_path": "modules/nf-core/mmseqs/createdb/main.nf",
++          "git_blob": "728ee2cc3b7fe09a6d737ab359370baefd5be1ae",
++          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/mmseqs/createdb/main.nf"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/mmseqs/createdb/environment.yml",
++      "sha256": "f097f365ad088a8e4e43c2611159c6e8b80816ba40bc8e8fec3248c5ab1a9c61",
++      "source_refs": [
++        {
++          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
++          "repository_path": "modules/nf-core/mmseqs/createdb/environment.yml",
++          "git_blob": "072223f2aacebbde31a5710b6e9d2bc22cae73cd",
++          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/mmseqs/createdb/environment.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/mmseqs/createdb/meta.yml",
++      "sha256": "fc9b42a991250f59130b348b9d3377c56cebc834950bba4eac6df360592859ad",
++      "source_refs": [
++        {
++          "consumer_revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
++          "repository_path": "modules/nf-core/mmseqs/createdb/meta.yml",
++          "git_blob": "9777725334653fd8c9513f64f8a91fd11ea3fecd",
++          "url": "https://github.com/nf-core/modules/blob/cbe6025183336010a9b716e463f897b0c0f70f8a/modules/nf-core/mmseqs/createdb/meta.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/untar/main.nf",
++      "sha256": "037665c6bdc42ddcc75e30a293c629c53a1d245ce7c8c7791f18ef3c1069f62d",
++      "source_refs": [
++        {
++          "consumer_revision": "781f2625386fe0bf2f337c7b99f56e618c59fc99",
++          "repository_path": "modules/nf-core/untar/main.nf",
++          "git_blob": "bf2c056c6239da4341583e3330675e548699049e",
++          "url": "https://github.com/nf-core/modules/blob/781f2625386fe0bf2f337c7b99f56e618c59fc99/modules/nf-core/untar/main.nf"
++        },
++        {
++          "consumer_revision": "b581ebb37c529fa07e22c38d128a7c5c273ed286",
++          "repository_path": "modules/nf-core/untar/main.nf",
++          "git_blob": "bf2c056c6239da4341583e3330675e548699049e",
++          "url": "https://github.com/nf-core/modules/blob/b581ebb37c529fa07e22c38d128a7c5c273ed286/modules/nf-core/untar/main.nf"
++        },
++        {
++          "consumer_revision": "d67d33d5925fcec4691b499670fa2bd926fd2be5",
++          "repository_path": "modules/nf-core/untar/main.nf",
++          "git_blob": "bf2c056c6239da4341583e3330675e548699049e",
++          "url": "https://github.com/nf-core/modules/blob/d67d33d5925fcec4691b499670fa2bd926fd2be5/modules/nf-core/untar/main.nf"
++        },
++        {
++          "consumer_revision": "98ad2ea364508c5eefa3eee721f5659b3d7585a9",
++          "repository_path": "modules/nf-core/untar/main.nf",
++          "git_blob": "bf2c056c6239da4341583e3330675e548699049e",
++          "url": "https://github.com/nf-core/modules/blob/98ad2ea364508c5eefa3eee721f5659b3d7585a9/modules/nf-core/untar/main.nf"
++        },
++        {
++          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
++          "repository_path": "modules/nf-core/untar/main.nf",
++          "git_blob": "bf2c056c6239da4341583e3330675e548699049e",
++          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/untar/main.nf"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/untar/environment.yml",
++      "sha256": "744c448dd17c4da5cfd257c470309e2de7e6d1adcbbb74c9f7fbc0ae4db6a452",
++      "source_refs": [
++        {
++          "consumer_revision": "781f2625386fe0bf2f337c7b99f56e618c59fc99",
++          "repository_path": "modules/nf-core/untar/environment.yml",
++          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
++          "url": "https://github.com/nf-core/modules/blob/781f2625386fe0bf2f337c7b99f56e618c59fc99/modules/nf-core/untar/environment.yml"
++        },
++        {
++          "consumer_revision": "b581ebb37c529fa07e22c38d128a7c5c273ed286",
++          "repository_path": "modules/nf-core/untar/environment.yml",
++          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
++          "url": "https://github.com/nf-core/modules/blob/b581ebb37c529fa07e22c38d128a7c5c273ed286/modules/nf-core/untar/environment.yml"
++        },
++        {
++          "consumer_revision": "d67d33d5925fcec4691b499670fa2bd926fd2be5",
++          "repository_path": "modules/nf-core/untar/environment.yml",
++          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
++          "url": "https://github.com/nf-core/modules/blob/d67d33d5925fcec4691b499670fa2bd926fd2be5/modules/nf-core/untar/environment.yml"
++        },
++        {
++          "consumer_revision": "98ad2ea364508c5eefa3eee721f5659b3d7585a9",
++          "repository_path": "modules/nf-core/untar/environment.yml",
++          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
++          "url": "https://github.com/nf-core/modules/blob/98ad2ea364508c5eefa3eee721f5659b3d7585a9/modules/nf-core/untar/environment.yml"
++        },
++        {
++          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
++          "repository_path": "modules/nf-core/untar/environment.yml",
++          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
++          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/untar/environment.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/untar/meta.yml",
++      "sha256": "cd10d878b40b8639a1c24be839d3667c035a97107ff3da80aeb184080a83ba2a",
++      "source_refs": [
++        {
++          "consumer_revision": "781f2625386fe0bf2f337c7b99f56e618c59fc99",
++          "repository_path": "modules/nf-core/untar/meta.yml",
++          "git_blob": "571d8078a42b09048e574b81cd329fc92aa3d82e",
++          "url": "https://github.com/nf-core/modules/blob/781f2625386fe0bf2f337c7b99f56e618c59fc99/modules/nf-core/untar/meta.yml"
++        },
++        {
++          "consumer_revision": "b581ebb37c529fa07e22c38d128a7c5c273ed286",
++          "repository_path": "modules/nf-core/untar/meta.yml",
++          "git_blob": "571d8078a42b09048e574b81cd329fc92aa3d82e",
++          "url": "https://github.com/nf-core/modules/blob/b581ebb37c529fa07e22c38d128a7c5c273ed286/modules/nf-core/untar/meta.yml"
++        },
++        {
++          "consumer_revision": "d67d33d5925fcec4691b499670fa2bd926fd2be5",
++          "repository_path": "modules/nf-core/untar/meta.yml",
++          "git_blob": "571d8078a42b09048e574b81cd329fc92aa3d82e",
++          "url": "https://github.com/nf-core/modules/blob/d67d33d5925fcec4691b499670fa2bd926fd2be5/modules/nf-core/untar/meta.yml"
++        },
++        {
++          "consumer_revision": "98ad2ea364508c5eefa3eee721f5659b3d7585a9",
++          "repository_path": "modules/nf-core/untar/meta.yml",
++          "git_blob": "571d8078a42b09048e574b81cd329fc92aa3d82e",
++          "url": "https://github.com/nf-core/modules/blob/98ad2ea364508c5eefa3eee721f5659b3d7585a9/modules/nf-core/untar/meta.yml"
++        },
++        {
++          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
++          "repository_path": "modules/nf-core/untar/meta.yml",
++          "git_blob": "571d8078a42b09048e574b81cd329fc92aa3d82e",
++          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/untar/meta.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/hifiadapterfilt/downloaddb/main.nf",
++      "sha256": "b35121119d619717b5fb2c82b543f47c5a32bad462cb442e49db42c5ae3165c8",
++      "source_refs": [
++        {
++          "consumer_revision": "9cc9ac3431911839826f062a5f0348835ebcc7ae",
++          "repository_path": "modules/nf-core/hifiadapterfilt/downloaddb/main.nf",
++          "git_blob": "937fd7a0ce644bf6afae5b1eaee5b28b020e3deb",
++          "url": "https://github.com/nf-core/modules/blob/9cc9ac3431911839826f062a5f0348835ebcc7ae/modules/nf-core/hifiadapterfilt/downloaddb/main.nf"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/hifiadapterfilt/downloaddb/environment.yml",
++      "sha256": "936b6730e9938ee4979bbffe354d6abaf737b820bdb0420b76685f1e0cd81ff5",
++      "source_refs": [
++        {
++          "consumer_revision": "9cc9ac3431911839826f062a5f0348835ebcc7ae",
++          "repository_path": "modules/nf-core/hifiadapterfilt/downloaddb/environment.yml",
++          "git_blob": "f7954e9d254f3690cb1a0213444347af43a91735",
++          "url": "https://github.com/nf-core/modules/blob/9cc9ac3431911839826f062a5f0348835ebcc7ae/modules/nf-core/hifiadapterfilt/downloaddb/environment.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/hifiadapterfilt/downloaddb/meta.yml",
++      "sha256": "cfa1a71bf7964b8c14d195c70f10b4557af0dfc9f92c182a7b765ed73d3a450f",
++      "source_refs": [
++        {
++          "consumer_revision": "9cc9ac3431911839826f062a5f0348835ebcc7ae",
++          "repository_path": "modules/nf-core/hifiadapterfilt/downloaddb/meta.yml",
++          "git_blob": "fe642e2e5ee76fcf2fbef5f238745a2e1d9399d4",
++          "url": "https://github.com/nf-core/modules/blob/9cc9ac3431911839826f062a5f0348835ebcc7ae/modules/nf-core/hifiadapterfilt/downloaddb/meta.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/pigz/compress/main.nf",
++      "sha256": "c58e8c7d0c5c46ab04ba466766cdaf5a71b3583f933688121f648a29f8a73deb",
++      "source_refs": [
++        {
++          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
++          "repository_path": "modules/nf-core/pigz/compress/main.nf",
++          "git_blob": "b5af45e921677ca88c4e89798ea21dcfb0bc2984",
++          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/pigz/compress/main.nf"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/pigz/compress/environment.yml",
++      "sha256": "9eccae7155a7fccbbd2b184e5f79a0d22ef447b83fae4e055c8b20cc0987cc20",
++      "source_refs": [
++        {
++          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
++          "repository_path": "modules/nf-core/pigz/compress/environment.yml",
++          "git_blob": "a91b6f426b087e94cbafefb6c4b1d00f96cd62ac",
++          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/pigz/compress/environment.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/pigz/compress/meta.yml",
++      "sha256": "178393d965812eeb1d75363aa7778c2712b548c36a9b747be130f87da97cd794",
++      "source_refs": [
++        {
++          "consumer_revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
++          "repository_path": "modules/nf-core/pigz/compress/meta.yml",
++          "git_blob": "bfcc0f9d15fdb85da367e28a10203619b5ed26d6",
++          "url": "https://github.com/nf-core/modules/blob/6d46786420b4d7bc88eba026eb389c0c5535d120/modules/nf-core/pigz/compress/meta.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/gunzip/main.nf",
++      "sha256": "8b23dad59f8f269b38d8262a035ab3384bb4edde93af3b412743d08ecfe3ab0d",
++      "source_refs": [
++        {
++          "consumer_revision": "5be91832f7c6a2d229f900a239d9532c9ae133c7",
++          "repository_path": "modules/nf-core/gunzip/main.nf",
++          "git_blob": "6edffc5930a42e4a191be194ec4d941aeb466557",
++          "url": "https://github.com/nf-core/modules/blob/5be91832f7c6a2d229f900a239d9532c9ae133c7/modules/nf-core/gunzip/main.nf"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/gunzip/environment.yml",
++      "sha256": "744c448dd17c4da5cfd257c470309e2de7e6d1adcbbb74c9f7fbc0ae4db6a452",
++      "source_refs": [
++        {
++          "consumer_revision": "5be91832f7c6a2d229f900a239d9532c9ae133c7",
++          "repository_path": "modules/nf-core/gunzip/environment.yml",
++          "git_blob": "9b926b1ffaf469636f8fdfcbb092487aa88c3b24",
++          "url": "https://github.com/nf-core/modules/blob/5be91832f7c6a2d229f900a239d9532c9ae133c7/modules/nf-core/gunzip/environment.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/gunzip/meta.yml",
++      "sha256": "216b014df4f884b6b2adf7ac36792f5618942a86b03575fcf2ee8d463204c03a",
++      "source_refs": [
++        {
++          "consumer_revision": "5be91832f7c6a2d229f900a239d9532c9ae133c7",
++          "repository_path": "modules/nf-core/gunzip/meta.yml",
++          "git_blob": "bba6b3ba70a704dcca1bb85de5639a16bcf009a4",
++          "url": "https://github.com/nf-core/modules/blob/5be91832f7c6a2d229f900a239d9532c9ae133c7/modules/nf-core/gunzip/meta.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/rgi/cardannotation/main.nf",
++      "sha256": "04424f2e2322c5923efd66a673b45d65711cd779c679a6f149a13e29bf9e8bad",
++      "source_refs": [
++        {
++          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
++          "repository_path": "modules/nf-core/rgi/cardannotation/main.nf",
++          "git_blob": "3e694e9d02b849e28472bb73e4ba9965c03e214b",
++          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/rgi/cardannotation/main.nf"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/rgi/cardannotation/environment.yml",
++      "sha256": "8ef25f7727c26a1b69585f118acbb4f6d14af493ce2793e9e59d5e7e7e73cf38",
++      "source_refs": [
++        {
++          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
++          "repository_path": "modules/nf-core/rgi/cardannotation/environment.yml",
++          "git_blob": "58b301d50929bd52c9438fbb4623ef8b3e950731",
++          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/rgi/cardannotation/environment.yml"
++        }
++      ]
++    },
++    {
++      "path": "tests/nf-test/prerequisites/nf-core/rgi/cardannotation/meta.yml",
++      "sha256": "367859cf0299f323a525698d61b0977dbe7461b0a35f1a55c9d60b43e07f8d51",
++      "source_refs": [
++        {
++          "consumer_revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
++          "repository_path": "modules/nf-core/rgi/cardannotation/meta.yml",
++          "git_blob": "3c1ffbe3e70eb7fd35f2397b8341a66ee61671a1",
++          "url": "https://github.com/nf-core/modules/blob/0a93f68a28f5e07bb7ae82aeb005720faf8a3b35/modules/nf-core/rgi/cardannotation/meta.yml"
++        }
++      ]
++    }
++  ],
++  "consumers": [
++    {
++      "suite": "modules/nf-core/blast/blastn/tests/main.nf.test",
++      "consumer": "blast/blastn",
++      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
++      "original_reference": "../../makeblastdb/main.nf",
++      "dependency": "blast/makeblastdb"
++    },
++    {
++      "suite": "modules/nf-core/eggnogmapper/tests/main.nf.test",
++      "consumer": "eggnogmapper",
++      "revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
++      "original_reference": "../../diamond/makedb/main.nf",
++      "dependency": "diamond/makedb"
++    },
++    {
++      "suite": "modules/nf-core/eggnogmapper/tests/main.nf.test",
++      "consumer": "eggnogmapper",
++      "revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
++      "original_reference": "../../mmseqs/createdb/main.nf",
++      "dependency": "mmseqs/createdb"
++    },
++    {
++      "suite": "modules/nf-core/eggnogmapper/tests/main.nf.test",
++      "consumer": "eggnogmapper",
++      "revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
++      "original_reference": "../../diamond/makedb/main.nf",
++      "dependency": "diamond/makedb"
++    },
++    {
++      "suite": "modules/nf-core/eggnogmapper/tests/main.nf.test",
++      "consumer": "eggnogmapper",
++      "revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
++      "original_reference": "../../diamond/makedb/main.nf",
++      "dependency": "diamond/makedb"
++    },
++    {
++      "suite": "modules/nf-core/genomad/endtoend/tests/main.nf.test",
++      "consumer": "genomad/endtoend",
++      "revision": "781f2625386fe0bf2f337c7b99f56e618c59fc99",
++      "original_reference": "../../../untar/main.nf",
++      "dependency": "untar"
++    },
++    {
++      "suite": "modules/nf-core/gtdbtk/classifywf/tests/main.nf.test",
++      "consumer": "gtdbtk/classifywf",
++      "revision": "b581ebb37c529fa07e22c38d128a7c5c273ed286",
++      "original_reference": "../../../untar/main.nf",
++      "dependency": "untar"
++    },
++    {
++      "suite": "modules/nf-core/hifiadapterfilt/hifiadapterfilt/tests/main.nf.test",
++      "consumer": "hifiadapterfilt/hifiadapterfilt",
++      "revision": "9cc9ac3431911839826f062a5f0348835ebcc7ae",
++      "original_reference": "../../downloaddb/main.nf",
++      "dependency": "hifiadapterfilt/downloaddb"
++    },
++    {
++      "suite": "modules/nf-core/kraken2/kraken2/tests/main.nf.test",
++      "consumer": "kraken2/kraken2",
++      "revision": "d67d33d5925fcec4691b499670fa2bd926fd2be5",
++      "original_reference": "modules/nf-core/untar/main.nf",
++      "dependency": "untar"
++    },
++    {
++      "suite": "modules/nf-core/macsyfinder/search/tests/main.nf.test",
++      "consumer": "macsyfinder/search",
++      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
++      "original_reference": "../../../pigz/compress/main.nf",
++      "dependency": "pigz/compress"
++    },
++    {
++      "suite": "modules/nf-core/metabat2/metabat2/tests/main.nf.test",
++      "consumer": "metabat2/metabat2",
++      "revision": "5be91832f7c6a2d229f900a239d9532c9ae133c7",
++      "original_reference": "../../../gunzip/main.nf",
++      "dependency": "gunzip"
++    },
++    {
++      "suite": "modules/nf-core/metaphlan/metaphlan/tests/main.nf.test",
++      "consumer": "metaphlan/metaphlan",
++      "revision": "98ad2ea364508c5eefa3eee721f5659b3d7585a9",
++      "original_reference": "modules/nf-core/untar/main.nf",
++      "dependency": "untar"
++    },
++    {
++      "suite": "modules/nf-core/rgi/main/tests/main.nf.test",
++      "consumer": "rgi/main",
++      "revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
++      "original_reference": "modules/nf-core/untar/main.nf",
++      "dependency": "untar"
++    },
++    {
++      "suite": "modules/nf-core/rgi/main/tests/main.nf.test",
++      "consumer": "rgi/main",
++      "revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
++      "original_reference": "modules/nf-core/rgi/cardannotation",
++      "dependency": "rgi/cardannotation"
++    }
++  ],
++  "license": {
++    "path": "LICENSE",
++    "git_blob": "2a0f576bcb8b535895922fc93da357534cd2d482",
++    "sha256": "0227425f8337b6dd85ddeb2de77d1a028dc0df4ca213dd1bdc8abd4f455fba7c"
++  },
++  "limitations": [
++    "Restoring definitions is not running native P1 cases or validating models/data/containers.",
++    "Original upstream helper source/environment/metadata preserved; hifi source downloads master DB, so native database identity still requires separate verification."
++  ]
++}
+--- /dev/null
++++ b/tests/run_upstream_prerequisites.py
+@@ -0,0 +1,99 @@
++#!/usr/bin/env python3
++"""Check real fixed upstream archive helpers; discovery is a separate check."""
++import argparse
++import csv
++import gzip
++import hashlib
++import io
++import json
++import os
++from pathlib import Path
++import re
++import subprocess
++import tarfile
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    for key in ['output', 'fasta', 'utility-prefix', 'pigz-prefix']:
++        parser.add_argument('--' + key, type=Path, required=True)
++    args = parser.parse_args()
++    base = args.output.resolve(); base.mkdir(exist_ok=False)
++    fasta = args.fasta.resolve(); dna = fasta.read_bytes()
++    assert dna.startswith(b'>') and dna.strip()
++    utilities = args.utility_prefix.resolve(); pigz = args.pigz_prefix.resolve()
++    env = {**os.environ, 'PATH': str(utilities / 'bin') + ':' + str(pigz / 'bin') + ':' + os.environ['PATH']}
++    versions = {}
++    for name, binary, expected in [('tar', utilities / 'bin/tar', '1.34'),
++                                   ('gzip', utilities / 'bin/gzip', '1.13'),
++                                   ('pigz', pigz / 'bin/pigz', '2.8')]:
++        p = subprocess.run([str(binary), '--version'], capture_output=True, text=True, env=env)
++        text = p.stdout + p.stderr
++        pattern = r'tar \(GNU tar\) (\S+)' if name == 'tar' else name + r' (\S+)'
++        match = re.fullmatch(pattern, text.splitlines()[0])
++        assert p.returncode == 0 and match and match[1] == expected, (name, text)
++        versions[name] = dict(binary=str(binary), reported=text.strip(),
++                              sha256=hashlib.sha256(binary.read_bytes()).hexdigest())
++    golden = base / 'golden.fna.gz'; golden.write_bytes(gzip.compress(dna, mtime=0))
++    corrupt = base / 'corrupt.fna.gz'; damaged = bytearray(golden.read_bytes()); damaged[-8] ^= 1; corrupt.write_bytes(damaged)
++    archives = {}
++    for kind, member in [('nested', 'bundle/reference.fna'), ('flat', 'reference.fna')]:
++        archive = base / (kind + '.tar.gz')
++        with tarfile.open(archive, 'w:gz') as stream:
++            info = tarfile.TarInfo(member); info.size = len(dna); info.mtime = 0
++            stream.addfile(info, io.BytesIO(dna))
++        archives[kind] = archive
++    config = base / 'config'
++    config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='256 MB'\nprocess.errorStrategy='terminate'\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\n")
++    sources = [Path(__file__).resolve(), ROOT / 'tests/nextflow/upstream_archive_prerequisites.nf',
++               *sorted((ROOT / 'tests/nf-test/prerequisites').rglob('*'))]
++    sources = [p for p in sources if p.is_file()]
++    sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
++    before = {str(p.relative_to(ROOT)): sha(p) for p in sources}
++    runs = []
++    for case in ['positive', 'corrupt-gzip']:
++        folder = base / case; folder.mkdir()
++        params = dict(fasta=str(fasta), gzip=str(golden if case == 'positive' else corrupt),
++                      nested_archive=str(archives['nested']), flat_archive=str(archives['flat']),
++                      execute_other_tools=case == 'positive')
++        pf = folder / 'params.json'; pf.write_text(json.dumps(params, indent=2) + '\n')
++        cmd = [str(ROOT / 'results/tool-audit/runtime/bin/nextflow'), '-C', str(config), 'run',
++               str(ROOT / 'tests/nextflow/upstream_archive_prerequisites.nf'), '-params-file', str(pf),
++               '-work-dir', str(folder / 'work'), '-with-trace', str(folder / 'trace.tsv'), '-ansi-log', 'false']
++        p = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=180)
++        (folder / 'stdout').write_text(p.stdout); (folder / 'stderr').write_text(p.stderr)
++        tasks = list(csv.DictReader((folder / 'trace.tsv').open(), delimiter='\t'))
++        if case == 'positive':
++            assert p.returncode == 0 and len(tasks) == 4 and all(t['status'] == 'COMPLETED' for t in tasks), (p.stdout, p.stderr, tasks)
++            assert {t['name'].split(' (', 1)[0] for t in tasks} == {'GUNZIP', 'PIGZ_COMPRESS', 'UNTAR_NESTED', 'UNTAR_FLAT'}
++            for task in tasks:
++                work = Path(task['workdir']); name = task['name']
++                if name.startswith('GUNZIP '):
++                    assert (work / 'golden.fna').read_bytes() == dna
++                elif name.startswith('PIGZ_COMPRESS '):
++                    assert gzip.decompress((work / (fasta.name + '.gz')).read_bytes()) == dna
++                else:
++                    label = 'nested' if name.startswith('UNTAR_NESTED ') else 'flat'
++                    files = [q for q in (work / label).rglob('*') if q.is_file()]
++                    assert [q.name for q in files] == ['reference.fna'] and files[0].read_bytes() == dna
++            assert all(marker in p.stdout for marker in ['DECODED=decoded:preserved:', 'COMPRESSED=compressed:preserved:', 'NESTED=nested:preserved:', 'FLAT=flat:preserved:'])
++        else:
++            assert p.returncode != 0 and len(tasks) == 1 and tasks[0]['status'] == 'FAILED' and tasks[0]['name'].startswith('GUNZIP ')
++            error = (Path(tasks[0]['workdir']) / '.command.err').read_text()
++            assert 'crc error' in error and 'DECODED=' not in p.stdout, error
++        runs.append(dict(case=case, command=cmd, exit_code=p.returncode, tasks=tasks, checks_passed=True))
++    unchanged = before == {str(p.relative_to(ROOT)): sha(p) for p in sources}
++    input_unchanged = fasta.read_bytes() == dna
++    assert unchanged and input_unchanged
++    record = dict(runs=runs, source_sha256=before, source_unchanged=unchanged,
++                  input_unchanged=input_unchanged,
++                  input=dict(path=str(fasta), sha256=sha(fasta), bytes=len(dna)), actual_tools=versions,
++                  scope='Four actual fixed-source helper tasks preserve complete original fixture bytes/meta; native CRC failure propagates. Declared tar1.34/gzip1.13 and existing pigz2.8 binaries, local backend; not the ten complete upstream suites, containers, inference, or biological accuracy.')
++    record['pass'] = True
++    (base / 'run.json').write_text(json.dumps(record, indent=2) + '\n')
++
++
++if __name__ == '__main__':
++    main()

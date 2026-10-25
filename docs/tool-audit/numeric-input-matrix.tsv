@@ -1,0 +1,31 @@
+script	case	selected_field	token	exit	same_outputs_as_zero
+diversity.R	zero	coverage	0	0	True
+diversity.R	text	coverage	garbage	0	True
+diversity.R	missing	coverage	NA	0	True
+diversity.R	blank	coverage		0	True
+diversity.R	infinite	coverage	Inf	0	False
+diversity.R	negative	coverage	-1	1	False
+differential_abundance.R	zero	coverage	0	0	True
+differential_abundance.R	text	coverage	garbage	0	True
+differential_abundance.R	missing	coverage	NA	0	True
+differential_abundance.R	blank	coverage		0	True
+differential_abundance.R	infinite	coverage	Inf	1	False
+differential_abundance.R	negative	coverage	-1	0	False
+network_prepare.R	zero	raw_count	0	0	True
+network_prepare.R	text	raw_count	garbage	0	True
+network_prepare.R	missing	raw_count	NA	0	False
+network_prepare.R	blank	raw_count		0	False
+network_prepare.R	infinite	raw_count	Inf	0	False
+network_prepare.R	negative	raw_count	-1	0	True
+deseq2_plasmid.R	zero	raw_count	0	0	True
+deseq2_plasmid.R	text	raw_count	garbage	0	True
+deseq2_plasmid.R	missing	raw_count	NA	0	True
+deseq2_plasmid.R	blank	raw_count		0	True
+deseq2_plasmid.R	infinite	raw_count	Inf	1	False
+deseq2_plasmid.R	negative	raw_count	-1	0	True
+merge_abundance.R	zero	coverage	0	0	True
+merge_abundance.R	text	coverage	garbage	0	False
+merge_abundance.R	missing	coverage	NA	0	False
+merge_abundance.R	blank	coverage		0	False
+merge_abundance.R	infinite	coverage	Inf	0	False
+merge_abundance.R	negative	coverage	-1	0	False

@@ -1,0 +1,16 @@
+{
+  "retrieved_date": "2026-10-22",
+  "primary_method": {
+    "title": "TETRA: a web-service and a stand-alone program for the analysis and comparison of tetranucleotide usage patterns in DNA sequences",
+    "authors": "Teeling et al.",
+    "year": 2004,
+    "doi": "10.1186/1471-2105-5-163",
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC529438/",
+    "facts_used": "double-stranded sequence composition, all256 tetranucleotide words, Markov expected frequencies/z-score/Pearson method",
+    "retrieval_limitations": "Primary article surfaced with full methods in web search. Subsequent direct PMC open showed bot check; BMC/EuropePMC direct follow-up transport failed. No new full-text PDF/source download claimed."
+  },
+  "fixed_implementation_comparison": "docs/tool-audit/evidence/pyani-tetra-source.json",
+  "implementation_scope": "Independent exact legal-window counts, per-record aggregation, both strands/256 ordered words. Not bitwise pyani0.2.12 compatible; complete finite variance profile eligibility explicitly defined locally.",
+  "user_method_authorization": "按标准 TETRA 方法修正，并单独校准关联阈值（推荐）",
+  "calibration": "Pending actual independently curated/labeled/locked host dataset with group-disjoint holdout. Native self/fragment controls and numerical calibration CLI examples are not known-host validation."
+}

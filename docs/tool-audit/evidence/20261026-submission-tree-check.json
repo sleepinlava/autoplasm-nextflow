@@ -1,0 +1,9 @@
+{
+  "pass": true,
+  "commit": "3e84f66331342027f062eccc077affe09b25cc1f",
+  "identities_checked": 718,
+  "removed_paths_checked": 7,
+  "accepted_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d",
+  "mismatches": [],
+  "scope": "Exact committed accepted-source bytes; current pending worktree remains separate. Not a new biological or full workflow run."
+}

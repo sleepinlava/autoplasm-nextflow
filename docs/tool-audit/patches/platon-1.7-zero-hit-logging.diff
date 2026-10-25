@@ -1,0 +1,37 @@
+--- original/functions.py
++++ effective/functions.py
+@@ -273,7 +273,7 @@
+                         'AMRs: hit! contig=%s, type=%s, start=%d, end=%d, strand=%s',
+                         contig['id'], hit['type'], hit['start'], hit['end'], hit['strand']
+                     )
+-    log.info('AMRs: contig=%s, # AMRs=%s', contig['id'], len(contig['amr_hits']))
++    log.info('AMRs: # hits=%d', len(hits))
+     return
+ 
+ 
+@@ -558,7 +558,7 @@
+                         'rep genes: hit! contig=%s, type=%s, start=%d, end=%d, strand=%s',
+                         contig['id'], hit['type'], hit['start'], hit['end'], hit['strand']
+                     )
+-    log.info('rep genes: contig=%s, # rep-genes=%s', contig['id'], len(contig['replication_hits']))
++    log.info('rep genes: # hits=%d', len(hits))
+     return
+ 
+ 
+@@ -616,7 +616,7 @@
+                         ' mob genes: hit! contig=%s, type=%s, start=%d, end=%d, strand=%s',
+                         contig['id'], hit['type'], hit['start'], hit['end'], hit['strand']
+                     )
+-    log.info('mob genes: contig=%s, # mob-genes=%s', contig['id'], len(contig['mobilization_hits']))
++    log.info('mob genes: # hits=%d', len(hits))
+     return
+ 
+ 
+@@ -674,5 +674,5 @@
+                         'conj genes: hit! contig=%s, type=%s, start=%d, end=%d, strand=%s',
+                         contig['id'], hit['type'], hit['start'], hit['end'], hit['strand']
+                     )
+-    log.info('conj genes: contig=%s, # conj-genes=%s', contig['id'], len(contig['conjugation_hits']))
+-    return
++    log.info('conj genes: # hits=%d', len(hits))
++    return

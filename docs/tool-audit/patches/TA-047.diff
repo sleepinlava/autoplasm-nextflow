@@ -1,0 +1,211 @@
+--- a/bin/diversity.R
++++ b/bin/diversity.R
+@@ -99,8 +99,16 @@
+ 
+ ab <- fread(opts$abundance, colClasses = c(sample_id = "character", contig_id = "character"),
+             na.strings = NULL)
++required <- c("sample_id", "contig_id", "coverage")
++if (!all(required %in% names(ab)))
++  die(paste0(opts$abundance, ": missing required columns: ", paste(setdiff(required, names(ab)), collapse = ", ")))
+ cov <- suppressWarnings(as.numeric(ab$coverage))
+-cov[is.na(cov)] <- 0
++bad <- which(!is.finite(cov) | cov < 0)
++if (length(bad)) {
++  i <- bad[1L]
++  die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=coverage value='%s'; expected finite nonnegative measurement",
++              opts$abundance, i + 1L, ab$sample_id[i], ab$contig_id[i], ab$coverage[i]))
++}
+ ab[, coverage := cov]
+ 
+ meta <- fread(opts$metadata, colClasses = c(sample_id = "character", group = "character"),
+--- a/bin/differential_abundance.R
++++ b/bin/differential_abundance.R
+@@ -124,8 +124,16 @@
+ 
+ ab <- fread(opts$abundance, colClasses = c(sample_id = "character", contig_id = "character"),
+             na.strings = NULL)
++required <- c("sample_id", "contig_id", "coverage")
++if (!all(required %in% names(ab)))
++  die(paste0(opts$abundance, ": missing required columns: ", paste(setdiff(required, names(ab)), collapse = ", ")))
+ cov <- suppressWarnings(as.numeric(ab$coverage))
+-cov[is.na(cov)] <- 0
++bad <- which(!is.finite(cov) | cov < 0)
++if (length(bad)) {
++  i <- bad[1L]
++  die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=coverage value='%s'; expected finite nonnegative measurement",
++              opts$abundance, i + 1L, ab$sample_id[i], ab$contig_id[i], ab$coverage[i]))
++}
+ ab[, coverage := cov]
+ 
+ by_sample <- split(ab, ab$sample_id)
+--- a/bin/network_prepare.R
++++ b/bin/network_prepare.R
+@@ -13,8 +13,8 @@
+ # otherwise give degenerate correlations.
+ #
+ # R equivalent of bin/network_prepare.py: the id column is contig_id or
+-# plasmid_id; the value is raw_count when non-empty, else coverage, else
+-# "0"; values are max(0, round(as.numeric(x))) with non-numeric -> 0.
++# plasmid_id; the value is raw_count when non-empty, else coverage.
++# Selected values must be finite and nonnegative before rounding.
+ 
+ suppressPackageStartupMessages(library(data.table))
+ 
+@@ -101,10 +101,19 @@
+   cat("warning: rounding coverage to counts; FastSpar expects integer counts\n",
+       file = stderr())
+ }
+-value <- ifelse(nzchar(raw), raw, ifelse(nzchar(cov), cov, "0"))
++if (!"sample_id" %in% names(ab) || !any(c("contig_id", "plasmid_id") %in% names(ab)))
++  die(paste0(opts$abundance, ": missing sample_id or feature ID column"))
++if (!any(c("raw_count", "coverage") %in% names(ab)))
++  die(paste0(opts$abundance, ": missing raw_count or coverage column"))
++value <- ifelse(nzchar(raw), raw, cov)
+ num <- suppressWarnings(as.numeric(value))
+-num[is.na(num)] <- 0
+-num[num < 0] <- 0
++bad <- which(!is.finite(num) | num < 0)
++if (length(bad)) {
++  i <- bad[1L]
++  field <- if (nzchar(raw[i])) "raw_count" else "coverage"
++  die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=%s value='%s'; expected finite nonnegative measurement",
++              opts$abundance, i + 1L, ab$sample_id[i], cid[i], field, value[i]))
++}
+ num <- round(num)
+ 
+ mat_dt <- data.table(contig = cid, sample = as.character(ab$sample_id),
+--- a/bin/deseq2_plasmid.R
++++ b/bin/deseq2_plasmid.R
+@@ -71,12 +71,17 @@
+ use_raw_counts <- "raw_count" %in% names(abundance) && any(nzchar(abundance$raw_count))
+ value_column <- if (use_raw_counts) "raw_count" else "coverage"
+ if (!value_column %in% names(abundance)) {
+-  empty_output()
+-  quit(status = 0)
++  stop(paste(abundance_path, ": missing selected numeric column", value_column))
+ }
+ abundance$value <- suppressWarnings(as.numeric(abundance[[value_column]]))
+-abundance$value[is.na(abundance$value)] <- 0
+-abundance$value <- round(pmax(abundance$value, 0))
++bad <- which(!is.finite(abundance$value) | abundance$value < 0)
++if (length(bad)) {
++  i <- bad[1L]
++  stop(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=%s value='%s'; expected finite nonnegative measurement",
++               abundance_path, i + 1L, abundance$sample_id[i], abundance$plasmid_id[i],
++               value_column, abundance[[value_column]][i]))
++}
++abundance$value <- round(abundance$value)
+ 
+ counts <- xtabs(value ~ plasmid_id + sample_id, data = abundance)
+ metadata <- metadata[!is.na(metadata$group) & nzchar(metadata$group), c("sample_id", "group")]
+--- a/bin/merge_abundance.R
++++ b/bin/merge_abundance.R
+@@ -7,7 +7,7 @@
+ #
+ # R equivalent of bin/merge_abundance.py: value columns (RPKM/TPM/coverage)
+ # are copied verbatim as strings (all columns are read as character), and
+-# error messages / exit codes match the Python implementation.
++# coverage is validated as a finite nonnegative measurement before writing.
+ 
+ suppressPackageStartupMessages(library(data.table))
+ 
+@@ -94,6 +94,8 @@
+   fields <- names(dt)
+   id_col <- fields[1]
+   mean_col <- Find(function(f) endsWith(tolower(f), "mean"), fields)
++  if (is.null(mean_col))
++    die(paste0(path, ": missing Mean coverage column"))
+   tpm_col <- Find(function(f) endsWith(tolower(f), "tpm"), fields)
+   rpkm_col <- Find(function(f) endsWith(tolower(f), "rpkm"), fields)
+   if (nrow(dt) == 0)
+@@ -113,12 +115,17 @@
+       v <- dt[[col]][k]
+       if (is.na(v)) "" else v
+     }
++    coverage <- get_col(mean_col)
++    numeric_coverage <- suppressWarnings(as.numeric(coverage))
++    if (length(numeric_coverage) != 1L || !is.finite(numeric_coverage) || numeric_coverage < 0)
++      die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=coverage value='%s'; expected finite nonnegative measurement",
++                  path, line_number, sample, feature, coverage))
+     rows[[length(rows) + 1]] <- data.table(
+       feature = feature,
+       sample_id = sample,
+       rpkm = get_col(rpkm_col),
+       tpm = get_col(tpm_col),
+-      coverage = get_col(mean_col),
++      coverage = coverage,
+       raw_count = "",
+       mapper = "")
+   }
+--- /dev/null
++++ b/tests/test_abundance_numeric_validation.py
+@@ -0,0 +1,69 @@
++"""Reject corrupted effective measurements before any statistical output."""
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++class AbundanceNumericValidationTests(unittest.TestCase):
++    def run_invalid(self, script, token):
++        with tempfile.TemporaryDirectory() as directory:
++            base=Path(directory);ab=base/'input.tsv';meta=base/'metadata.tsv';out=base/'out.tsv'
++            meta.write_text('sample_id\tgroup\nS1\tA\n')
++            field='raw_count' if script in ['network_prepare.R','deseq2_plasmid.R'] else 'coverage'
++            if script=='merge_abundance.R':
++                ab.write_text('Contig\tS1 Mean\np1\t'+token+'\n')
++                args=['--tables',str(ab),'--sample-ids','S1','--out',str(out)]
++            else:
++                cid='plasmid_id' if script in ['network_prepare.R','deseq2_plasmid.R'] else 'contig_id'
++                # Coverage is also invalid when counts are absent: no invented zero/fallback.
++                ab.write_text(f'sample_id\t{cid}\traw_count\tcoverage\nS1\tp1\t{token}\t{token}\n')
++                args=['--abundance',str(ab)]
++                if script=='diversity.R':args+=['--metadata',str(meta),'--out-metrics',str(out),'--out-beta',str(base/'beta.tsv')]
++                elif script=='differential_abundance.R':args+=['--metadata',str(meta),'--out',str(out)]
++                elif script=='deseq2_plasmid.R':args+=['--metadata',str(meta),'--output',str(out)]
++                else:args+=['--out',str(out)]
++            r=subprocess.run(['Rscript',str(ROOT/'bin'/script),*args],capture_output=True,text=True)
++            self.assertNotEqual(r.returncode,0,f'{script} accepted {token!r}')
++            self.assertIn('Invalid numeric value',r.stderr)
++            self.assertIn(str(ab),r.stderr)
++            self.assertIn('S1',r.stderr);self.assertIn('p1',r.stderr)
++            self.assertFalse(out.exists())
++            self.assertFalse((base/'beta.tsv').exists())
++
++    def check_script(self,script):
++        tokens=['garbage'] if os.environ.get('AUTOPLASM_NUMERIC_RED') else ['garbage','NA','','NaN','Inf','-1']
++        for token in tokens:
++            with self.subTest(script=script,token=token):self.run_invalid(script,token)
++
++    def test_diversity_rejects_invalid_measurements(self):self.check_script('diversity.R')
++    def test_differential_rejects_invalid_measurements(self):self.check_script('differential_abundance.R')
++    def test_network_rejects_invalid_effective_values(self):self.check_script('network_prepare.R')
++    def test_deseq_rejects_invalid_effective_values(self):self.check_script('deseq2_plasmid.R')
++    def test_merge_rejects_invalid_coverage(self):self.check_script('merge_abundance.R')
++
++    def test_missing_numeric_schema_is_not_empty_biology(self):
++        for script in ['diversity.R','differential_abundance.R','network_prepare.R',
++                       'deseq2_plasmid.R','merge_abundance.R']:
++            with self.subTest(script=script), tempfile.TemporaryDirectory() as directory:
++                base=Path(directory);ab=base/'input.tsv';meta=base/'meta.tsv';out=base/'out.tsv'
++                meta.write_text('sample_id\tgroup\nS1\tA\n')
++                ab.write_text('Contig\n' if script=='merge_abundance.R' else
++                              'sample_id\tcontig_id\tplasmid_id\n')
++                if script=='merge_abundance.R':args=['--tables',str(ab),'--sample-ids','S1','--out',str(out)]
++                else:
++                    args=['--abundance',str(ab)]
++                    if script=='diversity.R':args+=['--metadata',str(meta),'--out-metrics',str(out),'--out-beta',str(base/'beta.tsv')]
++                    elif script=='differential_abundance.R':args+=['--metadata',str(meta),'--out',str(out)]
++                    elif script=='deseq2_plasmid.R':args+=['--metadata',str(meta),'--output',str(out)]
++                    else:args+=['--out',str(out)]
++                r=subprocess.run(['Rscript',str(ROOT/'bin'/script),*args],capture_output=True,text=True)
++                self.assertNotEqual(r.returncode,0)
++                self.assertIn('missing',r.stderr.lower());self.assertIn(str(ab),r.stderr)
++                self.assertFalse(out.exists())
++
++
++if __name__=='__main__':unittest.main()

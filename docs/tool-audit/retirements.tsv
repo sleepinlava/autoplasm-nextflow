@@ -1,0 +1,2 @@
+date	tool	authorization	production_sources	environment	test_sources	findings	status	receipt
+2026-10-21	SCAPP detection/binning	explicit user reply: 删掉SCAPP节点	modules/detection/scapp.nf,modules/binning/scapp_bin.nf	envs/scapp.yml	tests/nf-test/nodes-binning-scapp.nf.test,tests/nf-test/nodes-detection-scapp.nf.test,tests/nf-test/workflows/scapp_detect_real.nf,tests/nf-test/workflows/scapp_bin_real.nf	TA-006,TA-035	removed_by_user; not verified repair; historical denominators retained	results/tool-audit/20261021-scapp-removal/receipt.json

@@ -1,0 +1,436 @@
+--- a/conf/nfcore_qc_assembly.config
++++ b/conf/nfcore_qc_assembly.config
+@@ -69,6 +69,9 @@
+ 
+     // ---------------- QC: multiqc (01_qc) ----------------
+     withName: '^MULTIQC$' {
++        // Default cleaning truncates '.clean', merging stages/mates and valid
++        // sample IDs. Keep the complete source name in QC summaries.
++        ext.args = '--fullnames'
+         // meta.id is the report label ('multiqc_illumina'); keep the legacy
+         // <label>_report.html product name.
+         ext.prefix = { "${meta.id}_report" }
+@@ -79,6 +82,7 @@
+         ]
+     }
+     withName: '^MULTIQC_ONT$' {
++        ext.args = '--fullnames'
+         ext.prefix = { "${meta.id}_report" }
+         publishDir = [
+             path    : { "${params.outdir}/01_qc" },
+--- a/tests/nf-test/pyproject.toml
++++ b/tests/nf-test/pyproject.toml
+@@ -5,7 +5,7 @@
+ dependencies = ["pytest>=8,<9"]
+ 
+ [project.optional-dependencies]
+-pipeline = ["genomad==1.12.0", "quast==5.3.0", "multiqc==1.33"]
++pipeline = ["genomad==1.12.0", "quast==5.3.0", "multiqc==1.35"]
+ 
+ [tool.uv]
+ package = false
+--- a/tests/nf-test/uv.lock
++++ b/tests/nf-test/uv.lock
+@@ -1,6 +1,10 @@
+ version = 1
+ revision = 5
+ requires-python = "==3.12.*"
++resolution-markers = [
++    "sys_platform == 'emscripten'",
++    "sys_platform != 'emscripten'",
++]
+ 
+ [[package]]
+ name = "absl-py"
+@@ -69,7 +73,7 @@
+ [package.metadata]
+ requires-dist = [
+     { name = "genomad", marker = "extra == 'pipeline'", specifier = "==1.12.0" },
+-    { name = "multiqc", marker = "extra == 'pipeline'", specifier = "==1.33" },
++    { name = "multiqc", marker = "extra == 'pipeline'", specifier = "==1.35" },
+     { name = "pytest", specifier = ">=8,<9" },
+     { name = "quast", marker = "extra == 'pipeline'", git = "https://github.com/ablab/quast.git?rev=c3eb988a2fa8a815e1b0bfff55a58cb8d6ff0152" },
+ ]
+@@ -535,7 +539,7 @@
+ 
+ [[package]]
+ name = "multiqc"
+-version = "1.33"
++version = "1.35"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "boto3" },
+@@ -552,7 +556,8 @@
+     { name = "packaging" },
+     { name = "pillow" },
+     { name = "plotly" },
+-    { name = "polars-lts-cpu" },
++    { name = "polars" },
++    { name = "polars", extra = ["rtcompat"], marker = "sys_platform != 'emscripten'" },
+     { name = "pyarrow" },
+     { name = "pydantic" },
+     { name = "python-dotenv" },
+@@ -565,9 +570,9 @@
+     { name = "tqdm" },
+     { name = "typeguard" },
+ ]
+-sdist = { url = "https://files.pythonhosted.org/packages/26/b0/be000ab5acbcd14e7f4d402cebd2235c34cc7753008a11a115dc4175d4fb/multiqc-1.33.tar.gz", hash = "sha256:06e2b82fd9bfa458a79d8da869cb7d88260f624c03297120a70446a49ce852ed", size = 5352630, upload-time = "2025-12-09T16:22:48.684Z" }
+-wheels = [
+-    { url = "https://files.pythonhosted.org/packages/6b/c5/a7b320d36c72049966150662fe3fc2b7b2b7635ba91a5c01595ceb7b574d/multiqc-1.33-py3-none-any.whl", hash = "sha256:d9a2abfb3a26e792e23dcaa35571acdc0633218623f2c5a3ce1f9b6c78c9804f", size = 5672939, upload-time = "2025-12-09T16:22:46.76Z" },
++sdist = { url = "https://files.pythonhosted.org/packages/af/a2/90e1b19ee65ec2619a4ff1767deefe32ba16c87f1363864778bd97ee5800/multiqc-1.35.tar.gz", hash = "sha256:5a4aa6480e6def2f9c0af2893358bf7ec5c304d606ecf613cd25ddcd0e244e77", size = 5451760, upload-time = "2026-05-13T01:01:55.167Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/ae/85/ea19a97a83eddf81ab645d44ea219211e65961c60a93c1a62e8751efe2ab/multiqc-1.35-py3-none-any.whl", hash = "sha256:818ad8aa75572f13be55b66c0bafd7877c1e119a0903e004855ec04385a94dc6", size = 5779740, upload-time = "2026-05-13T01:01:52.411Z" },
+ ]
+ 
+ [[package]]
+@@ -731,17 +736,52 @@
+ ]
+ 
+ [[package]]
+-name = "polars-lts-cpu"
+-version = "1.33.1"
+-source = { registry = "https://pypi.org/simple" }
+-sdist = { url = "https://files.pythonhosted.org/packages/f4/93/a0c4200a5e0af2eee31ea79330cb1f5f4c58f604cb3de352f654e2010c81/polars_lts_cpu-1.33.1.tar.gz", hash = "sha256:0a5426d95ec9eec937a56d3e7cf7911a4b5486c42f4dbbcc9512aa706039322c", size = 4822741, upload-time = "2025-09-09T08:37:51.491Z" }
+-wheels = [
+-    { url = "https://files.pythonhosted.org/packages/f1/9b/75916636b33724afabe820b0993f60dc243793421d6f680d5fcb531fe170/polars_lts_cpu-1.33.1-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:5db75d1b424bd8aa34c9a670a901592f1931cc94d9fb32bdd428dbaad8c33761", size = 38908638, upload-time = "2025-09-09T08:37:02.258Z" },
+-    { url = "https://files.pythonhosted.org/packages/81/e2/dc77b81650ba0c631c06f05d8e81faacee87730600fceca372273facf77b/polars_lts_cpu-1.33.1-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:37cf3a56cf447c69cfb3f9cd0e714d5b0c754705d7b497b9ab86cbf56e36b3e7", size = 35638895, upload-time = "2025-09-09T08:37:07.575Z" },
+-    { url = "https://files.pythonhosted.org/packages/27/fb/4dcff801d71dfa02ec682d6b32fd0ce5339de48797f663698d5f8348ffe7/polars_lts_cpu-1.33.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:656b530a672fe8fbd4c212b2a8481099e5cef63e84970975619ea7c25faeb833", size = 39585825, upload-time = "2025-09-09T08:37:11.631Z" },
+-    { url = "https://files.pythonhosted.org/packages/54/31/0474c14dce2c0507bea40069daafb848980ba7c351ad991908e51ac895fb/polars_lts_cpu-1.33.1-cp39-abi3-manylinux_2_24_aarch64.whl", hash = "sha256:64574c784380b37167b3db3a7cfdb9839cd308e89b8818859d2ffb34a9c896b2", size = 36685020, upload-time = "2025-09-09T08:37:15.597Z" },
+-    { url = "https://files.pythonhosted.org/packages/d4/0a/5ebba9b145388ffbbd09fa84ac3cd7d336b922e34256b1417abf0a1c2fb9/polars_lts_cpu-1.33.1-cp39-abi3-win_amd64.whl", hash = "sha256:6b849e0e1485acb8ac39bf13356d280ea7c924c2b41cd548ea6e4d102d70be77", size = 39191650, upload-time = "2025-09-09T08:37:19.541Z" },
+-    { url = "https://files.pythonhosted.org/packages/ce/ad/bf3db68d30ac798ca31c80624709a0c03aa890e2e20e5ca987d7e55fcfc2/polars_lts_cpu-1.33.1-cp39-abi3-win_arm64.whl", hash = "sha256:c99ab56b059cee6bcabe9fb89e97f5813be1012a2251bf77f76e15c2d1cba934", size = 35445244, upload-time = "2025-09-09T08:37:22.97Z" },
++name = "polars"
++version = "2.0.0"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "polars-runtime-32" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/8e/e9/001f371ec6a1bb54893f599ceebd56e6144fed4091f09f09fec0021a9276/polars-2.0.0.tar.gz", hash = "sha256:62da109e27a19a9d36657ee25dc035c9d3f87e7bd610526fe467dc37ea7dc115", size = 778215, upload-time = "2026-10-06T11:51:29.679Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/ac/09/cc33bbd5463749c116b62c204d88bed6c02a6cb901eac7adab0d38651b07/polars-2.0.0-py3-none-any.whl", hash = "sha256:35d62f3541b7a6d4c360a2e2f07fccc0c2bcbd33b0ea51c83a25417a47a3f3ad", size = 876611, upload-time = "2026-10-06T11:44:04.327Z" },
++]
++
++[package.optional-dependencies]
++rtcompat = [
++    { name = "polars-runtime-compat" },
++]
++
++[[package]]
++name = "polars-runtime-32"
++version = "2.0.0"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/34/ad/dbb6f6d7070867951532bcfe5e6a648d8777b416b18cddabc07030404e8c/polars_runtime_32-2.0.0.tar.gz", hash = "sha256:b5f9afcc742b4a67eabd2c680ff0f12eb02ede9b4bf807bffabd6dbb9a58d5c7", size = 3591339, upload-time = "2026-10-06T11:51:31.076Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/82/88/d35dec6c8928dfbaa1cccf9b626a1067da906e792c92d9f994ca825ab2b5/polars_runtime_32-2.0.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:ffb7ac6cf4e8c4a652df1951e3c3840c7c23a033603d5a9efd422fa8dd699d82", size = 52494314, upload-time = "2026-10-06T11:44:07.768Z" },
++    { url = "https://files.pythonhosted.org/packages/5f/fd/2237bf53ffaff47cdf1edc6c10587a7a6444d4951150eeb08d84f3493ff8/polars_runtime_32-2.0.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:7012d8a0201bd95638545ce8f256c0efe2c5cab0f806eb043021dddde5a9498b", size = 47930083, upload-time = "2026-10-06T11:44:11.592Z" },
++    { url = "https://files.pythonhosted.org/packages/0d/0d/85e3ed90417996fc09770be91b39979074fe2978fc15b431bf8a9459760d/polars_runtime_32-2.0.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8b85bb42e6009acc9629afcc70a83473fd468694d6a30ffb0ab376c8dd1a0a17", size = 50417889, upload-time = "2026-10-06T11:50:20.774Z" },
++    { url = "https://files.pythonhosted.org/packages/83/88/e9fecfd49159da92f54ff2445883577a0f1bc195da53ecc9535c458d55dd/polars_runtime_32-2.0.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0d6ac584ea2b38913784db943879412380d92e28ab9cb88e20a77ba71ba3f911", size = 54475036, upload-time = "2026-10-06T11:50:24.411Z" },
++    { url = "https://files.pythonhosted.org/packages/48/ad/b2abf732697b21467aaaeaac0f3bf7eee0d89c59ce8125f1ed41b28a2d97/polars_runtime_32-2.0.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:a6bf5e260e0a6f00d0f9181438fe9e45776df8c66cee9cba16e3675cc3888488", size = 50579474, upload-time = "2026-10-06T11:50:28.377Z" },
++    { url = "https://files.pythonhosted.org/packages/7f/05/304deee59a95865e1b5e9ec7b066069b49093b81b768f473d9d3b165c686/polars_runtime_32-2.0.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:55c26eef325b6840584d91aac232e9cf3ac19e1b904594b9b54131be1edeab4d", size = 54413293, upload-time = "2026-10-06T11:50:31.828Z" },
++    { url = "https://files.pythonhosted.org/packages/61/59/8c9fd7199f7c4eb1b64e640306a946a2e4a46337b3bbb33b840972c7d84b/polars_runtime_32-2.0.0-cp310-abi3-win_amd64.whl", hash = "sha256:7da1caf3c7b4f397fb213c984013a0c755557619a2d511899a1ff74392484078", size = 54229989, upload-time = "2026-10-06T11:50:35.206Z" },
++    { url = "https://files.pythonhosted.org/packages/e2/93/43608026f38aa6ed4d22da8597706a61682ee403caef0021ce8e6dc73227/polars_runtime_32-2.0.0-cp310-abi3-win_arm64.whl", hash = "sha256:c30ba698c8904048df4a9bc3d6c5033cc2d0a7cbb0e13f4fd2de5a1947b61994", size = 48730655, upload-time = "2026-10-06T11:50:38.756Z" },
++]
++
++[[package]]
++name = "polars-runtime-compat"
++version = "2.0.0"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/ef/68/a60ee766b9aaf2305e6b22a65811aecd079f8da2df635606e6059c0ffdf2/polars_runtime_compat-2.0.0.tar.gz", hash = "sha256:040449ad38e9a08c0a0159a142860a9b15b73ff24bb694846cb3dde94bbce55b", size = 3591055, upload-time = "2026-10-06T11:51:34.525Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/95/73/9b6d09a378e4d1284acb0718791745a089cd214a8b296bb1c4f1df7be2b6/polars_runtime_compat-2.0.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:c4491962142efa3672e5d1227c422fdf58518fca2e3afdadd85609262f50e558", size = 51823010, upload-time = "2026-10-06T11:51:06.816Z" },
++    { url = "https://files.pythonhosted.org/packages/b7/65/5d1ca1717a217411a3cd370f9aa353276e8d9fd6711bfb4d36fe2ffb40fc/polars_runtime_compat-2.0.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:7836391420159891e81c2d0669243ee875265655e5ab59e40d6d0bedd22c0f11", size = 47776771, upload-time = "2026-10-06T11:51:09.965Z" },
++    { url = "https://files.pythonhosted.org/packages/47/13/3b9e6b7ad12516937f2fffbbcd87e978b91d10dac0c1fb6a3d0a5aa88e1b/polars_runtime_compat-2.0.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:5d8bba54f8803dcfa025e0f9614e07ea76443d61ecff4703bff1912c5e61d974", size = 50305808, upload-time = "2026-10-06T11:51:13.151Z" },
++    { url = "https://files.pythonhosted.org/packages/a4/0a/6b137915ccd20e0d2788ea1585340c629872605a67c970e4e79ad5752a3a/polars_runtime_compat-2.0.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9e51b3fc9a922808fd3a8293bbd671b582edbbaf7d7bbe459c0b7d3248a637ac", size = 53820362, upload-time = "2026-10-06T11:51:16.026Z" },
++    { url = "https://files.pythonhosted.org/packages/b1/ba/8c3122cebcabdcac273ad0b30104ee9356afee187c844b21d47fb863904f/polars_runtime_compat-2.0.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:8ce8ed4b06efce6d1ffa14555fbec0217397641f40c5c603160b0f30bfdbf20a", size = 50479958, upload-time = "2026-10-06T11:51:18.906Z" },
++    { url = "https://files.pythonhosted.org/packages/47/d4/86689dc9db4dc941aa1c23daf4d89c0d0edb06ee3a42968c5bd64587300c/polars_runtime_compat-2.0.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:205cf0af66ed02c6ecd0a0d37a97fc851fb5cdb5e94979c7170dbc962f6f3dc0", size = 53749499, upload-time = "2026-10-06T11:51:21.712Z" },
++    { url = "https://files.pythonhosted.org/packages/1f/86/2afc01912b199bb7844ed042a5970be4e8fda179ffa2447893511d713e9c/polars_runtime_compat-2.0.0-cp310-abi3-win_amd64.whl", hash = "sha256:79d7b1ef22ee35554e98af1346a95b9a26be79201812f40619da42ffc5668c12", size = 53600538, upload-time = "2026-10-06T11:51:24.602Z" },
++    { url = "https://files.pythonhosted.org/packages/23/2f/dc4fc800dc03d4edad63e4390685fe7ac60007fb450ca050bacac0ebc213/polars_runtime_compat-2.0.0-cp310-abi3-win_arm64.whl", hash = "sha256:a63117c272bb1991ad92afca621dbfff56fa20e81fc9c750a50149047220f07a", size = 48640788, upload-time = "2026-10-06T11:51:27.457Z" },
+ ]
+ 
+ [[package]]
+--- a/tests/nextflow/qc.nf
++++ b/tests/nextflow/qc.nf
+@@ -40,6 +40,11 @@
+             cleanEntries << tuple([id: 'U1'], 'clean',
+                 file("${root}/uncompressed/mate1/reads.fastq", checkIfExists: true),
+                 file("${root}/uncompressed/mate2/reads.fq", checkIfExists: true))
++            ['A.clean.B', 'A.clean.C'].each { id ->
++                rawEntries << tuple([id: id], 'raw',
++                    file("${root}/${id}/R1.fastq.gz", checkIfExists: true),
++                    file("${root}/${id}/R2.fastq.gz", checkIfExists: true))
++            }
+         }
+         // nf-core fastqc input: tuple(meta, [reads]); meta.stage feeds the
+         // <id>.<stage> alias prefix configured in conf/nfcore_qc_assembly.config
+--- a/tests/nextflow/nextflow.config
++++ b/tests/nextflow/nextflow.config
+@@ -17,6 +17,9 @@
+ conda.enabled = false
+ docker.enabled = false
+ singularity.enabled = false
++
++// Output oracles must resolve the recorded task directory, never the caller's cwd.
++trace.fields = 'task_id,hash,native_id,name,status,exit,workdir'
+ 
+ params.outdir = 'results/test'
+ params.publish_dir_mode = 'copy'
+--- a/tests/run_module_regressions.py
++++ b/tests/run_module_regressions.py
+@@ -4,6 +4,7 @@
+ import argparse
+ import csv
+ import gzip
++import io
+ import json
+ import os
+ import re
+@@ -32,6 +33,27 @@
+     missing = [name for name in names if shutil.which(name) is None]
+     if missing:
+         raise RegressionFailure(f"未运行：缺少工具 {', '.join(missing)}")
++
++
++def require_qc_versions():
++    """Native QC must exercise the versions declared by its production modules."""
++    versions = {}
++    for name, pattern in [('fastqc', r'FastQC v(\S+)'),
++                          ('multiqc', r'multiqc, version (\S+)'),
++                          ('fastp', r'fastp (\S+)')]:
++        environment = ROOT / 'modules' / 'nf-core' / name / 'environment.yml'
++        declared = re.findall(r'^\s*-\s+bioconda::' + name + r'=([^\s]+)\s*$',
++                              environment.read_text(), re.MULTILINE)
++        if len(declared) != 1:
++            raise RegressionFailure(f'无法确定 {name} 的生产版本：{environment}')
++        result = subprocess.run([name, '--version'], text=True, capture_output=True, check=False)
++        output = (result.stdout + result.stderr).strip()
++        match = re.fullmatch(pattern, output)
++        if result.returncode != 0 or match is None or match.group(1) != declared[0]:
++            raise RegressionFailure(f'QC 回归要求 {name}=={declared[0]}，实际：{output}（退出码 {result.returncode}）')
++        versions[name] = {'expected': declared[0], 'actual': match.group(1),
++                          'executable': shutil.which(name), 'version_output': output}
++    return versions
+ 
+ 
+ def java_version():
+@@ -470,25 +492,21 @@
+ 
+ 
+ def make_fastp_json(path):
+-    summary = {
+-        "total_reads": 200, "total_bases": 15000, "q20_rate": 0.95,
+-        "q30_rate": 0.90, "q20_bases": 14250, "q30_bases": 13500,
+-        "gc_content": 0.5, "read1_mean_length": 75, "read2_mean_length": 75,
+-    }
+-    data = {
+-        "summary": {"before_filtering": summary, "after_filtering": summary},
+-        "filtering_result": {
+-            "passed_filter_reads": 190, "low_quality_reads": 5,
+-            "too_many_N_reads": 2, "too_short_reads": 2, "low_complexity_reads": 1,
+-        },
+-        "read1_before_filtering": summary, "read2_before_filtering": summary,
+-        "read1_after_filtering": summary, "read2_after_filtering": summary,
+-        "duplication": {"rate": 0.02, "duplication": 2},
+-        "insert_size": 0,
+-        "adapter_cutting": {"adapter_trimmed_reads": 0, "adapter_trimmed_bases": 0},
+-    }
++    # Generate the complete target-version producer format; hand-written partial
++    # JSON omitted `command` and was correctly rejected by MultiQC 1.35.
++    path = Path(path)
+     path.parent.mkdir(parents=True, exist_ok=True)
+-    path.write_text(json.dumps(data))
++    input_reads = path.with_suffix('.input.fastq.gz')
++    write_fastq_gz(input_reads, 'FASTP', 'raw', 'R1', 200)
++    command = ['fastp', '--in1', str(input_reads), '--out1', str(path.with_suffix('.clean.fastq.gz')),
++               '--json', str(path), '--html', str(path.with_suffix('.html')), '--thread', '1',
++               '--disable_adapter_trimming', '--disable_trim_poly_g']
++    result = subprocess.run(command, text=True, capture_output=True, check=True)
++    path.with_suffix('.producer.log').write_text(result.stdout + result.stderr)
++    data = json.loads(path.read_text())
++    assert_true(data['summary']['before_filtering']['total_reads'] == 200 and
++                data['summary']['after_filtering']['total_reads'] == 200,
++                'real fastp fixture must preserve all 200 known reads')
+ 
+ 
+ def make_qc_fixtures(root):
+@@ -517,20 +535,35 @@
+ 
+ def multiqc_data_text(work, trace):
+     rows = trace_rows(trace)
+-    multiqc_tasks = [row for row in rows if "MULTIQC" in row.get("name", "").upper()]
+-    assert_true(bool(multiqc_tasks), "MultiQC task was not recorded")
+-    task_work = Path(multiqc_tasks[-1].get("workdir", ""))
+-    if not task_work.is_absolute():
+-        task_work = ROOT / task_work
+-    files = []
+-    for candidate in task_work.rglob("multiqc_data"):
+-        files.extend(path for path in candidate.rglob("*") if path.is_file())
+-    assert_true(bool(files), "MultiQC task did not write its data directory")
+-    return {path.name: path.read_text(errors="replace") for path in files}
++    multiqc_tasks = [row for row in rows if row.get('name', '').split(' (')[0].split(':')[-1] in ['MULTIQC', 'MULTIQC_ONT']]
++    assert_true(len(multiqc_tasks) == 1, "Exactly one MultiQC task must be recorded")
++    assert_true(bool(multiqc_tasks[0].get('workdir')), 'MultiQC trace lacks workdir; refusing unrelated or stale files')
++    task_work = Path(multiqc_tasks[0]['workdir']).resolve()
++    assert_true(task_work.is_relative_to(Path(work).resolve()) and task_work.is_dir(),
++                'MultiQC task directory must belong to this regression work directory')
++    directories = [path for path in task_work.glob('*_data') if path.is_dir()]
++    assert_true(len(directories) == 1, "MultiQC task must write exactly one report data directory")
++    files = [path for path in directories[0].iterdir() if path.is_file() and path.suffix in ['.txt', '.json', '.log']]
++    assert_true(bool(files), "MultiQC task did not write its data files")
++    return {path.name: path.read_text() for path in files}
++
++
++def assert_multiqc_fastqc_sources(work, trace, expected):
++    data_files = multiqc_data_text(work, trace)
++    assert_true('multiqc_fastqc.txt' in data_files, 'MultiQC did not parse FastQC source data')
++    records = list(csv.DictReader(io.StringIO(data_files['multiqc_fastqc.txt']), delimiter='\t'))
++    assert_true(len(records) == len(expected), 'MultiQC merged or lost FastQC reports')
++    assert_true({row['Sample'] for row in records} == set(expected), 'MultiQC changed sample/stage/mate identities')
++    for row in records:
++        assert_true(row['Filename'] == row['Sample'], 'MultiQC source filename differs from its complete sample key')
++        assert_true(float(row['Total Sequences']) == expected[row['Sample']], 'MultiQC assigned the wrong read count to a source')
+ 
+ 
+ def suite_qc(base):
+-    require_tools(["fastqc", "multiqc"])
++    require_tools(["fastqc", "multiqc", "fastp"])
++    versions = require_qc_versions()
++    (base / 'tool-versions.json').write_text(json.dumps(versions, indent=2) + '\n')
++    print('QC versions: ' + json.dumps(versions))
+     for workflow_name in ("illumina", "hybrid"):
+         source = (ROOT / "subworkflows" / f"{workflow_name}.nf").read_text()
+         assert_true("SHORT_READ_MULTIQC_INPUTS(FASTP.out.json" in source and
+@@ -570,15 +603,7 @@
+                 f"expected four completed FastQC tasks, got {statuses}")
+     report = full_out / "01_qc" / "multiqc_test_report.html"
+     assert_true(report.exists(), "MultiQC report was not published")
+-    data_files = multiqc_data_text(full_work, full_trace)
+-    fastqc_data_files = {name: text for name, text in data_files.items()
+-                         if "fastqc" in name.lower() and "source" not in name.lower()}
+-    assert_true(bool(fastqc_data_files), "could not identify FastQC source data in MultiQC output")
+-    fastqc_content = "\n".join(fastqc_data_files.values())
+-    observed_keys = {alias for alias in expected if alias in fastqc_content}
+-    assert_true(observed_keys == set(expected),
+-                f"MultiQC FastQC data did not contain eight unique sample keys: {observed_keys}; "
+-                f"files={sorted(fastqc_data_files)}")
++    assert_multiqc_fastqc_sources(full_work, full_trace, {key + '.fastq.gz': count for key, count in expected.items()})
+ 
+     resume_trace = base / "trace-full-resume.trace"
+     run_nf(base, "qc.nf", fixture, full_out, full_work, resume_trace, resume=True)
+@@ -592,12 +617,17 @@
+ 
+     fastp_json = fixture / "fastp.json"
+     make_fastp_json(fastp_json)
+-    no_fastqc_out, _, no_fastqc_trace = qc_run(base, fixture, "multiqc-without-fastqc", False, True,
++    no_fastqc_out, no_fastqc_work, no_fastqc_trace = qc_run(base, fixture, "multiqc-without-fastqc", False, True,
+                                                 True, fastp_json)
+     assert_true((no_fastqc_out / "01_qc" / "multiqc_test_report.html").exists(),
+                 "MultiQC did not run on fastp JSON with run_fastqc=false")
+     assert_true(not trace_statuses(no_fastqc_trace, "FASTQC"),
+                 "FASTQC was scheduled when run_fastqc=false")
++    fastp_table = multiqc_data_text(no_fastqc_work, no_fastqc_trace).get('multiqc_fastp.txt')
++    assert_true(bool(fastp_table), 'MultiQC must parse the actual fastp JSON when FastQC is disabled')
++    fastp_rows = list(csv.DictReader(io.StringIO(fastp_table), delimiter='\t'))
++    assert_true(len(fastp_rows) == 1 and fastp_rows[0]['Sample'] == 'fastp.input.fastq.gz',
++                'MultiQC changed or lost the real fastp source identity')
+ 
+     fastqc_only_out, _, fastqc_only_trace = qc_run(base, fixture, "fastqc-without-multiqc", True, False, False)
+     assert_true(len(list((fastqc_only_out / "01_qc" / "fastqc").glob("*.zip"))) == 8,
+@@ -619,15 +649,22 @@
+     write_extra(fixture / "same-basename" / "mate2" / "reads.fq.gz", 115, True)
+     write_extra(fixture / "uncompressed" / "mate1" / "reads.fastq", 125, False)
+     write_extra(fixture / "uncompressed" / "mate2" / "reads.fq", 135, False)
+-    alias_out, _, alias_trace = qc_run(base, fixture, "alias-extensions", True, False, False,
++    for sample, first in [('A.clean.B', 145), ('A.clean.C', 165)]:
++        write_extra(fixture / sample / 'R1.fastq.gz', first, True)
++        write_extra(fixture / sample / 'R2.fastq.gz', first + 10, True)
++    alias_out, alias_work, alias_trace = qc_run(base, fixture, "alias-extensions", True, True, False,
+                                        extra_alias_tests=True)
+     alias_zips = sorted((alias_out / "01_qc" / "fastqc").glob("*.zip"))
+-    assert_true(len(alias_zips) == 12, f"extension/complex-ID check expected 12 ZIPs, got {len(alias_zips)}")
++    assert_true(len(alias_zips) == 16, f"extension/complex-ID check expected 16 ZIPs, got {len(alias_zips)}")
+     alias_counts = {
+         "A__B.v1.raw.R1": (105, "A__B.v1.raw.R1.fastq.gz"),
+         "A__B.v1.raw.R2": (115, "A__B.v1.raw.R2.fastq.gz"),
+         "U1.clean.R1": (125, "U1.clean.R1.fastq"),
+         "U1.clean.R2": (135, "U1.clean.R2.fastq"),
++        "A.clean.B.raw.R1": (145, "A.clean.B.raw.R1.fastq.gz"),
++        "A.clean.B.raw.R2": (155, "A.clean.B.raw.R2.fastq.gz"),
++        "A.clean.C.raw.R1": (165, "A.clean.C.raw.R1.fastq.gz"),
++        "A.clean.C.raw.R2": (175, "A.clean.C.raw.R2.fastq.gz"),
+     }
+     seen_aliases = set()
+     for archive in alias_zips:
+@@ -642,8 +679,11 @@
+                 assert_true(int(total.group(1)) == count, f"{key}: wrong read count in ZIP")
+                 seen_aliases.add(key)
+     assert_true(seen_aliases == set(alias_counts), "complex ID or FASTQ extension aliases were not preserved")
+-    assert_true(len(trace_statuses(alias_trace, "FASTQC")) == 6,
+-                "same-basename/extension run did not execute all six sample-stage tasks")
++    assert_true(len(trace_statuses(alias_trace, "FASTQC")) == 8,
++                "same-basename/extension run did not execute all eight sample-stage tasks")
++    assert_multiqc_fastqc_sources(alias_work, alias_trace,
++        {**{key + '.fastq.gz': count for key, count in expected.items()},
++         **{filename: count for count, filename in alias_counts.values()}})
+     print("qc: real FastQC/MultiQC verified eight unique aliases, ZIP counts, and conditional routing")
+ 
+ 
+@@ -663,7 +703,7 @@
+         "sequence-optional": ["nextflow"],
+         "longread-source": ["nextflow", "samtools"],
+         "crispr-guard": ["nextflow"],
+-        "qc": ["nextflow", "fastqc", "multiqc"],
++        "qc": ["nextflow", "fastqc", "multiqc", "fastp"],
+         "abricate-routing": ["nextflow", "python3"],
+     }
+     require_tools(requirements[name])
+--- a/tests/test_module_regression_oracles.py
++++ b/tests/test_module_regression_oracles.py
+@@ -41,5 +41,49 @@
+                 runner.assert_duplicate_join_failure(result)
+ 
+ 
++class QcVersionOracleTests(unittest.TestCase):
++    def test_missing_or_unrelated_workdir_rejected_before_output_search(self):
++        with tempfile.TemporaryDirectory() as directory:
++            base = Path(directory)
++            for record in [{'name': 'MULTIQC (report)'},
++                           {'name': 'MULTIQC (report)', 'workdir': str(runner.ROOT)}]:
++                with self.subTest(record=record), \
++                     patch.object(runner, 'trace_rows', return_value=[record]), \
++                     self.assertRaises(runner.RegressionFailure):
++                    runner.multiqc_data_text(base / 'work', base / 'trace')
++
++    def invoke_qc(self, multiqc_output, code=0):
++        def result(command, **kwargs):
++            output = {'fastqc': 'FastQC v0.13.0\n', 'fastp': 'fastp 1.3.6\n'}.get(command[0], multiqc_output)
++            status = 0 if command[0] == 'fastqc' else code
++            return subprocess.CompletedProcess(command, status, stdout=output, stderr='')
++        with tempfile.TemporaryDirectory() as directory, \
++             patch.object(runner.shutil, 'which', side_effect=lambda name: '/declared/bin/' + name), \
++             patch.object(runner.subprocess, 'run', side_effect=result), \
++             patch.object(runner, 'run_nf', side_effect=AssertionError('analysis must not start')):
++            runner.suite_qc(Path(directory))
++
++    def test_wrong_multiqc_rejected_before_any_analysis(self):
++        for output in ['multiqc, version 1.33\n', 'multiqc, version 1.350\n',
++                       'multiqc, version 1.35.dev1\n', 'unrelated banner 1.35\n']:
++            with self.subTest(output=output), self.assertRaises(runner.RegressionFailure):
++                self.invoke_qc(output)
++
++    def test_failed_version_command_rejected_even_with_correct_text(self):
++        with self.assertRaises(runner.RegressionFailure):
++            self.invoke_qc('multiqc, version 1.35\n', code=1)
++
++    def test_declared_versions_are_recorded_on_correct_success(self):
++        outputs = [subprocess.CompletedProcess([], 0, stdout='FastQC v0.13.0\n', stderr=''),
++                   subprocess.CompletedProcess([], 0, stdout='multiqc, version 1.35\n', stderr=''),
++                   subprocess.CompletedProcess([], 0, stdout='', stderr='fastp 1.3.6\n')]
++        with patch.object(runner.subprocess, 'run', side_effect=outputs), \
++             patch.object(runner.shutil, 'which', side_effect=lambda name: '/declared/bin/' + name):
++            versions = runner.require_qc_versions()
++        self.assertEqual(versions['multiqc']['actual'], '1.35')
++        self.assertEqual(versions['fastqc']['actual'], '0.13.0')
++        self.assertEqual(versions['multiqc']['expected'], '1.35')
++
++
+ if __name__ == '__main__':
+     unittest.main()

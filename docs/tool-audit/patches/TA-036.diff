@@ -1,0 +1,437 @@
+--- a/bin/plasmid_structure.R
++++ b/bin/plasmid_structure.R
+@@ -2,7 +2,7 @@
+ # Detect plasmid circularity and terminal overlap.
+ #
+ # Pipeline step ``plasmid_structure``. Circularity evidence:
+-# header-declared markers plus sequence-based terminal repeats detected
++# header-declared markers plus sequence-based direct terminal repeats detected
+ # with the geNomad convention (genomad/sequence.py has_dtr/has_itr) and
+ # CheckV's low-complexity filters (CheckV complete_genomes.py
+ # fetch_dtr/fetch_itr):
+@@ -12,6 +12,7 @@
+ #   the sequence is DTR+ iff prefix == suffix exactly.
+ # * ITR: first 21 bp == reverse complement of the last 21 bp, extendable
+ #   up to 1000 bp while the prefix == revcomp(suffix) identity holds.
++#   ITR is structural repeat evidence, not support for circular topology.
+ # * Exact matching only (no mismatches). A candidate repeat is rejected as
+ #   low-complexity when its 21-mer seed occurs > 8 times genome-wide, its
+ #   N fraction is > 0.2, or its dominant base frequency is > 0.70
+@@ -31,6 +32,10 @@
+   "the assembly graph or read support."
+ )
+ LOW_COMPLEXITY_NOTE <- "low-complexity terminal repeat filtered"
++ITR_TOPOLOGY_NOTE <- paste(
++  "Terminal inverted repeats alone do not support circular topology;",
++  "topology remains unknown, not confirmed linear."
++)
+ 
+ header_circularity <- function(header) {
+   tokens <- strsplit(tolower(trimws(header)), "[[:space:];]+", perl = TRUE)[[1L]]
+@@ -208,6 +213,8 @@
+     itr_len <- find_itr(seq_i)
+     dtr_ok <- dtr_len > 0L && !repeat_low_complexity(seq_i, dtr_len)
+     itr_ok <- itr_len > 0L && !repeat_low_complexity(seq_i, itr_len)
++    repeat_types <- c(if (dtr_ok) "dtr", if (itr_ok) "itr")
++    repeat_type <- if (length(repeat_types)) paste(repeat_types, collapse = "+") else "none"
+     if (header_evidence$circular) {
+       is_circular <- TRUE
+       method <- "header_marker"
+@@ -219,10 +226,10 @@
+       overlap <- dtr_len
+       warnings <- WARNINGS_TEXT
+     } else if (itr_ok) {
+-      is_circular <- TRUE
++      is_circular <- FALSE
+       method <- "itr"
+       overlap <- itr_len
+-      warnings <- WARNINGS_TEXT
++      warnings <- ITR_TOPOLOGY_NOTE
+     } else {
+       is_circular <- FALSE
+       method <- "none"
+@@ -234,17 +241,25 @@
+     if (header_evidence$conflict) {
+       warnings <- paste(warnings, "conflicting circularity header markers; header inference disabled")
+     }
++    # The legacy boolean records a supported circularity candidate. A false
++    # value never establishes linearity; keep that distinction explicit.
++    topology_status <- if (isTRUE(is_circular)) "circular_candidate" else "unknown"
++    topology_evidence <- if (isTRUE(is_circular)) method else "none"
+     rows[[i]] <- c(
+       args$sample_id, ids[i], as.character(widths[i]),
+       tolower(as.character(isTRUE(is_circular))),
+       as.character(overlap),
+       method,
+       warnings,
+-      args$contigs
++      args$contigs,
++      repeat_type,
++      topology_status,
++      topology_evidence
+     )
+   }
+   df <- rows_to_df(rows, c("sample_id", "plasmid_id", "length_bp", "is_circular",
+-                           "terminal_overlap_bp", "method", "warnings", "source_file"))
++                           "terminal_overlap_bp", "method", "warnings", "source_file",
++                           "repeat_type", "topology_status", "topology_evidence"))
+   write.table(df, file = args$out, sep = "\t", quote = FALSE, row.names = FALSE,
+               col.names = TRUE)
+ 
+--- a/tests/test_plasmid_structure.py
++++ b/tests/test_plasmid_structure.py
+@@ -56,5 +56,77 @@
+                          ('true', 'dtr', '25'))
+ 
+ 
++class StructureTopologyTests(unittest.TestCase):
++    """Sequence geometry controls, not synthetic claims of molecular topology."""
++    def run_sequences(self, records):
++        with tempfile.TemporaryDirectory() as directory:
++            base = Path(directory)
++            source, output = base / 'input.fasta', base / 'structure.tsv'
++            source.write_text(''.join('>' + name + '\n' + dna + '\n' for name, dna in records))
++            result = subprocess.run(['Rscript', str(ROOT / 'bin/plasmid_structure.R'),
++                                     '--contigs', str(source), '--sample-id', 'S1', '--out', str(output)],
++                                    text=True, capture_output=True)
++            self.assertEqual(result.returncode, 0, result.stderr)
++            with output.open() as stream:
++                reader = csv.DictReader(stream, delimiter='\t')
++                rows = list(reader)
++                fields = reader.fieldnames
++            self.assertEqual([row['plasmid_id'] for row in rows], [name.split()[0] for name, _ in records])
++            self.assertTrue(all(row['sample_id'] == 'S1' for row in rows))
++            self.assertEqual([int(row['length_bp']) for row in rows], [len(dna) for _, dna in records])
++            return rows, fields
++
++    @staticmethod
++    def sequence(itr=0, dtr=0):
++        rng = random.Random(3661)
++        head = ''.join(rng.choices('ACGT', k=itr or dtr or 30))
++        body = 'A' + ''.join(rng.choices('ACGT', k=798)) + 'A'
++        tail = head.translate(str.maketrans('ACGT', 'TGCA'))[::-1] if itr else (head if dtr else ''.join(rng.choices('ACGT', k=len(head))))
++        return head + body + tail
++
++    def test_itr_only_is_structural_evidence_and_unknown_topology(self):
++        row = self.run_sequences([('itr', self.sequence(itr=25))])[0][0]
++        self.assertEqual((row['is_circular'], row['method'], row['terminal_overlap_bp']), ('false', 'itr', '25'))
++        self.assertEqual((row['repeat_type'], row['topology_status'], row['topology_evidence']), ('itr', 'unknown', 'none'))
++        self.assertIn('not confirmed linear', row['warnings'])
++
++    def test_header_can_support_a_candidate_independently_of_itr(self):
++        row = self.run_sequences([('itr topology=circular', self.sequence(itr=25))])[0][0]
++        self.assertEqual((row['is_circular'], row['method'], row['repeat_type']), ('true', 'header_marker', 'itr'))
++        self.assertEqual((row['topology_status'], row['topology_evidence']), ('circular_candidate', 'header_marker'))
++
++    def test_dtr_candidate_is_preserved(self):
++        row = self.run_sequences([('dtr', self.sequence(dtr=25))])[0][0]
++        self.assertEqual((row['is_circular'], row['method'], row['repeat_type']), ('true', 'dtr', 'dtr'))
++        self.assertEqual((row['topology_status'], row['topology_evidence']), ('circular_candidate', 'dtr'))
++
++    def test_absence_of_repeat_does_not_claim_linearity(self):
++        row = self.run_sequences([('no_repeat', self.sequence())])[0][0]
++        self.assertEqual((row['is_circular'], row['method'], row['repeat_type'], row['topology_status']), ('false', 'none', 'none', 'unknown'))
++
++    def test_low_complexity_itr_is_still_filtered(self):
++        body = self.sequence()[30:-30]
++        row = self.run_sequences([('low_complexity', 'A' * 30 + body + 'T' * 30)])[0][0]
++        self.assertEqual((row['is_circular'], row['method'], row['repeat_type']), ('false', 'none', 'none'))
++        self.assertEqual(row['topology_status'], 'unknown')
++        self.assertIn('low-complexity terminal repeat filtered', row['warnings'])
++
++    def test_itr_seed_and_length_limit_are_unchanged(self):
++        rows = self.run_sequences([('short', self.sequence(itr=20)), ('seed', self.sequence(itr=21)), ('long', self.sequence(itr=1001))])[0]
++        self.assertEqual([(row['is_circular'], row['method'], row['terminal_overlap_bp']) for row in rows], [('false', 'none', '0'), ('false', 'itr', '21'), ('false', 'itr', '1000')])
++
++    def test_dtr_and_itr_are_not_collapsed_to_one_repeat_type(self):
++        half = 'ACGTCAGTACG'
++        palindrome = half + half.translate(str.maketrans('ACGT', 'TGCA'))[::-1]
++        row = self.run_sequences([('both', palindrome + self.sequence()[30:-30] + palindrome)])[0][0]
++        self.assertEqual((row['is_circular'], row['method'], row['repeat_type']), ('true', 'dtr', 'dtr+itr'))
++        self.assertEqual(row['topology_evidence'], 'dtr')
++
++    def test_empty_input_keeps_legacy_columns_and_new_schema(self):
++        rows, fields = self.run_sequences([])
++        self.assertEqual(rows, [])
++        self.assertEqual(fields, ['sample_id', 'plasmid_id', 'length_bp', 'is_circular', 'terminal_overlap_bp', 'method', 'warnings', 'source_file', 'repeat_type', 'topology_status', 'topology_evidence'])
++
++
+ if __name__ == '__main__':
+     unittest.main()
+--- a/README.md
++++ b/README.md
+@@ -36,8 +36,8 @@
+    统一质粒目录上的可比矩阵。DIVERSITY 与内部差异分支实际读取 **contig 表**。
+ 3. 本项目 CoverM 配置只请求 mean/TPM/RPKM，`raw_count` 留空；DESeq2 与网络
+    的 coverage 取整回退只是代理，不能当作原始 read/fragment 计数验收。
+-4. 结构脚本会将通过过滤的 ITR 写成 `is_circular=true`；末端反向重复本身不足以
+-   证明闭环。结构标记、宿主预测和共现连线均需独立证据复核。
++4. 末端反向重复（ITR）只记录结构证据，单独出现时拓扑为未知；header/DTR
++   支持的环状候选仍需独立证据复核，宿主预测和共现连线也不能直接视为确证。
+ 5. mock / 单元回归支持工程行为，不证明真实数据库下的分类性能或生物学结论。
+ 
+ 建议先补齐 **统一 catalog 回贴与计数 → 研究设计及统计模型 → 结构 / MAG / 宿主
+@@ -273,8 +273,11 @@
+   或序列 ID 的 `_circular` 后缀；`not_circular`、`circular=false`、
+   `topology=linear` 等否定标记禁用 header 阳性推断。冲突标记会写入 warning；
+   序列重复证据仍独立评估，未命中 header 阳性不等于证实线性拓扑。
+-  当前通过过滤的 ITR 也产生 `is_circular=true`，存在解释风险；该字段只能作
+-  候选结构标记，不能视为已证实完整环状质粒。需要组装图与跨接 reads 等复核。
++  `repeat_type` 记录通过过滤的 `dtr`/`itr`/`dtr+itr`/`none`；单独 ITR
++  保留 `method=itr` 和重复长度，`is_circular=false`、`topology_status=unknown`、
++  `topology_evidence=none`。只有 header/DTR 支持环状候选，标为
++  `topology_status=circular_candidate`；false/unknown 不代表已证实线性。
++  原八列保留，追加三个证据字段；环状候选数量仍需组装图与跨接 reads 等复核。
+ - 序列组成宿主关联当前使用 **TETRA 风格的四核苷酸 z-score 向量 Pearson
+   相关**，并非旧版文档的“余弦相似度 + GC 惩罚”，也不建模密码子使用。
+   它是组成启发式，不是宿主后验概率或分类学鉴定。
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -374,3 +374,11 @@
+ 可选--old-module指定冻结原module进行错误参数的原生反例；不将失败前态覆盖为成功。
+ 当前生产MAG_HOST仍传[]使用默认内置DB；此项扩展的是module声明的可选接口。测试
+ 不等于镜像/nf-test框架/完整平台或用户自定义DB生物学有效性认证。
++
++### 结构拓扑与报告回归（TA-036，原生局部验证）
++
++`python3 tests/run_structure_topology.py --work-dir <fresh-directory> --references <locked-reference-directory>`
++
++依赖 Nextflow、R/data.table/Biostrings；两份参考的下载 URL、accession、完整文件/核酸 SHA256、长度与 GenBank 拓扑见 `tests/structure-reference.lock.json`。SCP1 NC_003903.1 的线性拓扑另有原始实验研究支持（PMID1847368）。原脚本对其输出 true/itr1000，修复后保留 itr1000 而拓扑 unknown；不从 ITR 反推线性。pUTI89 原始 FASTA 无闭环证据时保持 unknown；另一个明确依据独立 GenBank 注释添加 header 的输入才应产生 header 候选。人工 DTR/ITR 和空结果仅为规则/格式对照。
++
++原 PLASMID_STRUCTURE 五任务、原 REPORT 一任务核对 ID/长度/重复/候选数量，报告不把 ITR-only 计为环状。runner 在生产者完成后显式准备全新报告目录，不能据此关闭生产 publishDir 屏障问题 TA-015。13 项结构单元方法、3 项报告方法、54 项 R smoke 和原检测路由26任务另验；分类器为 observer，不是分类器/图或 reads/完整平台/nf-test 框架/镜像或科学性能认证。
+--- a/assets/plasmid_report.Rmd
++++ b/assets/plasmid_report.Rmd
+@@ -41,6 +41,7 @@
+ ## Limitations
+ 
+ - Sequence-based circularity is predictive and should be confirmed from the assembly graph or read support.
++- The circular count represents candidates, not confirmed topology. Terminal inverted repeats alone do not establish circularity; a negative circularity call does not confirm linearity.
+ - Plasmid calls are predictions from automated classifiers; confirm biologically important hits manually.
+ 
+ ## Methods
+--- a/bin/generate_report.R
++++ b/bin/generate_report.R
+@@ -77,7 +77,9 @@
+ 
+ WARNING <- paste0(
+   "Sequence-based circularity is predictive and should be confirmed from ",
+-  "the assembly graph or read support.")
++  "the assembly graph or read support. The circular count represents candidates, ",
++  "not confirmed topology. Terminal inverted repeats alone do not establish ",
++  "circularity; an unsupported call has unknown topology, not confirmed linearity.")
+ 
+ count_fasta_records <- function(path) {
+   tryCatch(sum(startsWith(readLines(path, warn = FALSE), ">")),
+--- a/modules/detection/structure.nf
++++ b/modules/detection/structure.nf
+@@ -1,7 +1,8 @@
+ /*
+  * Plasmid circularity / terminal-overlap detection (pipeline step:
+  * plasmid_structure, implemented by bin/plasmid_structure.R with the
+- * geNomad/CheckV terminal-repeat convention).
++ * candidate circularity from explicit headers or direct terminal repeats).
++ * Inverted repeats are retained as structural evidence, not circular calls.
+  */
+ process PLASMID_STRUCTURE {
+     tag { meta.id }
+--- /dev/null
++++ b/tests/run_structure_topology.py
+@@ -0,0 +1,144 @@
++#!/usr/bin/env python3
++"""Actual structure/report wrappers on locked topology references and controls.
++
++Requires R/Biostrings/data.table and Nextflow. Fetch the two exact references
++listed in structure-reference.lock.json, then provide their directory. Reference
++bytes and metadata are checked before running. No classifier or read inference.
++"""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import random
++import re
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def sequences(path):
++    records = {}
++    for line in path.read_text().splitlines():
++        if line.startswith('>'):
++            key = line[1:].split()[0]
++            assert key not in records
++            records[key] = ''
++        else:
++            records[key] += line.strip().upper()
++    return records
++
++
++def run(base, references):
++    lock = json.loads((ROOT / 'tests/structure-reference.lock.json').read_text())
++    dna = {}
++    for ref in lock['references']:
++        accession = ref['accession']
++        for suffix, digest in ref['files'].items():
++            assert sha(references / (accession + '.' + suffix)) == digest
++        gb = (references / (accession + '.gb')).read_text()
++        assert re.search(r'\b' + ref['topology'] + r'\b', gb.splitlines()[0])
++        assert re.search(r'^VERSION\s+' + re.escape(accession) + r'\b', gb, re.M)
++        seq = ''.join(re.findall('[a-zA-Z]+', gb.split('ORIGIN')[1].split('//')[0])).upper()
++        assert sequences(references / (accession + '.fasta')) == {accession: seq}
++        assert len(seq) == ref['length']
++        assert hashlib.sha256(seq.encode()).hexdigest() == ref['sequence_sha256']
++        dna[accession] = seq
++    fixture = base / 'fixtures'
++    fixture.mkdir()
++    shutil.copyfile(references / 'NC_003903.1.fasta', fixture / 'SCP1.fasta')
++    shutil.copyfile(references / 'NC_007941.1.fasta', fixture / 'pUTI89.fasta')
++    (fixture / 'metadata_circle.fasta').write_text('>NC_007941.1 topology=circular\n' + dna['NC_007941.1'] + '\n')
++    rng = random.Random(3661)
++    head = ''.join(rng.choices('ACGT', k=25))
++    body = 'A' + ''.join(rng.choices('ACGT', k=798)) + 'A'
++    rc = head.translate(str.maketrans('ACGT', 'TGCA'))[::-1]
++    (fixture / 'mixed.fasta').write_text('>itr\n' + head + body + rc + '\n>dtr\n' + head + body + head + '\n')
++    (fixture / 'empty.fasta').write_text('')
++    sources = ['bin/plasmid_structure.R', 'bin/generate_report.R', 'assets/plasmid_report.Rmd',
++               'modules/detection/structure.nf', 'modules/cross_sample/report.nf',
++               'tests/nextflow/structure_topology.nf', 'tests/run_structure_topology.py',
++               'tests/structure-reference.lock.json']
++    initial = {name: sha(ROOT / name) for name in sources}
++    fixture_hashes = {p.name: sha(p) for p in fixture.iterdir()}
++    config = base / 'native.config'
++    config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\n"
++                      "process.maxForks=1\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n"
++                      "params.publish_dir_mode='copy'\n")
++    out = base / 'out'
++    params = {'outdir': str(out), 'fixture_dir': str(fixture), 'report_only': False,
++              'platform': 'assembly', 'project_name': 'topology_reference_controls'}
++    runs = []
++    env = os.environ.copy()
++    env['PATH'] = str(ROOT / 'bin') + ':' + env['PATH']
++
++    def invoke(name, report_only):
++        directory = base / name
++        directory.mkdir()
++        params['report_only'] = report_only
++        param_file = directory / 'params.json'
++        param_file.write_text(json.dumps(params))
++        cmd = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run',
++               str(ROOT / 'tests/nextflow/structure_topology.nf'), '-params-file', str(param_file),
++               '-work-dir', str(directory / 'work'), '-with-trace', str(directory / 'trace.tsv'), '-ansi-log', 'false']
++        result = subprocess.run(cmd, env=env, capture_output=True, text=True)
++        (directory / 'stdout.log').write_text(result.stdout)
++        (directory / 'stderr.log').write_text(result.stderr)
++        tasks = list(csv.DictReader((directory / 'trace.tsv').open(), delimiter='\t')) if (directory / 'trace.tsv').exists() else []
++        runs.append({'name': name, 'command': cmd, 'exit': result.returncode, 'tasks': tasks})
++        assert result.returncode == 0, result.stdout + result.stderr
++        assert len(tasks) == (1 if report_only else 5)
++        assert all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks)
++
++    invoke('structure', False)
++    rows = {}
++    for sid in ['SCP1', 'pUTI89', 'metadata_circle', 'mixed', 'empty']:
++        table = out / '04_plasmid_detection/structure' / (sid + '.plasmid_structure.tsv')
++        reader = csv.DictReader(table.open(), delimiter='\t')
++        rows[sid] = list(reader)
++        assert reader.fieldnames[-3:] == ['repeat_type', 'topology_status', 'topology_evidence']
++        original = sequences(fixture / (sid + '.fasta'))
++        assert {r['plasmid_id'] for r in rows[sid]} == set(original)
++        assert all(r['sample_id'] == sid and int(r['length_bp']) == len(original[r['plasmid_id']]) for r in rows[sid])
++    scp = rows['SCP1'][0]
++    assert (scp['is_circular'], scp['method'], scp['terminal_overlap_bp'], scp['repeat_type'], scp['topology_status'], scp['topology_evidence']) == ('false', 'itr', '1000', 'itr', 'unknown', 'none')
++    assert (rows['pUTI89'][0]['is_circular'], rows['pUTI89'][0]['topology_status']) == ('false', 'unknown')
++    assert (rows['metadata_circle'][0]['is_circular'], rows['metadata_circle'][0]['method']) == ('true', 'header_marker')
++    assert [(r['is_circular'], r['method']) for r in rows['mixed']] == [('false', 'itr'), ('true', 'dtr')]
++    assert rows['empty'] == []
++    # Isolated, explicit assembly of report inputs after producer completion.
++    consensus = out / '04_plasmid_detection/consensus'
++    consensus.mkdir()
++    for sid in rows:
++        shutil.copyfile(fixture / (sid + '.fasta'), consensus / (sid + '.plasmid_contigs.fasta'))
++        (consensus / (sid + '.plasmid_consensus.tsv')).write_text('contig_id\tsample_id\tplasmid_call\tsupporting_tools\n' + ''.join(r['plasmid_id'] + '\t' + sid + '\tplasmid\tcontrolled_input\n' for r in rows[sid]))
++    invoke('report', True)
++    report = (out / 'report/report.md').read_text()
++    expected = {'SCP1': (1, 0), 'pUTI89': (1, 0), 'metadata_circle': (1, 1), 'mixed': (2, 1), 'empty': (0, 0)}
++    for sid, (total, circular) in expected.items():
++        assert f'| {sid} | {total} | {circular} |' in report
++    assert 'unknown topology, not confirmed linearity' in report
++    assert initial == {name: sha(ROOT / name) for name in sources}
++    assert fixture_hashes == {p.name: sha(p) for p in fixture.iterdir()}
++    receipt = {'pass': True, 'runs': runs, 'source_sha256': initial, 'fixture_sha256': fixture_hashes,
++               'reference_lock': lock, 'expected_counts': expected, 'observed_structure': rows,
++               'limitations': ['Known linear SCP1 plus circular pUTI89 reference metadata; no classifier, topology sensitivity benchmark, graph/read confirmation, container or nf-test certification.',
++                               'REPORT is invoked only after explicitly preparing isolated completed inputs; production publishDir synchronization TA-015 is not tested or fixed.']}
++    (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    print('PASS: five structure tasks, one actual REPORT task; IDs, lengths, repeats, unknown/candidate semantics and counts checked.')
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True)
++    parser.add_argument('--references', required=True)
++    args = parser.parse_args()
++    base = Path(args.work_dir).resolve()
++    base.mkdir(parents=True, exist_ok=True)
++    run(base, Path(args.references).resolve())
+--- /dev/null
++++ b/tests/nextflow/structure_topology.nf
+@@ -0,0 +1,17 @@
++nextflow.enable.dsl=2
++
++include { PLASMID_STRUCTURE } from '../../modules/detection/structure'
++include { REPORT } from '../../modules/cross_sample/report'
++
++workflow {
++    // The runner waits for structure completion and explicitly prepares a fresh
++    // published directory before the separate REPORT invocation. This does not
++    // certify production publishDir synchronization (TA-015 remains open).
++    if (params.report_only) {
++        REPORT(Channel.value(true))
++    } else {
++        inputs = Channel.fromList(['SCP1', 'pUTI89', 'metadata_circle', 'mixed', 'empty'])
++            .map { sid -> tuple([id: sid], file("${params.fixture_dir}/${sid}.fasta", checkIfExists: true)) }
++        PLASMID_STRUCTURE(inputs)
++    }
++}
+--- /dev/null
++++ b/tests/structure-reference.lock.json
+@@ -0,0 +1,31 @@
++{
++  "retrieved": "2026-10-21",
++  "references": [
++    {
++      "accession": "NC_003903.1",
++      "length": 356023,
++      "topology": "linear",
++      "sequence_sha256": "909d85ee50c1ba31928fddf6559b0b221370e6ad7272ed80218509d316d882f8",
++      "files": {
++        "gb": "462ca3ab2dbbd598c90f2e9c28a45f6f000220304133199da420a2beb8a7a071",
++        "fasta": "ec8bf52a876914bcaeb212b0948177d6c78c98f4f0a8dc8f0fe9612876c74467"
++      },
++      "genbank_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_003903.1&rettype=gbwithparts&retmode=text",
++      "fasta_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_003903.1&rettype=fasta&retmode=text"
++    },
++    {
++      "accession": "NC_007941.1",
++      "length": 114230,
++      "topology": "circular",
++      "sequence_sha256": "4966cccce7f09029ffcdd712418d8aa844d452b206eab563a295997726f65b15",
++      "files": {
++        "gb": "0fbb58f15da521ba9ba38a5a19ba02b9d4d4d8d1db6c51cfa791ab2481393b9b",
++        "fasta": "f48980b3e15eb733333493755a432de7e2380b71abf8ac682d92e94353ad8431"
++      },
++      "genbank_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_007941.1&rettype=gbwithparts&retmode=text",
++      "fasta_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_007941.1&rettype=fasta&retmode=text"
++    }
++  ],
++  "independent_linear_topology": "https://pmc.ncbi.nlm.nih.gov/articles/PMC207291/",
++  "limits": "SCP1 independently known linear. pUTI89 raw FASTA is not expected to carry circularity evidence; metadata-derived header is explicitly a separate input."
++}

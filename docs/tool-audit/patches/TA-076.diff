@@ -1,0 +1,13 @@
+--- a/conf/nfcore_mag.config
++++ b/conf/nfcore_mag.config
+@@ -91,7 +91,9 @@
+         cpus   = 16
+         memory = 120.GB
+         time   = 48.h
+-        ext.args = '--skip_ani_screen'
++        // GTDB-Tk2.7.2 standard workflow includes ANI pre-screening. The old
++        // --skip_ani_screen option was removed by the pinned upstream release.
++        ext.args = ''
+         publishDir = [
+             [path: "${params.outdir}/07_host_prediction/mag/gtdbtk", mode: params.publish_dir_mode]
+         ]

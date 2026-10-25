@@ -1,0 +1,2 @@
+path	git_mode	git_blob	target	target_sha256	limitations
+tests/nf-test/workflows/bin	120000	1660911b3f75261d48f8ec5b0e457b00fcce6e20	../../../bin	107dc2010ea08a69c8ba78b10c4e0f93128d0af7c9869f623a520d34da21f837	Supplement to frozen488 regular-file hashes; historical489 tracked-source-object count includes this directory symlink; not runtime certification

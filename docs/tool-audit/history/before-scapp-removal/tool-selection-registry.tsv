@@ -1,0 +1,14 @@
+parameter	recognized_names_proposal	source	contract_note
+polishing_tools	medaka	subworkflows/ont.nf	ONT-only gate
+plasmid_detection_tools	genomad,plasme,plasx,platon,scapp	subworkflows/plasmid_detection.nf	geNomad mandatory independently of list
+plasmid_binning_tools	plasmaag,gplas2,mob_recon,mob_suite,scapp,recycler	subworkflows/plasmid_downstream.nf	mob_suite and mob_recon supported aliases
+typing_tools	plasmidfinder,mob_typer	subworkflows/plasmid_downstream.nf	retain both
+typing_optional_tools	copla,conjscan,macsyfinder	subworkflows/plasmid_downstream.nf	conjscan/macsyfinder both recognized
+host_prediction_tools	metaphlan,kraken2,plasmidhostfinder	subworkflows/host_prediction.nf	platform-specific execution remains separate
+mag_tools	metabat2,concoct,semibin,das_tool,checkm2,gtdbtk	subworkflows/mag_host.nf	retain all declared capabilities
+host_linking_methods	co_abundance,sequence,long_read	subworkflows/host_linking.nf	master switch and read eligibility remain separate
+host_linking_optional_methods	crispr,hotspot	subworkflows/host_linking.nf;main.nf	crispr known but explicitly unsupported when enabled
+annotation_tools	bakta,amrfinderplus,abricate,isescan,integronfinder,prodigal	subworkflows/plasmid_downstream.nf	prodigal supported in main or optional list
+annotation_optional_tools	prodigal,abricate,rgi,eggnog_mapper,mob_suite	nextflow.config;subworkflows/plasmid_downstream.nf	ABRicate now accepted in either annotation list (TA-009 route-only repair); real node still unverified
+comparative_tools	mmseqs2	subworkflows/comparative.nf	retain declared default
+comparative_optional_tools	blast,mummer,clinker	subworkflows/comparative.nf	clinker dependency on bakta remains explicit

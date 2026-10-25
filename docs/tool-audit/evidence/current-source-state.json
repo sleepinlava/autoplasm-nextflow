@@ -1,0 +1,13 @@
+{
+  "head": "f57d0f91454ee0c99cf462ac9093bdf68349991a",
+  "tracked_production_test_diff": "empty",
+  "receipt": "docs/tool-audit/source-receipt.tsv",
+  "tracked_source_files": 489,
+  "scope": "bin/conf/envs/modules/subworkflows/tests/containers/assets plus main.nf nextflow.config modules.json",
+  "limitations": [
+    "source receipt not runtime environment or database certification",
+    "audit docs and ignored result probes are additional uncommitted artifacts"
+  ],
+  "historical_snapshot": "before TA-043 fix",
+  "superseded_for_current_state_by": "docs/tool-audit/evidence/post-fix-source-state.json"
+}

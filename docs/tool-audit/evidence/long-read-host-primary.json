@@ -1,0 +1,12 @@
+[
+  {
+    "path": "docs/tool-audit/evidence/samtools-1.24-fastq.1",
+    "sha": "3e4209e2bf92a0f64e27ccbb3838016fb4b377f3",
+    "url": "https://github.com/samtools/samtools/blob/1.24/doc/samtools-fasta.1"
+  },
+  {
+    "path": "docs/tool-audit/evidence/minimap2-align-upstream.nf",
+    "sha": "e61e77eeaa0fd7af5d2de7718fd15cc5c49b8ce8",
+    "url": "https://github.com/nf-core/modules/blob/135d883a43b1a2324b4112cd270cf22e20835533/modules/nf-core/minimap2/align/main.nf"
+  }
+]

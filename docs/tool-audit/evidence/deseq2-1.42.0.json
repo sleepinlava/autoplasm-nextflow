@@ -1,0 +1,262 @@
+{
+  "repository": "thelovelab/DESeq2",
+  "commit": "17a39b5296cb3d897f1e2a9aa4bebbdefb13b46a",
+  "description_version": "1.42.0",
+  "retrieval": "GitHub connector fixed commit",
+  "excerpts": [
+    {
+      "path": "DESCRIPTION",
+      "blob_sha": "0624a06d1f39952ffdc9d676a7e12b842d271113",
+      "lines": [
+        {
+          "line": 1,
+          "text": "Package: DESeq2"
+        },
+        {
+          "line": 2,
+          "text": "Type: Package"
+        },
+        {
+          "line": 3,
+          "text": "Title: Differential gene expression analysis based on the negative"
+        },
+        {
+          "line": 4,
+          "text": "    binomial distribution"
+        },
+        {
+          "line": 5,
+          "text": "Version: 1.42.0"
+        },
+        {
+          "line": 6,
+          "text": "Authors@R: c("
+        },
+        {
+          "line": 7,
+          "text": "    person(\"Michael\", \"Love\", email=\"michaelisaiahlove@gmail.com\", role = c(\"aut\",\"cre\")),"
+        },
+        {
+          "line": 8,
+          "text": "    person(\"Constantin\", \"Ahlmann-Eltze\", role = c(\"ctb\")),"
+        },
+        {
+          "line": 9,
+          "text": "    person(\"Kwame\", \"Forbes\", role = c(\"ctb\")),"
+        },
+        {
+          "line": 10,
+          "text": "    person(\"Simon\", \"Anders\", role = c(\"aut\",\"ctb\")),"
+        },
+        {
+          "line": 11,
+          "text": "    person(\"Wolfgang\", \"Huber\", role = c(\"aut\",\"ctb\")),"
+        },
+        {
+          "line": 12,
+          "text": "    person(\"RADIANT EU FP7\", role=\"fnd\"),"
+        },
+        {
+          "line": 13,
+          "text": "    person(\"NIH NHGRI\", role=\"fnd\"),"
+        },
+        {
+          "line": 14,
+          "text": "    person(\"CZI\", role=\"fnd\"))"
+        },
+        {
+          "line": 15,
+          "text": "Maintainer: Michael Love <michaelisaiahlove@gmail.com>"
+        },
+        {
+          "line": 16,
+          "text": "Description: Estimate variance-mean dependence in count data from"
+        }
+      ]
+    },
+    {
+      "path": "R/AllClasses.R",
+      "blob_sha": "b817c98e6d23a53366e3630ab554955bd3c1a35f",
+      "lines": [
+        {
+          "line": 171,
+          "text": "    mode(assay(se)) <- \"integer\""
+        },
+        {
+          "line": 172,
+          "text": "  }"
+        },
+        {
+          "line": 173,
+          "text": ""
+        },
+        {
+          "line": 174,
+          "text": "  if (all(assay(se) == 0)) {"
+        },
+        {
+          "line": 175,
+          "text": "    stop(\"all samples have 0 counts for all genes. check the counting script.\")"
+        },
+        {
+          "line": 176,
+          "text": "  }"
+        },
+        {
+          "line": 177,
+          "text": "  "
+        },
+        {
+          "line": 178,
+          "text": "  if (all(MatrixGenerics::rowSums(assay(se) == assay(se)[,1]) == ncol(se))) {"
+        },
+        {
+          "line": 179,
+          "text": "    warning(\"all genes have equal values for all samples. will not be able to perform differential analysis\")"
+        },
+        {
+          "line": 180,
+          "text": "  }"
+        },
+        {
+          "line": 181,
+          "text": ""
+        },
+        {
+          "line": 182,
+          "text": "  if (any(duplicated(rownames(se)))) {"
+        },
+        {
+          "line": 183,
+          "text": "    warning(sum(duplicated(rownames(se))),\" duplicate rownames were renamed by adding numbers\")"
+        },
+        {
+          "line": 184,
+          "text": "    rnms <- rownames(se)"
+        },
+        {
+          "line": 185,
+          "text": "    dups <- unique(rnms[duplicated(rnms)])"
+        },
+        {
+          "line": 186,
+          "text": "    for (rn in dups) {"
+        }
+      ]
+    },
+    {
+      "path": "vignettes/DESeq2.Rmd",
+      "blob_sha": "10dae23d1c34dae6696c18e987273e36c85556ab",
+      "lines": [
+        {
+          "line": 182,
+          "text": "and by a CZI EOSS award."
+        },
+        {
+          "line": 183,
+          "text": ""
+        },
+        {
+          "line": 184,
+          "text": "## Input data"
+        },
+        {
+          "line": 185,
+          "text": ""
+        },
+        {
+          "line": 186,
+          "text": "### Why un-normalized counts?"
+        },
+        {
+          "line": 187,
+          "text": ""
+        },
+        {
+          "line": 188,
+          "text": "As input, the DESeq2 package expects count data as obtained, e.g.,"
+        },
+        {
+          "line": 189,
+          "text": "from RNA-seq or another high-throughput sequencing experiment, in the form of a"
+        },
+        {
+          "line": 190,
+          "text": "matrix of integer values. The value in the *i*-th row and the *j*-th column of"
+        },
+        {
+          "line": 191,
+          "text": "the matrix tells how many reads can be assigned to gene *i* in sample *j*."
+        },
+        {
+          "line": 192,
+          "text": "Analogously, for other types of assays, the rows of the matrix might correspond"
+        },
+        {
+          "line": 193,
+          "text": "e.g. to binding regions (with ChIP-Seq) or peptide sequences (with"
+        },
+        {
+          "line": 194,
+          "text": "quantitative mass spectrometry). We will list method for obtaining count matrices"
+        },
+        {
+          "line": 195,
+          "text": "in sections below."
+        },
+        {
+          "line": 196,
+          "text": ""
+        },
+        {
+          "line": 197,
+          "text": "The values in the matrix should be un-normalized counts or estimated"
+        },
+        {
+          "line": 198,
+          "text": "counts of sequencing reads (for"
+        },
+        {
+          "line": 199,
+          "text": "single-end RNA-seq) or fragments (for paired-end RNA-seq). "
+        },
+        {
+          "line": 200,
+          "text": "The [RNA-seq workflow](http://www.bioconductor.org/help/workflows/rnaseqGene/)"
+        },
+        {
+          "line": 201,
+          "text": "describes multiple techniques for preparing such count matrices.  It"
+        },
+        {
+          "line": 202,
+          "text": "is important to provide count matrices as input for DESeq2's"
+        },
+        {
+          "line": 203,
+          "text": "statistical model [@Love2014] to hold, as only the count values allow"
+        },
+        {
+          "line": 204,
+          "text": "assessing the measurement precision correctly. The DESeq2 model"
+        },
+        {
+          "line": 205,
+          "text": "internally corrects for library size, so transformed or normalized"
+        },
+        {
+          "line": 206,
+          "text": "values such as counts scaled by library size should not be used as"
+        },
+        {
+          "line": 207,
+          "text": "input."
+        },
+        {
+          "line": 208,
+          "text": ""
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,886 @@
+--- a/bin/sequence_similarity_link.R
++++ b/bin/sequence_similarity_link.R
+@@ -1,29 +1,28 @@
+ #!/usr/bin/env Rscript
+ # Link plasmid contigs to first-level MAG FASTA files by sequence composition.
+ #
+-# Score: TETRA (Teeling et al. 2004, Env. Microbiol. 6(9):938-947), the
+-# canonical tetranucleotide-signature method also used by pyani. Instead of a
+-# raw cosine on composition frequencies (which retains compositional bias), the
+-# z-score math is ported EXACTLY from pyani's MIT-licensed implementation
+-# (pyani/tetra.py, https://github.com/widdowquinn/pyani): expected frequencies
+-# from the maximal-order (3rd) Markov model over di/tri-nucleotide counts,
+-# sd per Teeling's approximation, z = (observed - expected) / sd, with pyani's
+-# zero-variance fallback. Pairwise similarity is the Pearson correlation
+-# between the two z-vectors over canonical tetranucleotide classes; undefined
+-# or zero-variance z-vectors (e.g. homopolymers) yield similarity 0.
+-#
+-# This remains a composition-based heuristic linker; it is not a taxonomic or
+-# whole-genome alignment method.
++# TETRA per Teeling et al. (2004), doi:10.1186/1471-2105-5-163:
++# sum every overlapping ACGT di/tri/tetranucleotide on BOTH strands of each
++# FASTA record separately, then calculate Markov expected counts and z-scores.
++# Pearson correlation uses all 256 ordered words, including both RC slots and
++# doubled palindromic counts. Records are never joined across contig boundaries.
++# This is an independent implementation of the published formula, not an exact
++# port of pyani (which has different sequence-end handling and sparse defaults).
++# Undefined/zero variance profiles are ineligible, not fabricated correlations.
++# A threshold selects exploratory candidates; it is not a host probability.
++# The legacy default 0.7 is UNCALIBRATED for this corrected method.
+ 
+ suppressPackageStartupMessages({
+   library(Biostrings)
+ })
+ 
+ PROG <- "sequence_similarity_link.R"
++METHOD <- "tetra_markov256_v1"
+ USAGE <- paste(
+   "usage: sequence_similarity_link.R [-h] --plasmid-contigs PLASMID_CONTIGS",
+   "[--host-genomes HOST_GENOMES] [--taxonomy TAXONOMY] [--sample-id SAMPLE_ID]",
+-  "[--min-similarity MIN_SIMILARITY] --out OUT"
++  "[--min-similarity MIN_SIMILARITY] --out OUT",
++  "[--out-scores OUT_SCORES] [--out-profile-status OUT_PROFILE_STATUS]"
+ )
+ 
+ die <- function(msg) {
+@@ -38,7 +37,9 @@
+     "taxonomy" = list(mode = "single", required = FALSE),
+     "sample-id" = list(mode = "single", required = FALSE),
+     "min-similarity" = list(mode = "single", required = FALSE),
+-    "out" = list(mode = "single", required = TRUE)
++    "out" = list(mode = "single", required = TRUE),
++    "out-scores" = list(mode = "single", required = FALSE),
++    "out-profile-status" = list(mode = "single", required = FALSE)
+   )
+   values <- list()
+   seen <- character(0)
+@@ -157,71 +158,62 @@
+   records
+ }
+ 
+-# K-mer spaces and canonical (both-strands, reverse-complement-folded) counts.
+-# Canonical slot k holds oligonucleotideFrequency(k) + oligonucleotideFrequency(rc(k));
+-# palindromic words are counted once, non-canonical slots are zero. This matches
+-# counting every double-stranded window once under min(kmer, revcomp(kmer)).
++# Ordered word spaces. No canonical folding: reverse complements retain their
++# own slot, and palindromes are counted once per physical strand (twice total).
+ kmer_space <- function(width) {
+   grid <- expand.grid(rep(list(c("A", "C", "G", "T")), width))
+   words <- do.call(paste0, unname(as.list(grid[, seq.int(width, 1L)])))
+   rc <- match(as.character(reverseComplement(DNAStringSet(words))), words)
+   list(words = words, rc = rc, n = length(words), width = width)
+ }
+-
+ SPACE2 <- kmer_space(2L)
+ SPACE3 <- kmer_space(3L)
+ SPACE4 <- kmer_space(4L)
+-REP4 <- which(SPACE4$rc >= seq_len(SPACE4$n))
+-CANON2 <- pmin(seq_len(SPACE2$n), SPACE2$rc)
+-CANON3 <- pmin(seq_len(SPACE3$n), SPACE3$rc)
+-TETRA_PREFIX3 <- CANON3[match(substr(SPACE4$words, 1L, 3L), SPACE3$words)]
+-TETRA_SUFFIX3 <- CANON3[match(substr(SPACE4$words, 2L, 4L), SPACE3$words)]
+-TETRA_MIDDLE2 <- CANON2[match(substr(SPACE4$words, 2L, 3L), SPACE2$words)]
+-
+-canonical_counts <- function(clean, space) {
+-  raw <- as.numeric(oligonucleotideFrequency(DNAString(clean), width = space$width)[space$words])
+-  canon <- raw + raw[space$rc]
+-  idx <- seq_len(space$n)
+-  canon[idx > space$rc] <- 0
+-  canon[idx == space$rc] <- raw[idx == space$rc]
+-  canon
+-}
+-
+-# TETRA z-scores per Teeling et al. (2004) as implemented by pyani/tetra.py
+-# (MIT License, (c) 2017-2019 James Hutton Institute / 2019-2024 University of
+-# Strathclyde): for each tetranucleotide, expected count under the
+-# maximal-order Markov model E = tri[prefix] * tri[suffix] / di[middle] and
+-# sd = sqrt(E * (den - tri[prefix]) * (den - tri[suffix]) / den^2) with
+-# den = di[middle]; z = (observed - E) / sd. pyani's zero-sd fallback
+-# z = 1 / den^2 applies when sd == 0 and den > 0; undefined expectations
+-# (den == 0) leave z as NA. Returns the 136 canonical z-scores.
+-tetra_zscores <- function(seq) {
+-  clean <- gsub("[^ACGTN]", "N", toupper(seq))
+-  di <- canonical_counts(clean, SPACE2)
+-  tri <- canonical_counts(clean, SPACE3)
+-  tet <- canonical_counts(clean, SPACE4)
++TETRA_PREFIX3 <- match(substr(SPACE4$words, 1L, 3L), SPACE3$words)
++TETRA_SUFFIX3 <- match(substr(SPACE4$words, 2L, 4L), SPACE3$words)
++TETRA_MIDDLE2 <- match(substr(SPACE4$words, 2L, 3L), SPACE2$words)
++
++strand_counts <- function(sequences, space) {
++  counts <- numeric(space$n)
++  for (sequence in sequences) {
++    clean <- gsub("[^ACGTN]", "N", toupper(sequence))
++    raw <- as.numeric(oligonucleotideFrequency(DNAString(clean), width = space$width)[space$words])
++    counts <- counts + raw + raw[space$rc]
++  }
++  stats::setNames(counts, space$words)
++}
++
++# E(XYZW) = N(XYZ) N(YZW) / N(YZ)
++# Var = E (N(YZ)-N(XYZ)) (N(YZ)-N(YZW)) / N(YZ)^2
++# All legal windows including the last one are counted. Ambiguity symbols break
++# a window; they are not deleted. Sum per-record counts BEFORE expectations.
++tetra_zscores <- function(sequences) {
++  di <- strand_counts(sequences, SPACE2)
++  tri <- strand_counts(sequences, SPACE3)
++  tet <- strand_counts(sequences, SPACE4)
+   den <- di[TETRA_MIDDLE2]
+   tpre <- tri[TETRA_PREFIX3]
+   tsuf <- tri[TETRA_SUFFIX3]
+-  exp <- tpre * tsuf / den
+-  var <- exp * (den - tpre) * (den - tsuf) / (den * den)
+-  sdv <- suppressWarnings(sqrt(var))
+-  z <- suppressWarnings((tet - exp) / sdv)
+-  zero_sd <- !is.na(sdv) & sdv == 0 & den > 0
+-  z[zero_sd] <- 1 / (den[zero_sd] * den[zero_sd])
+-  z[!is.finite(z)] <- NA_real_
+-  z[REP4]
+-}
+-
+-# Pearson correlation between the two z-vectors over their jointly defined
+-# (finite) canonical slots. Degenerate cases - fewer than two shared defined
+-# slots, zero variance, or undefined values (e.g. homopolymer sequences where
+-# the Markov expectations are degenerate) - yield similarity 0.
++  expected <- tpre * tsuf / den
++  variance <- expected * (den - tpre) * (den - tsuf) / (den * den)
++  z <- rep(NA_real_, SPACE4$n)
++  valid <- is.finite(variance) & variance > 0 & is.finite(expected)
++  z[valid] <- (tet[valid] - expected[valid]) / sqrt(variance[valid])
++  stats::setNames(z, SPACE4$words)
++}
++
++profile_status <- function(z) {
++  if (length(z) != 256L || any(!is.finite(z))) return("undefined_markov_variance")
++  if (stats::sd(z) == 0) return("constant_zscores")
++  "complete256"
++}
++
++# A partial finite subset is not the published 256-dimensional comparison.
++# No usable profile means no numeric similarity, even at threshold zero.
+ similarity <- function(z1, z2) {
+-  ok <- is.finite(z1) & is.finite(z2)
+-  if (sum(ok) < 2L) return(0)
+-  r <- suppressWarnings(stats::cor(z1[ok], z2[ok]))
+-  if (!is.finite(r)) 0 else r
++  if (profile_status(z1) != "complete256" || profile_status(z2) != "complete256") return(NA_real_)
++  r <- stats::cor(z1, z2)
++  if (!is.finite(r)) NA_real_ else max(-1, min(1, r))
+ }
+ 
+ load_taxonomy <- function(path) {
+@@ -282,9 +274,9 @@
+       die(sprintf("Duplicate MAG host_id '%s': %s and %s", host_id, owners[host_id], path))
+     }
+     owners[host_id] <- path
+-    seq <- paste(vapply(read_fasta(path), function(r) r$seq, character(1)), collapse = "")
+-    if (nzchar(seq)) {
+-      features[[host_id]] <- tetra_zscores(seq)
++    sequences <- vapply(read_fasta(path), function(r) r$seq, character(1))
++    if (any(nzchar(sequences))) {
++      features[[host_id]] <- tetra_zscores(sequences)
+     }
+   }
+   features
+@@ -309,19 +301,29 @@
+   plasmids <- read_fasta(args[["plasmid-contigs"]])
+   participating <- Filter(function(r) nchar(r$seq) >= 1000L, plasmids)
+   collected <- list()
++  scored <- list()
++  plasmid_profiles <- list()
+   if (length(bins)) {
+     for (rec in participating) {
+       pz <- tetra_zscores(rec$seq)
++      plasmid_profiles[[rec$name]] <- profile_status(pz)
+       for (bname in names(bins)) {
+         score <- similarity(pz, bins[[bname]])
+-        if (score >= min_similarity) {
++        status <- if (is.finite(score)) "complete256" else "ineligible_profile"
++        scored[[length(scored) + 1L]] <- data.frame(plasmid_id = rec$name,
++          host_id = bname, sample_id = args[["sample-id"]], method = METHOD,
++          score = if (is.finite(score)) sprintf("%.17g", score) else "",
++          profile_status = status, threshold = min_similarity,
++          threshold_pass = is.finite(score) && score >= min_similarity,
++          threshold_status = "uncalibrated", stringsAsFactors = FALSE)
++        if (is.finite(score) && score >= min_similarity) {
+           tax_string <- if (bname %in% names(taxonomy)) taxonomy[bname][[1L]] else "NA"
+           collected[[length(collected) + 1L]] <- list(
+             plasmid_id = rec$name,
+             host_id = bname,
+             sample_id = args[["sample-id"]],
+             score = score,
+-            supporting_data = sprintf("taxonomy=%s;method=tetra_zscore", tax_string)
++            supporting_data = sprintf("taxonomy=%s;method=%s;dimensions=256;threshold=%.17g;threshold_status=uncalibrated", tax_string, METHOD, min_similarity)
+           )
+         }
+       }
+@@ -341,7 +343,7 @@
+       host_id = hos[ord],
+       sample_id = vapply(collected, function(r) r$sample_id, character(1))[ord],
+       evidence_type = "sequence_similarity",
+-      score = sprintf("%.4f", scs[ord]),
++      score = sprintf("%.17g", scs[ord]),
+       supporting_data = vapply(collected, function(r) r$supporting_data, character(1))[ord],
+       stringsAsFactors = FALSE
+     )
+@@ -350,6 +352,25 @@
+     write.table(df, file = args[["out"]], sep = "\t", quote = FALSE, row.names = FALSE),
+     error = function(e) die(conditionMessage(e))
+   )
++  if (!is.null(args[["out-scores"]])) {
++    score_table <- if (length(scored)) do.call(rbind, scored) else data.frame(
++      plasmid_id=character(), host_id=character(), sample_id=character(), method=character(),
++      score=character(), profile_status=character(), threshold=numeric(),
++      threshold_pass=logical(), threshold_status=character())
++    if (nrow(score_table)) score_table <- score_table[order(score_table$plasmid_id, score_table$host_id, method="radix"), ]
++    write.table(score_table, args[["out-scores"]], sep="\t", quote=FALSE, row.names=FALSE)
++  }
++  if (!is.null(args[["out-profile-status"]])) {
++    jsonlite::write_json(list(method=METHOD, dimensions=256L, strands="both",
++      boundaries="sum_per_record_counts_before_expectations", threshold=min_similarity,
++      threshold_status="uncalibrated", ineligible="undefined variance or constant full vector; no fabricated score",
++      sample_id=args[["sample-id"]],
++      mag_profiles=lapply(bins, profile_status), plasmid_profiles=plasmid_profiles,
++      short_plasmids=vapply(Filter(function(r) nchar(r$seq) < 1000L, plasmids), function(r) r$name, character(1))),
++      args[["out-profile-status"]], auto_unbox=TRUE, pretty=TRUE)
++  }
++  cat(sprintf("method=%s; dimensions=256; threshold_status=uncalibrated; complete MAG profiles=%d/%d\n",
++      METHOD, sum(vapply(bins, profile_status, character(1)) == "complete256"), length(bins)), file=stderr())
+   mag_path <- if (have_mags) args[["host-genomes"]] else "not provided"
+   cat(sprintf(
+     "MAG path: %s; candidate FASTA files: %d; valid bins: %d; plasmids compared: %d; links: %d%s\n",
+--- a/modules/linking/sequence.nf
++++ b/modules/linking/sequence.nf
+@@ -15,10 +15,12 @@
+     publishDir "${params.outdir}/07_host_prediction/linking/sequence", mode: params.publish_dir_mode
+ 
+     input:
+-    tuple val(meta), path(plasmid_contigs), path(mag_bins, stageAs: 'mag_bins/*'), path(host_taxonomy)
++    tuple val(meta), path(plasmid_contigs), path(mag_bins, stageAs: 'mag_bins/*'), path(host_taxonomy, stageAs: 'host_taxonomy??/*')
+ 
+     output:
+     tuple val(meta), path("${meta.id}.sequence_links.tsv"), emit: links
++    tuple val(meta), path("${meta.id}.sequence_scores.tsv"), emit: scores
++    tuple val(meta), path("${meta.id}.sequence_method.json"), emit: method
+ 
+     script:
+     def binPaths = (mag_bins in List ? mag_bins : (mag_bins ? [mag_bins] : []))
+@@ -38,6 +40,8 @@
+         ${binsArg} ${taxArg} \\
+         --sample-id ${shellQuote.call(meta.id)} \\
+         --min-similarity ${params.link_min_similarity} \\
++        --out-scores ${shellQuote.call("${meta.id}.sequence_scores.tsv")} \\
++        --out-profile-status ${shellQuote.call("${meta.id}.sequence_method.json")} \\
+         --out ${shellQuote.call("${meta.id}.sequence_links.tsv")}
+     """
+ }
+--- a/tests/test_sequence_similarity_link.py
++++ b/tests/test_sequence_similarity_link.py
+@@ -4,12 +4,15 @@
+ import sys
+ import tempfile
+ import unittest
++import random
+ from pathlib import Path
+ 
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ SCRIPT = ROOT / "bin" / "sequence_similarity_link.R"
+-MATCHING = "ACGT" * 300
++# Full-rank self-match control, independent of the implementation's output.
++# Periodic ACGT is a degenerate Markov profile and is tested separately.
++MATCHING = ''.join(random.Random(39040).choices('ACGT', k=1200))
+ 
+ 
+ class SequenceSimilarityLinkTests(unittest.TestCase):
+@@ -158,6 +161,21 @@
+         self.assertIn("valid bins: 1", result.stderr)
+         self.assertIn("links: 0", result.stderr)
+ 
++    def test_degenerate_profile_never_becomes_a_link_at_zero_threshold(self):
++        self.fasta(self.plasmids, [("periodic", "ACGT" * 300)])
++        mag_dir = self.root / "bins"
++        self.fasta(mag_dir / "host.fa", [("c", "ACGT" * 300)])
++        scores = self.root / 'scores.tsv'
++        result = self.run_cli('--host-genomes', mag_dir, '--min-similarity', '0',
++                              '--out-scores', scores)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual(self.rows(), [])
++        with scores.open() as stream:
++            row = next(csv.DictReader(stream, delimiter='\t'))
++        self.assertEqual(row['score'], '')
++        self.assertEqual(row['profile_status'], 'ineligible_profile')
++        self.assertEqual(row['threshold_pass'], 'FALSE')
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -416,3 +416,11 @@
+ `tests/mock_e2e/run.py` 的 `--with-host-removal --host-minimap-prefix <2.30-prefix> --host-samtools-prefix <1.24-prefix> --long-input mixed` 让两样本使用不同宿主参考，另外四样本走无参考分支；ONT/HiFi/hybrid(OPERA)共496任务中仅18个宿主长读工具任务为原生，其余外部CLI为observer，R/Python真实执行。再验ONT全无参考144任务。FASTQ/BAM/POD5（HiFi不含POD5）输入为明确fixture，末端组装器输入逐记录核对，不是实际组装/检测效果验证。HybridSPAdes额外尝试因observer环境缺真实SPAdes计划解析依赖失败，保留原日志且不计通过；本批不认证该完整分支。共享定量三模式55原生任务另验。
+ 
+ 未配对长读宿主过滤消费 `<id>.host_removed_other.fastq.gz`；全被过滤时终止，hybrid不自动改为短读单独组装。版本、阈值和预设保持不变。未进行镜像、远端执行器、nf-test框架或科学灵敏度/特异度基准；TT-001计数oracle问题仍开放。
++
++### TETRA 256维数值、输入保护与阈值校准
++
++用户确认采用标准TETRA并单独校准阈值。本地 `tests/test_tetra_math.py` 的8方法独立逐窗口计算；`test_sequence_similarity_link.py` 现11接口方法，低复杂度profile在零阈值也不得生成关联。`tests/run_tetra_sequence.py` 的两个原LINK_SEQUENCE任务使用锁定pUTI89/SCP1真实DNA作明确自匹配/碎片等控制，24配对分数、分类marker、输入不变和完整方法状态均核对；这是数值/接口控制，不是已知宿主准确率基准。
++
++`tests/run_sequence_taxonomy_input.py --work-dir <fresh> --before-dir <frozen-before>` 3个原任务复现旧taxonomy.tsv重定向截断源文件（任务仍0），并验证当前单表及双域同名输入均不变、分类准确。only disposable fixtures用于反例。HOST_LINKING可选/重复键11任务和54R smoke另验。原nf-test no-MAG场景仍仅为空结果，未升级为阳性/框架认证；新native harness不等于nf-test JUnit。
++
++所有比较保存在sequence_scores.tsv，method JSON明确tetra_markov256_v1与uncalibrated；0.7仍未校准。`bin/calibrate_sequence_threshold.py` 用具证据的显式标签和质粒/宿主组均隔离的calibration/holdout集合；7方法/3CLI控制只验证统计工具，人工0.8不得写回默认。完整数据约束、方法差异和待做真实宿主校准见 `docs/tool-audit/contracts/tetra-sequence-method.md`。TA-039仍ready/open；TA-040与新TA-058局部修复另记。
+--- a/README.md
++++ b/README.md
+@@ -287,9 +287,15 @@
+   `topology_evidence=none`。只有 header/DTR 支持环状候选，标为
+   `topology_status=circular_candidate`；false/unknown 不代表已证实线性。
+   原八列保留，追加三个证据字段；环状候选数量仍需组装图与跨接 reads 等复核。
+-- 序列组成宿主关联当前使用 **TETRA 风格的四核苷酸 z-score 向量 Pearson
+-  相关**，并非旧版文档的“余弦相似度 + GC 惩罚”，也不建模密码子使用。
+-  它是组成启发式，不是宿主后验概率或分类学鉴定。
++- 序列组成关联采用 TETRA 的双链256维 z-score Pearson 相关：
++  按每条 FASTA 记录分别计数，再汇总 MAG 计数；不跨 contig 拼接。
++  不能计算完整向量的低复杂度输入不产生伪造的零分或关联。
++  `sequence_scores.tsv` 保留所有比较（含未过阈值和无法评分），
++  `sequence_method.json` 记录方法与可评分状态；旧关联分数需要重算。
++  当前 `--link_min_similarity 0.7` 仍为**未校准的历史阈值**，候选关联不是
++  宿主概率。阈值校准工具及分组隔离要求见
++  [TETRA 方法与校准](docs/tool-audit/contracts/tetra-sequence-method.md)；
++  人工算例的阈值不用于替换默认值。
+ - 长读桥接通过 Rsamtools 解析 SAM/BAM，要求同一 read 有 primary 与
+   supplementary 记录，支持质粒与非质粒 contig 连接；默认 MAPQ≥20，并过滤
+   secondary、QC-fail、duplicate、paired 等标记。桥接仍可能来自嵌合、重复或
+--- a/nextflow.config
++++ b/nextflow.config
+@@ -59,6 +59,7 @@
+     host_linking_optional_methods = []                 // crispr, hotspot
+     link_correlation_method      = 'spearman'          // spearman | pearson
+     link_min_correlation         = 0.6
++    // Legacy exploratory cutoff; uncalibrated for tetra_markov256_v1.
+     link_min_similarity          = 0.7
+     // HOTSPOT (optional method 'hotspot'): cloned repository + downloaded
+     // database/models folders (see https://github.com/Orin-beep/HOTSPOT)
+--- a/tests/run_module_regressions.py
++++ b/tests/run_module_regressions.py
+@@ -220,7 +220,8 @@
+ def suite_sequence(base):
+     fixture = base / "fixtures" / "sequence"
+     sample = "S1"
+-    sequence = "ACGT" * 300
++    import random
++    sequence = "".join(random.Random(39040).choices("ACGT", k=1200))
+     write_fasta(fixture / f"{sample}.plasmid_contigs.fasta", [("p1", sequence)])
+     write_fasta(fixture / f"{sample}.metabat2_bins" / "bin.1.fa", [("contig_1", sequence)])
+     (fixture / f"{sample}.taxonomy.tsv").write_text(
+@@ -286,7 +287,8 @@
+ 
+ 
+ def sequence_optional_fixtures(root):
+-    seq = "ACGT" * 300
++    import random
++    seq = ''.join(random.Random(39040).choices('ACGT', k=1200))
+     for sample in ("S1", "S2"):
+         write_fasta(root / f"{sample}.plasmid_contigs.fasta", [("p1", seq)])
+     write_fasta(root / "S1.metabat2_bins" / "bin.1.fa", [("h1", seq)])
+--- a/tests/r_mock/run_r_mock_tests.sh
++++ b/tests/r_mock/run_r_mock_tests.sh
+@@ -152,7 +152,7 @@
+ check "sequence_similarity_link exits 0" test $? -eq 0
+ check_grep "identical sequence links to bin.1" sequence_links.tsv $'	bin.1	'
+ check_grep "taxonomy attached" sequence_links.tsv "d__Bacteria"
+-check_grep "TETRA method label" sequence_links.tsv "method=tetra_zscore"
++check_grep "TETRA method label" sequence_links.tsv "method=tetra_markov256_v1"
+ 
+ # ---------- 8. longread_bridge_link.R ----------
+ Rscript "$BIN/longread_bridge_link.R" --sam alignments.sam --plasmid-contigs S1.plasmid_contigs.fasta \
+--- /dev/null
++++ b/bin/calibrate_sequence_threshold.py
+@@ -0,0 +1,122 @@
++#!/usr/bin/env python3
++"""Calibrate a TETRA candidate cutoff on explicitly labeled, disjoint cohorts.
++
++Labels are curator assertions with evidence, not inferred from absent host links.
++This does not establish host permissiveness or certify a dataset's provenance.
++"""
++import argparse
++import csv
++import hashlib
++import json
++import math
++from pathlib import Path
++
++METHOD = 'tetra_markov256_v1'
++KEYS = ['sample_id', 'plasmid_id', 'host_id']
++
++
++def rows(path):
++    with path.open() as stream:
++        reader = csv.DictReader(stream, delimiter='\t')
++        if reader.fieldnames is None: raise ValueError(f'Empty table: {path}')
++        return list(reader)
++
++
++def load_labels(path):
++    records = rows(path); seen = set(); groups = {'calibration': [set(), set()], 'holdout': [set(), set()]}
++    for row in records:
++        required = KEYS + ['label', 'split', 'plasmid_group', 'host_group', 'label_evidence']
++        if any(not row.get(k, '').strip() for k in required): raise ValueError('Labels need explicit IDs, binary label, split, both grouping IDs and label_evidence')
++        key = tuple(row[k] for k in KEYS)
++        if key in seen: raise ValueError('Duplicate labeled pair')
++        seen.add(key)
++        if row['label'] not in ['0', '1'] or row['split'] not in groups: raise ValueError('Invalid label/split')
++        row['label'] = int(row['label'])
++        for i, key in enumerate(['plasmid_group', 'host_group']): groups[row['split']][i].add(row[key])
++    for i in [0, 1]:
++        if groups['calibration'][i] & groups['holdout'][i]: raise ValueError('Calibration/holdout group leakage (plasmid or host)')
++    # Exact IDs must also not bypass the grouping barrier with invented group names.
++    for key in ['plasmid_id', 'host_id']:
++        # These IDs are local to a sample. Shared sequence/lineage identity is
++        # represented by the required curator group IDs above.
++        if {(r['sample_id'], r[key]) for r in records if r['split'] == 'calibration'} & {(r['sample_id'], r[key]) for r in records if r['split'] == 'holdout'}:
++            raise ValueError('Calibration/holdout entity leakage')
++    for split in groups:
++        if {r['label'] for r in records if r['split'] == split} != {0, 1}: raise ValueError('Both labels are required in each cohort')
++    return records
++
++
++def load_scores(paths):
++    result = {}
++    for path in paths:
++        for row in rows(path):
++            if any(not row.get(k) for k in KEYS) or row.get('method') != METHOD: raise ValueError('Score identity/method mismatch')
++            key = tuple(row[k] for k in KEYS)
++            if key in result: raise ValueError('Duplicate scored pair')
++            if row.get('profile_status') == 'complete256':
++                value = float(row['score'])
++                if not math.isfinite(value) or not -1 <= value <= 1: raise ValueError('Invalid Pearson score')
++            elif row.get('profile_status') == 'ineligible_profile' and row.get('score', '') == '': value = None
++            else: raise ValueError('Invalid score/profile state')
++            result[key] = value
++    return result
++
++
++def metrics(records, threshold):
++    available = [r for r in records if r['score'] is not None]
++    tp = sum(r['label'] == 1 and r['score'] >= threshold for r in available)
++    fp = sum(r['label'] == 0 and r['score'] >= threshold for r in available)
++    tn = sum(r['label'] == 0 and r['score'] < threshold for r in available)
++    fn = sum(r['label'] == 1 and r['score'] < threshold for r in available)
++    sensitivity = tp / (tp + fn) if tp + fn else None
++    specificity = tn / (tn + fp) if tn + fp else None
++    return {'tp': tp, 'fp': fp, 'tn': tn, 'fn': fn,
++        'precision': tp / (tp + fp) if tp + fp else None, 'sensitivity': sensitivity,
++        'specificity': specificity,
++        'balanced_accuracy': (sensitivity + specificity) / 2 if sensitivity is not None and specificity is not None else None,
++        'labeled_pairs': len(records), 'eligible_pairs': len(available),
++        'ineligible_by_label': {str(label): sum(r['label'] == label and r['score'] is None for r in records) for label in [0, 1]},
++        'metric_scope': 'eligible pairs only; ineligible profiles abstain and are reported separately, not true negatives'}
++
++
++def calibrate(score_paths, label_path, endpoint, minimum_precision):
++    if not 0 < minimum_precision <= 1: raise ValueError('Minimum calibration precision must be in (0,1]')
++    labels = load_labels(label_path); scores = load_scores(score_paths)
++    for row in labels:
++        key = tuple(row[k] for k in KEYS)
++        if key not in scores: raise ValueError('Missing scored pair; use unfiltered all-pairs sequence_scores.tsv, not selected links')
++        row['score'] = scores[key]
++    train = [r for r in labels if r['split'] == 'calibration']; holdout = [r for r in labels if r['split'] == 'holdout']
++    # Threshold policy is restricted to the production parameter domain [0,1].
++    thresholds = sorted({0., 1.} | {r['score'] for r in train if r['score'] is not None and r['score'] >= 0})
++    candidates = [{'threshold': t, **metrics(train, t)} for t in thresholds]
++    feasible = [c for c in candidates if c['precision'] is not None and c['precision'] >= minimum_precision and c['balanced_accuracy'] is not None]
++    selected = max(feasible, key=lambda c: (c['balanced_accuracy'], c['specificity'], c['threshold'])) if feasible else None
++    return {'method': METHOD, 'endpoint': endpoint, 'status': 'estimated_on_supplied_labels' if selected else 'no_feasible_cutoff',
++        'selection': 'calibration only: maximize eligible balanced accuracy subject to minimum precision; tie specificity then higher cutoff',
++        'minimum_calibration_precision': minimum_precision, 'selected_threshold': selected['threshold'] if selected else None,
++        'calibration': selected, 'holdout': metrics(holdout, selected['threshold']) if selected else None,
++        'calibration_candidates': candidates,
++        'inputs_sha256': {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in [label_path, *score_paths]},
++        'label_provenance': 'Supplied curator labels/evidence; not independently verified by this numerical tool',
++        'labels': labels,
++        'limitations': ['Cutoff not automatically installed into pipeline; independent holdout performance/coverage and label provenance require scientific review.',
++            'An assembly-of-isolation endpoint does not imply experimental host range or true non-permissiveness of decoys.',
++            'A fixture/small or biased panel cannot establish generalizable biological performance.']}
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--scores', nargs='+', required=True, type=Path)
++    parser.add_argument('--labels', required=True, type=Path)
++    parser.add_argument('--endpoint', required=True, choices=['recorded_assembly_host', 'experimental_permissiveness'])
++    parser.add_argument('--min-calibration-precision', type=float, default=.9)
++    parser.add_argument('--out', type=Path, required=True)
++    args = parser.parse_args()
++    try: result = calibrate(args.scores, args.labels, args.endpoint, args.min_calibration_precision)
++    except (ValueError, KeyError) as error: parser.error(str(error))
++    args.out.write_text(json.dumps(result, indent=2, allow_nan=False) + '\n')
++    return 0 if result['selected_threshold'] is not None else 2
++
++
++if __name__ == '__main__': raise SystemExit(main())
+--- /dev/null
++++ b/tests/test_tetra_math.py
+@@ -0,0 +1,145 @@
++"""Independent finite-window/Markov oracle for the published 256-word TETRA math.
++
++This is a numeric contract test, not a host association accuracy benchmark.
++"""
++import collections
++import csv
++import itertools
++import math
++from pathlib import Path
++import random
++import subprocess
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++SCRIPT = ROOT / 'bin/sequence_similarity_link.R'
++WORDS = {k: [''.join(x) for x in itertools.product('ACGT', repeat=k)] for k in [2, 3, 4]}
++
++
++def rc(sequence):
++    return sequence.translate(str.maketrans('ACGTN', 'TGCAN'))[::-1]
++
++
++def counts(records, width):
++    counter = collections.Counter()
++    for record in records:
++        clean = ''.join(c if c in 'ACGTN' else 'N' for c in record.upper())
++        for strand in [clean, rc(clean)]:
++            for start in range(len(strand) - width + 1):
++                word = strand[start:start + width]
++                if all(c in 'ACGT' for c in word): counter[word] += 1
++    return {word: counter[word] for word in WORDS[width]}
++
++
++def zscores(records):
++    di, tri, tetra = [counts(records, k) for k in [2, 3, 4]]
++    result = {}
++    for word in WORDS[4]:
++        denominator = di[word[1:3]]
++        if not denominator: result[word] = None; continue
++        left, right = tri[word[:3]], tri[word[1:]]
++        expected = left * right / denominator
++        variance = expected * (denominator - left) * (denominator - right) / denominator ** 2
++        result[word] = (tetra[word] - expected) / math.sqrt(variance) if variance > 0 else None
++    return result
++
++
++def pearson(a, b):
++    if any(x is None for x in list(a.values()) + list(b.values())): return None
++    left = [a[w] for w in WORDS[4]]; right = [b[w] for w in WORDS[4]]
++    ml = sum(left) / 256; mr = sum(right) / 256
++    vl = sum((x - ml) ** 2 for x in left); vr = sum((x - mr) ** 2 for x in right)
++    if not vl or not vr: return None
++    return sum((x - ml) * (y - mr) for x, y in zip(left, right)) / math.sqrt(vl * vr)
++
++
++class TetraMathTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.temp = tempfile.TemporaryDirectory(); cls.base = Path(cls.temp.name)
++        rng = random.Random(390402026)
++        seq = ''.join(rng.choices('ACGT', weights=[.35, .15, .2, .3], k=4000))
++        varied = ''.join(rng.choice('ACGT') if rng.random() < .18 else c for c in seq)
++        cls.records = {'full': [seq], 'changed': [varied], 'reverse': [rc(seq)],
++            'split': [seq[:1999], seq[1999:]], 'reordered': [seq[1999:], seq[:1999]],
++            'ambiguous': [seq[:2000] + 'NRY-' + seq[2000:]],
++            'broken': [seq[:2000], seq[2000:]], 'short': ['ACGT', 'AT', 'CG'],
++            'homopolymer': ['A' * 1200], 'periodic': ['ACGT' * 300], 'empty': []}
++        for name, seqs in cls.records.items():
++            (cls.base / (name + '.fa')).write_text(''.join(f'>r{i}\n{s}\n' for i, s in enumerate(seqs)))
++        probe = cls.base / 'probe.R'
++        probe.write_text('''args <- commandArgs(TRUE)
++e <- parse(args[1]); for (x in e[-length(e)]) eval(x)
++root <- args[2]
++for (name in c("full","changed","reverse","split","reordered","ambiguous","broken","short","homopolymer","periodic","empty")) {
++  sequences <- vapply(read_fasta(file.path(root,paste0(name,".fa"))), function(r) r$seq, character(1))
++  z <- tetra_zscores(sequences)
++  write.table(data.frame(word=names(z),z=z),file.path(root,paste0(name,".z.tsv")),sep="\\t",quote=FALSE,row.names=FALSE,na="NA")
++  for (space in list(SPACE2,SPACE3,SPACE4)) {
++    n <- strand_counts(sequences,space)
++    write.table(data.frame(word=names(n),count=n),file.path(root,paste0(name,".",space$width,".tsv")),sep="\\t",quote=FALSE,row.names=FALSE)
++  }
++}
++''')
++        result = subprocess.run(['Rscript', str(probe), str(SCRIPT), str(cls.base)], text=True, capture_output=True)
++        if result.returncode: raise AssertionError(result.stderr)
++
++    @classmethod
++    def tearDownClass(cls): cls.temp.cleanup()
++
++    def rcounts(self, name, width):
++        with (self.base / f'{name}.{width}.tsv').open() as f:
++            return {r['word']: int(r['count']) for r in csv.DictReader(f, delimiter='\t')}
++
++    def rz(self, name):
++        with (self.base / f'{name}.z.tsv').open() as f:
++            return {r['word']: None if r['z'] == 'NA' else float(r['z']) for r in csv.DictReader(f, delimiter='\t')}
++
++    def test_every_legal_window_both_strands_and_all_ordered_words(self):
++        for name, records in self.records.items():
++            for width in [2, 3, 4]: self.assertEqual(self.rcounts(name, width), counts(records, width), (name, width))
++
++    def test_full_256_zscores_against_independent_scalar_formula(self):
++        for name, records in self.records.items():
++            actual, expected = self.rz(name), zscores(records)
++            self.assertEqual(len(actual), 256)
++            for word, value in expected.items():
++                if value is None: self.assertIsNone(actual[word], (name, word))
++                else: self.assertAlmostEqual(actual[word], value, places=9, msg=(name, word))
++
++    def test_palindromes_are_counted_on_each_strand(self):
++        self.assertEqual(self.rcounts('short', 4)['ACGT'], 2)
++        self.assertEqual(self.rcounts('short', 2)['AT'], 2)
++        self.assertEqual(self.rcounts('short', 2)['CG'], 4)
++
++    def test_sequence_end_windows_and_short_records(self):
++        self.assertEqual(sum(self.rcounts('full', 4).values()), 2 * (4000 - 3))
++        self.assertEqual(sum(self.rcounts('split', 4).values()), 2 * (4000 - 6))
++        self.assertEqual(sum(self.rcounts('short', 4).values()), 2)
++        self.assertEqual(sum(self.rcounts('empty', 4).values()), 0)
++
++    def test_fragment_boundaries_exclude_six_junction_windows(self):
++        full, split = self.rcounts('full', 4), self.rcounts('split', 4)
++        self.assertEqual(sum(full.values()) - sum(split.values()), 6)
++        self.assertTrue(any(full[w] != split[w] for w in WORDS[4]))
++        # Reordering independent contigs cannot alter any count or z-score.
++        self.assertEqual(split, self.rcounts('reordered', 4))
++        self.assertEqual(self.rz('split'), self.rz('reordered'))
++
++    def test_strand_invariance_and_ambiguity_breaks_windows(self):
++        self.assertEqual(self.rz('full'), self.rz('reverse'))
++        for width in [2, 3, 4]: self.assertEqual(self.rcounts('ambiguous', width), self.rcounts('broken', width))
++
++    def test_undefined_profiles_are_not_numeric_zero_similarities(self):
++        self.assertIsNone(pearson(self.rz('homopolymer'), self.rz('full')))
++        self.assertIsNone(pearson(self.rz('periodic'), self.rz('periodic')))
++
++    def test_full_vector_pearson_independent_and_self_match(self):
++        self.assertAlmostEqual(pearson(self.rz('full'), self.rz('reverse')), 1, places=12)
++        expected = pearson(zscores(self.records['full']), zscores(self.records['changed']))
++        self.assertAlmostEqual(pearson(self.rz('full'), self.rz('changed')), expected, places=12)
++        self.assertLess(expected, .7)
++
++
++if __name__ == '__main__': unittest.main()
+--- /dev/null
++++ b/tests/test_sequence_threshold_calibration.py
+@@ -0,0 +1,73 @@
++"""Predeclared numeric controls; no synthetic fixture is biological calibration."""
++import csv
++import importlib.util
++from pathlib import Path
++import tempfile
++import unittest
++
++SOURCE = Path(__file__).resolve().parents[1] / 'bin/calibrate_sequence_threshold.py'
++spec = importlib.util.spec_from_file_location('calibrate_tetra', SOURCE)
++m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
++
++
++class ThresholdCalibrationTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory(); self.base = Path(self.temp.name)
++        self.labels = self.base / 'labels.tsv'; self.scores = self.base / 'scores.tsv'
++        self.label_rows = []; self.score_rows = []
++        for i, (split, label, score) in enumerate([('calibration',1,.9),('calibration',1,.8),('calibration',0,.7),('calibration',0,.1),('holdout',1,.5),('holdout',0,.9)]):
++            key = dict(sample_id='S',plasmid_id=f'p{i}',host_id=f'h{i}')
++            self.label_rows.append(dict(**key,label=str(label),split=split,plasmid_group=f'pg{i}',host_group=f'hg{i}',label_evidence='explicit numeric control; not biology'))
++            self.score_rows.append(dict(**key,method=m.METHOD,score=str(score),profile_status='complete256'))
++
++    def tearDown(self): self.temp.cleanup()
++
++    def run_calibration(self):
++        for path, rows in [(self.labels,self.label_rows),(self.scores,self.score_rows)]:
++            with path.open('w') as f:
++                w=csv.DictWriter(f,list(rows[0]),delimiter='\t');w.writeheader();w.writerows(rows)
++        return m.calibrate([self.scores],self.labels,'recorded_assembly_host',1.)
++
++    def test_predeclared_cutoff_and_bad_holdout_are_reported(self):
++        result=self.run_calibration();self.assertEqual(result['selected_threshold'],.8)
++        self.assertEqual(result['calibration']['balanced_accuracy'],1)
++        self.assertEqual(result['holdout']['balanced_accuracy'],0)
++        self.assertEqual((result['holdout']['fp'],result['holdout']['fn']),(1,1))
++
++    def test_holdout_cannot_tune_cutoff(self):
++        a=self.run_calibration()['selected_threshold']
++        self.score_rows[-2]['score']='.99';self.score_rows[-1]['score']='-.3'
++        b=self.run_calibration();self.assertEqual(a,b['selected_threshold']);self.assertEqual(b['holdout']['balanced_accuracy'],1)
++
++    def test_host_or_plasmid_group_leakage_rejected(self):
++        for key in ['host_group','plasmid_group']:
++            old=self.label_rows[-1][key];self.label_rows[-1][key]=self.label_rows[0][key]
++            with self.assertRaisesRegex(ValueError,'group leakage'):self.run_calibration()
++            self.label_rows[-1][key]=old
++
++    def test_missing_label_evidence_or_score_rejected(self):
++        self.label_rows[0]['label_evidence']=''
++        with self.assertRaisesRegex(ValueError,'label_evidence'):self.run_calibration()
++        self.label_rows[0]['label_evidence']='numeric control';self.score_rows.pop()
++        with self.assertRaisesRegex(ValueError,'Missing scored pair'):self.run_calibration()
++
++    def test_wrong_method_or_nonfinite_score_rejected(self):
++        self.score_rows[0]['method']='legacy_folded136'
++        with self.assertRaisesRegex(ValueError,'method mismatch'):self.run_calibration()
++        self.score_rows[0]['method']=m.METHOD;self.score_rows[0]['score']='nan'
++        with self.assertRaisesRegex(ValueError,'Invalid Pearson'):self.run_calibration()
++
++    def test_same_local_ids_in_distinct_samples_are_not_merged(self):
++        self.label_rows[-1].update(sample_id='OTHER',plasmid_id='p0',host_id='h0')
++        self.score_rows[-1].update(sample_id='OTHER',plasmid_id='p0',host_id='h0')
++        result=self.run_calibration()
++        self.assertEqual(result['selected_threshold'],.8)
++        self.assertEqual(result['holdout']['labeled_pairs'],2)
++
++    def test_ineligible_profile_is_abstention_not_negative(self):
++        self.score_rows[-1].update(score='',profile_status='ineligible_profile')
++        result=self.run_calibration()['holdout'];self.assertEqual(result['ineligible_by_label']['0'],1);self.assertEqual(result['tn'],0)
++        self.assertIsNone(result['specificity'])
++
++
++if __name__=='__main__':unittest.main()
+--- /dev/null
++++ b/tests/run_tetra_sequence.py
+@@ -0,0 +1,90 @@
++#!/usr/bin/env python3
++"""Native R/original LINK_SEQUENCE on locked DNA with explicit self/fragment controls.
++
++MAG files here are controlled input fixtures, not known plasmid-host assignments.
++No threshold is calibrated from these positive/negative mathematical controls.
++"""
++import argparse
++import csv
++import gzip
++import hashlib
++import json
++import math
++import os
++from pathlib import Path
++import random
++import shutil
++import subprocess
++from test_tetra_math import zscores, pearson, rc
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def fasta(path):
++    records=[];name=None;dna=[]
++    for line in path.read_text().splitlines():
++        if line.startswith('>'):
++            if name is not None: records.append((name,''.join(dna)))
++            name=line[1:].split()[0];dna=[]
++        else:dna.append(line.strip())
++    if name is not None:records.append((name,''.join(dna)))
++    return records
++
++
++def main():
++    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--work-dir',type=Path,required=True);p.add_argument('--references',type=Path,required=True);p.add_argument('--before-dir',type=Path,required=True);args=p.parse_args();base=args.work_dir.resolve();base.mkdir(parents=True,exist_ok=False)
++    fixture=base/'fixtures';fixture.mkdir();lock=json.loads((ROOT/'tests/structure-reference.lock.json').read_text())
++    dna=[]
++    for accession in ['NC_007941.1','NC_003903.1']:
++        item=next(x for x in lock['references'] if x['accession']==accession);ref=next(q for q in args.references.glob('*.fasta') if q.name.startswith(accession));assert hashlib.sha256(ref.read_bytes()).hexdigest()==item['files']['fasta'];dna.append(fasta(ref)[0][1])
++    expected={}
++    for sid,seq,other in [('P',dna[0],dna[1]),('S',dna[1],dna[0])]:
++        d=fixture/sid;mag=d/'MAG files';mag.mkdir(parents=True)
++        plasmids=[('self_control',seq),('unrelated_control',other),('homopolymer','A'*1200),('periodic','ACGT'*300),('too_short',seq[:999])]
++        (d/'plasmids.fasta').write_text(''.join('>'+n+'\n'+s+'\n' for n,s in plasmids))
++        sequences={'full':[seq],'fragmented':[seq[i:i+997] for i in range(0,len(seq),997)],'reverse':[rc(seq)]}
++        for name,records in sequences.items():
++            text=''.join(f'>contig{i}\n{s}\n' for i,s in enumerate(records))
++            if name=='reverse':
++                with gzip.open(mag/(name+'.fa.gz'),'wt') as f:f.write(text)
++            else:(mag/(name+'.fa')).write_text(text)
++        (d/'taxonomy.tsv').write_text('user_genome\tclassification\n'+'\n'.join(n+'.fa\td__Controlled_input' for n in ['full','fragmented'])+'\n')
++        (d/'second-domain').mkdir()
++        (d/'second-domain/taxonomy.tsv').write_text('user_genome\tclassification\nreverse.fa.gz\td__Controlled_input\n')
++        expected[sid]={}
++        for pid,pseq in plasmids:
++            if len(pseq)<1000:continue
++            for host,records in sequences.items():expected[sid][pid+'|'+host]=pearson(zscores([pseq]),zscores(records))
++    source_names=['bin/sequence_similarity_link.R','modules/linking/sequence.nf','tests/run_tetra_sequence.py','tests/nextflow/tetra_sequence.nf','tests/test_tetra_math.py']
++    source_sha={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in source_names};hashes={str(q.relative_to(fixture)):hashlib.sha256(q.read_bytes()).hexdigest() for q in fixture.rglob('*') if q.is_file()}
++    (base/'inputs-before.json').write_text(json.dumps(hashes,indent=2)+'\n')
++    config=base/'native.config';config.write_text(f"params.outdir='{base}/out'\nparams.fixture_dir='{fixture}'\nparams.publish_dir_mode='copy'\nparams.link_min_similarity=0.7\nprocess.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nprocess.maxForks=1\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\n")
++    cmd=[shutil.which('nextflow') or 'nextflow','-C',str(config),'run',str(ROOT/'tests/nextflow/tetra_sequence.nf'),'-work-dir',str(base/'work'),'-with-trace',str(base/'trace.tsv'),'-ansi-log','false'];env=os.environ.copy();env['PATH']=str(ROOT/'bin')+':'+env['PATH'];r=subprocess.run(cmd,env=env,text=True,capture_output=True);(base/'console.log').write_text(r.stdout+r.stderr);assert r.returncode==0,r.stdout+r.stderr
++    tasks=list(csv.DictReader((base/'trace.tsv').open(),delimiter='\t'));assert len(tasks)==2 and all(t['status']=='COMPLETED' and t['exit']=='0' for t in tasks)
++    observed={}
++    for sid in expected:
++        out=base/'out/07_host_prediction/linking/sequence';scores=list(csv.DictReader((out/(sid+'.sequence_scores.tsv')).open(),delimiter='\t'));assert len(scores)==12
++        actual={row['plasmid_id']+'|'+row['host_id']:row for row in scores};assert actual.keys()==expected[sid].keys()
++        for key,value in expected[sid].items():
++            row=actual[key];assert row['sample_id']==sid and row['method']=='tetra_markov256_v1' and row['threshold_status']=='uncalibrated'
++            if value is None:assert row['score']=='' and row['profile_status']=='ineligible_profile' and row['threshold_pass']=='FALSE'
++            else:assert math.isclose(float(row['score']),value,rel_tol=1e-10,abs_tol=1e-10),(sid,key,row['score'],value)
++        links=list(csv.DictReader((out/(sid+'.sequence_links.tsv')).open(),delimiter='\t'));assert {x['plasmid_id']+'|'+x['host_id'] for x in links}=={key for key,value in expected[sid].items() if value is not None and value>=.7}
++        assert all('taxonomy=d__Controlled_input;' in row['supporting_data'] for row in links)
++        info=json.loads((out/(sid+'.sequence_method.json')).read_text());assert info['dimensions']==256 and info['method']=='tetra_markov256_v1' and info['threshold_status']=='uncalibrated';assert info['short_plasmids']=='too_short';assert info['mag_profiles']=={h:'complete256' for h in ['full','fragmented','reverse']};assert info['plasmid_profiles']['homopolymer']=='undefined_markov_variance';observed[sid]=scores
++    # Actual legacy-folded numeric counterexample. This only reads frozen script definitions.
++    old=base/'legacy-probe.R';old.write_text('''args <- commandArgs(TRUE); e<-parse(args[1]); for(x in e[-length(e)])eval(x)
++a<-read_fasta(args[2])[[1]]$seq;b<-read_fasta(args[3])[[1]]$seq
++cat(sprintf("%.17g\\n",similarity(tetra_zscores(a),tetra_zscores(b))))
++''')
++    rng=random.Random(20261020);a=''.join(rng.choices('ACGT',weights=[.35,.15,.2,.3],k=4000));bb=''.join(rng.choice('ACGT') if rng.random()<.18 else x for x in a)
++    for name,s in [('a',a),('b',bb)]:(base/(name+'.fa')).write_text('>'+name+'\n'+s+'\n')
++    oldcmd=['Rscript',str(old),str(args.before_dir.resolve()/'bin/sequence_similarity_link.R'),str(base/'a.fa'),str(base/'b.fa')];before=subprocess.run(oldcmd,text=True,capture_output=True,check=True);oldscore=float(before.stdout);newscore=pearson(zscores([a]),zscores([bb]));assert oldscore>.7 and newscore<.7
++    # Current public CLI produces the lower independent score (not only the helper probe).
++    cmag=base/'counter-MAG';cmag.mkdir();(cmag/'candidate.fa').write_text('>candidate\n'+bb+'\n')
++    ccmd=['Rscript',str(ROOT/'bin/sequence_similarity_link.R'),'--plasmid-contigs',str(base/'a.fa'),'--host-genomes',str(cmag),'--out',str(base/'counter.links.tsv'),'--out-scores',str(base/'counter.scores.tsv'),'--min-similarity','0.7'];cr=subprocess.run(ccmd,text=True,capture_output=True,check=True);crow=list(csv.DictReader((base/'counter.scores.tsv').open(),delimiter='\t'));assert len(crow)==1 and math.isclose(float(crow[0]['score']),newscore,abs_tol=1e-10);assert not list(csv.DictReader((base/'counter.links.tsv').open(),delimiter='\t'))
++    assert source_sha=={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in source_names};assert hashes=={str(q.relative_to(fixture)):hashlib.sha256(q.read_bytes()).hexdigest() for q in fixture.rglob('*') if q.is_file()}
++    record={'pass':True,'command':cmd,'exit':r.returncode,'tasks':tasks,'source_sha256':source_sha,'fixture_sha256':hashes,'expected':expected,'observed':observed,'legacy_counterexample':{'command':oldcmd,'score':oldscore,'current_expected':newscore,'current_cli_command':ccmd,'threshold':.7,'legacy_passes_current_rejects':True},'limitations':['locked real DNA with explicit self/fragment/unrelated controls and independent scalar math, not known biological plasmid-host associations','not host accuracy or threshold calibration; legacy cutoff remains uncalibrated','native local R/Biostrings/Nextflow; no image/nf-test framework/full platform claim']};(base/'run.json').write_text(json.dumps(record,indent=2,allow_nan=False)+'\n');print('PASS2 native LINK_SEQUENCE tasks;24 independent pair scores; legacy threshold crossing',oldscore,newscore)
++
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/tests/nextflow/tetra_sequence.nf
+@@ -0,0 +1,11 @@
++nextflow.enable.dsl=2
++include { LINK_SEQUENCE } from '../../modules/linking/sequence'
++workflow {
++    samples = Channel.fromList(['P','S']).map { id ->
++        def root = "${params.fixture_dir}/${id}"
++        tuple([id:id,group:'preserved'], file("${root}/plasmids.fasta",checkIfExists:true),
++              [file("${root}/MAG files",checkIfExists:true)],
++              [file("${root}/taxonomy.tsv",checkIfExists:true), file("${root}/second-domain/taxonomy.tsv",checkIfExists:true)])
++    }
++    LINK_SEQUENCE(samples)
++}
+--- /dev/null
++++ b/tests/run_sequence_taxonomy_input.py
+@@ -0,0 +1,32 @@
++#!/usr/bin/env python3
++"""Original LINK_SEQUENCE taxonomy filename collision: frozen before and repaired nodes.
++
++Controlled self-match DNA; taxonomy strings are interface markers, not host truth.
++"""
++import argparse,csv,hashlib,json,os,random,shutil,subprocess
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def main():
++    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--work-dir',type=Path,required=True);parser.add_argument('--before-dir',type=Path,required=True);args=parser.parse_args();base=args.work_dir.resolve();base.mkdir(parents=True,exist_ok=False);sources=['modules/linking/sequence.nf','bin/sequence_similarity_link.R','tests/run_sequence_taxonomy_input.py'];source_sha={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in sources};runs=[]
++    sequence=''.join(random.Random(5802026).choices('ACGT',k=1800))
++    for name,old,multiple in [('before',True,False),('after-single',False,False),('after-two-domains',False,True)]:
++        d=base/name;d.mkdir();fixture=d/'fixture';mag=fixture/'bins';mag.mkdir(parents=True);(fixture/'plasmids.fa').write_text('>p1\n'+sequence+'\n');(mag/'host1.fa').write_text('>c1\n'+sequence+'\n');(fixture/'taxonomy.tsv').write_text('user_genome\tclassification\nhost1.fa\td__MARKER_ONE\n');tax=[fixture/'taxonomy.tsv']
++        if multiple:
++            (mag/'host2.fa').write_text('>c2\n'+sequence+'\n');(fixture/'second').mkdir();(fixture/'second/taxonomy.tsv').write_text('user_genome\tclassification\nhost2.fa\td__MARKER_TWO\n');tax.append(fixture/'second/taxonomy.tsv')
++        hashes={str(p.relative_to(fixture)):hashlib.sha256(p.read_bytes()).hexdigest() for p in fixture.rglob('*') if p.is_file()};(d/'inputs-before.json').write_text(json.dumps(hashes,indent=2)+'\n')
++        module=args.before_dir.resolve()/'modules/linking/sequence' if old else ROOT/'modules/linking/sequence';probe=d/'probe.nf';probe.write_text(f"nextflow.enable.dsl=2\ninclude {{ LINK_SEQUENCE }} from '{module}'\nworkflow {{\nLINK_SEQUENCE(Channel.of(tuple([id:'S',group:'kept'],file('{fixture}/plasmids.fa'),[file('{mag}')],["+','.join("file('"+str(t)+"')" for t in tax)+"])))\n}\n")
++        config=d/'native.config';config.write_text(f"params.outdir='{d}/out'\nparams.publish_dir_mode='copy'\nparams.link_min_similarity=0.7\nprocess.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\n")
++        cmd=[shutil.which('nextflow') or 'nextflow','-C',str(config),'run',str(probe),'-work-dir',str(d/'work'),'-with-trace',str(d/'trace.tsv'),'-ansi-log','false'];env=os.environ.copy();env['PATH']=str(args.before_dir.resolve()/'bin' if old else ROOT/'bin')+':'+env['PATH'];r=subprocess.run(cmd,text=True,capture_output=True,env=env);(d/'console.log').write_text(r.stdout+r.stderr);assert r.returncode==0,r.stdout+r.stderr
++        tasks=list(csv.DictReader((d/'trace.tsv').open(),delimiter='\t'));assert len(tasks)==1 and tasks[0]['status']=='COMPLETED' and tasks[0]['exit']=='0';after={str(p.relative_to(fixture)):hashlib.sha256(p.read_bytes()).hexdigest() for p in fixture.rglob('*') if p.is_file()};links=list(csv.DictReader((d/'out/07_host_prediction/linking/sequence/S.sequence_links.tsv').open(),delimiter='\t'));assert len(links)==(2 if multiple else 1)
++        if old:
++            assert (fixture/'taxonomy.tsv').stat().st_size==0 and after['taxonomy.tsv']!=hashes['taxonomy.tsv'];assert 'taxonomy=NA;' in links[0]['supporting_data']
++        else:
++            assert after==hashes,'Source input mutation';expected={'host1':'d__MARKER_ONE','host2':'d__MARKER_TWO'}
++            for row in links:assert 'taxonomy='+expected[row['host_id']]+';' in row['supporting_data']
++        runs.append({'case':name,'command':cmd,'exit':r.returncode,'tasks':tasks,'before_hashes':hashes,'after_hashes':after,'links':links,'source_mutation_expected':old})
++    assert source_sha=={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in sources};(base/'run.json').write_text(json.dumps({'pass':True,'runs':runs,'source_sha256':source_sha,'limitations':['before intentionally mutates disposable fixture only; exact frozen module and R definitions','self-match controlled interface DNA/taxonomy labels; not known-host or taxonomy biological benchmark','native local R/Biostrings; image/remote executor/nf-test framework not executed']},indent=2)+'\n');print('PASS frozen before1/current2 native nodes; input identity and exact taxonomy labels')
++
++
++if __name__=='__main__':main()

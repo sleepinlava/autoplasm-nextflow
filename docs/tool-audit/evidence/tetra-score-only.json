@@ -1,0 +1,96 @@
+{
+  "date": "2026-10-24",
+  "user_decision": "保留标准 TETRA 相似度分数，停用未校准的宿主链接",
+  "verified_findings": [
+    "TA-039"
+  ],
+  "scientific_threshold_acceptance": "FAILED; unchanged55-source benchmark and original holdout metrics retained",
+  "unit_unique_methods": 39,
+  "actual_R_NF_trace_entries": 18,
+  "actual_R_NF_status_counts": {
+    "COMPLETED": 18
+  },
+  "mag_observer_trace_entries": 58,
+  "mag_observer_status_counts": {
+    "COMPLETED": 58
+  },
+  "source": {
+    "files": [
+      "bin/sequence_similarity_link.R",
+      "modules/linking/sequence.nf",
+      "subworkflows/host_linking.nf",
+      "README.md",
+      "assets/plasmid_report.Rmd",
+      "tests/test_sequence_similarity_link.py",
+      "tests/run_tetra_sequence.py",
+      "tests/run_sequence_taxonomy_input.py",
+      "tests/run_module_regressions.py",
+      "tests/run_mag_routing.py",
+      "tests/r_mock/run_r_mock_tests.sh",
+      "bin/generate_report.R",
+      "tests/test_generate_report.py",
+      "tests/run_tetra_scores_only.py"
+    ],
+    "before_sha256": {
+      "bin/sequence_similarity_link.R": "174df604e8d2594b3f043acb758b450e04176cdb0add4aa949af4e6458bfef7d",
+      "modules/linking/sequence.nf": "e3f7b45463265d04969b70acb8c760a52c1ad4897a4b46216b8a219314a84c62",
+      "subworkflows/host_linking.nf": "5ee73db94d800f9f38ddf382c6ea826f5f25e82acc091b451b40f13a4c3bdbee",
+      "README.md": "ca1e7f2cf5c291d12d96e47a24c33200bf804f5cb7f4bf59b7b617573e89dba1",
+      "assets/plasmid_report.Rmd": "16b4eaa8b15e318342ffcff0f7a934173ba9c9f9b3b931b9878e18aa8ed1251c",
+      "tests/test_sequence_similarity_link.py": "3ebf60fd6a1e3d26dbc67f88e6431107c373f50bbd2247d71b6fc97268746236",
+      "tests/run_tetra_sequence.py": "c3ac0a84e6cd4adaf10f83b6890af5b0c23ace48741e07cabe2788dc588bd6f4",
+      "tests/run_sequence_taxonomy_input.py": "c7a48e64d9722b88768612f4236e6c373d4ab077b86a2776992b479f54a2dad9",
+      "tests/run_module_regressions.py": "4ad569ce7591527fcfe616a42d0ed9fea3c4f4737d457d49a519ccf21eaa5af4",
+      "tests/run_mag_routing.py": "a0dbfa381c715aec5d4da3a359d77745de0564cce89a0ce51893fe447170c85f",
+      "tests/r_mock/run_r_mock_tests.sh": "4b4338ea4ffac10009852fd85a4f1f1752872dcbe9ce3ca976aef866190fd754",
+      "bin/generate_report.R": "6f45cfa1526af59d7275f37f5070cb57588dda940d3678bbaa4546cdffe90dec",
+      "tests/test_generate_report.py": "9bd80a64c5867fcf837334bded054d3af83a67f6ce26957e4eac0359f1fc23c3"
+    },
+    "after_sha256": {
+      "bin/sequence_similarity_link.R": "463f085fc0811e6b9e2540432a0be20cec74100bf31258377cdb5dc544c281ab",
+      "modules/linking/sequence.nf": "537cdf1b3678441a603657e663cd520fbd73ff9964d565c6f8af907d3e5097dc",
+      "subworkflows/host_linking.nf": "6ec79406465aa2bd683bc6f6c4a41a8983a560e057843da479da105950f5d404",
+      "README.md": "31efaffbb4c78e52f2ec957c15017b7f6cc8d4ecbced202f4a2de0dad5832678",
+      "assets/plasmid_report.Rmd": "c543a5d2cf3d495de080bcd31c543f396c187f100acd76692194456d70f23590",
+      "tests/test_sequence_similarity_link.py": "9fda4dff8a5ed488ad5f21ae9da9bff064f425678b9996ceb0670bafd747be3d",
+      "tests/run_tetra_sequence.py": "246a6990171e35c49584b284e6b70aaada52d6a5d8f0868cfc36fb6a4c865815",
+      "tests/run_sequence_taxonomy_input.py": "7c73b9e87795395cb001eccf0a3652d0c980c2b52b09847ef04b4ca9d7263a00",
+      "tests/run_module_regressions.py": "29c3e53ea0e6575797471510b401dcc84e7bdd0307523ef02cb8941bd10a92cb",
+      "tests/run_mag_routing.py": "59f7f914fd3b57103edc3215c99a18de927a819f23fddefcae3aeb392bd9d6c6",
+      "tests/r_mock/run_r_mock_tests.sh": "d22d89e9b3852432614401c0cf58f8d52ef1a534aee96d6562fc611ad7930b57",
+      "bin/generate_report.R": "a2d9910f5895dff70616f6f846786c3f4580583f41d9b060f558ab00fa27d9d5",
+      "tests/test_generate_report.py": "7ad595950e30d928188ad7e5f72463f9430ed20b923b50cd070afe7d99b4455b",
+      "tests/run_tetra_scores_only.py": "8aa9f229a1490f091fa6380f196f3df5c6f40e98eb9f828253fbf2cf98905005"
+    },
+    "patches": {
+      "docs/tool-audit/patches/TA-039-score-only.diff": "f0ee7c56f8962c32b95ee3e7b19fe9ec015d13c3a02301818e32139f5ece1bdb"
+    },
+    "patch_order": [
+      "docs/tool-audit/patches/TA-039-score-only.diff"
+    ],
+    "forward_and_reverse_chain_check": true,
+    "numeric_formula_block_unchanged": true,
+    "new_unique_accepted_sources": 1
+  },
+  "limitations": [
+    "Synthetic full-rank self-match is an exact mathematical control, not a known host assignment or host accuracy benchmark.",
+    "Score-only suppression is intentional after failed independent threshold acceptance; no scientific threshold is claimed valid.",
+    "locked real DNA with explicit self/fragment/unrelated controls and independent scalar math, not known biological plasmid-host associations",
+    "not host accuracy or threshold calibration; uncalibrated host links are disabled",
+    "native local R/Biostrings/Nextflow; no image/nf-test framework/full platform claim",
+    "explicit synthetic binner/DAS/CheckM/GTDB observers, fake BAM/db inputs; no tool inference or scientific accuracy claim",
+    "actual original workflow + gzip/converter helper + native R host linking; per-sample bin identity/DNA/metadata/multiplicity checks",
+    "GTDB observer verifies private normalized staging and unchanged final-bin identities, not the actual classifier; separate real2.7.2 parser/selection tests, no image/nf-test framework/full platform",
+    "Actual fixed full-resource normal HOTSPOT plus native R TETRA simultaneous workflow; self-MAG is a mathematical control and official example may overlap model training.",
+    "Checks independent evidence method remains emitted while uncalibrated TETRA links are disabled; not biological host accuracy or calibrated threshold validation.",
+    "18native trace includes1original taxonomy-source-mutation counterexample (exit0 but wrong behavior), separately identified;17current completed tasks.58MAG tasks use explicit inference observers. Scientific threshold remains failed."
+  ],
+  "combined_methods": {
+    "trace_entries": 2,
+    "status": "COMPLETED",
+    "TETRA": "score retained; no host links",
+    "HOTSPOT": "actual normal inference; sole unified host link"
+  },
+  "native_original_counterexample_tasks": 1,
+  "native_current_completed_tasks": 17
+}

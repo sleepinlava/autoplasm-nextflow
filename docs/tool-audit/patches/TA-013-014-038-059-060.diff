@@ -1,0 +1,1425 @@
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -342,3 +342,5 @@
+   局部 MAG 等用途的覆盖度仍可合并长短读 BAM。
+ - PLASMe/PlasX/COPLA 等工具输出列格式存在版本差异，解析器做了宽松启发式
+   处理（按列名候选匹配）。
++
++跨样本统计现在先核对完整样本清单、逐样本定量状态和完整特征矩阵。缺失测量、重复样本/特征或不一致的质粒子集会失败；真实零值与全局空目录保留预期样本。多样性按每个样本计算，单特征和全零输入有有限数值及状态说明。网络在流行率过滤后再次去除全零样本，只有至少4个特征且满足 `network_min_samples` 的矩阵进入 FastSpar，并发布筛选状态。分析脚本及辅助库作为任务输入参与缓存判断。DESeq2固定部署模型及TETRA真实宿主阈值仍有独立验收项，见 `docs/tool-audit/status.md`。
+diff --git a/bin/collect_shared_abundance.py b/bin/collect_shared_abundance.py
+--- a/bin/collect_shared_abundance.py
++++ b/bin/collect_shared_abundance.py
+@@ -79,10 +79,11 @@
+                     writers[0].writerow(row)
+                     if feature['is_plasmid'] == '1':
+                         writers[1].writerow(row)
+-                states.append([sample, len(features), total, 'empty_catalogue' if not features else ('measured_zero' if total == 0 else 'measured')])
++                plasmid_total = sum(int(values[r["feature_id"]]["raw_count"]) for r in features if r["is_plasmid"] == "1")
++                states.append([sample, len(features), sum(r["is_plasmid"] == "1" for r in features), total, plasmid_total, 'empty_catalogue' if not features else ('measured_zero' if total == 0 else 'measured')])
+         with (stage / 'sample_states.tsv').open('w') as stream:
+             writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
+-            writer.writerow(['sample_id', 'reference_features', 'eligible_read_alignments', 'quantification_status'])
++            writer.writerow(['sample_id', 'reference_features', 'plasmid_features', 'eligible_read_alignments', 'plasmid_read_alignments', 'quantification_status'])
+             writer.writerows(states)
+         (stage / 'method.json').write_text(json.dumps({'mapper': mapper, 'count_unit': 'primary_read_alignment',
+             'paired_end': 'each eligible mate counts separately; not fragment counts',
+diff --git a/bin/deseq2_plasmid.R b/bin/deseq2_plasmid.R
+--- a/bin/deseq2_plasmid.R
++++ b/bin/deseq2_plasmid.R
+@@ -16,6 +16,10 @@
+ #
+ # Output schema: plasmid_id, group_a, group_b, log2_fold_change, p_value,
+ # q_value, method, warnings (NA values are written as empty cells).
++
++# Load the shared identity contract alongside the executable, including PATH invocation.
++script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1L])
++source(file.path(dirname(normalizePath(script_file)), "statistics_input_contract.R"))
+ 
+ args <- commandArgs(trailingOnly = TRUE)
+ 
+@@ -82,9 +86,13 @@
+                value_column, abundance[[value_column]][i]))
+ }
+ 
++statistics_input_contract(abundance, metadata, "plasmid_id", abundance_path)
++if (nrow(abundance) == 0) {
++  empty_output()
++  quit(status = 0)
++}
+ counts <- xtabs(value ~ plasmid_id + sample_id, data = abundance)
+ metadata <- metadata[!is.na(metadata$group) & nzchar(metadata$group), c("sample_id", "group")]
+-metadata <- metadata[!duplicated(metadata$sample_id), ]
+ shared <- intersect(colnames(counts), metadata$sample_id)
+ if (length(shared) == 0 || nrow(counts) == 0) {
+   empty_output()
+diff --git a/bin/differential_abundance.R b/bin/differential_abundance.R
+--- a/bin/differential_abundance.R
++++ b/bin/differential_abundance.R
+@@ -30,6 +30,10 @@
+ # Output schema follows the ``differential_abundance`` standard table.
+ 
+ suppressPackageStartupMessages(library(data.table))
++
++# Load the shared identity contract alongside the executable, including PATH invocation.
++script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1L])
++source(file.path(dirname(normalizePath(script_file)), "statistics_input_contract.R"))
+ 
+ die <- function(msg) {
+   cat(msg, "\n", file = stderr(), sep = "")
+@@ -136,10 +140,10 @@
+ }
+ ab[, coverage := cov]
+ 
+-by_sample <- split(ab, ab$sample_id)
+-
+ meta <- fread(opts$metadata, colClasses = c(sample_id = "character", group = "character"),
+               na.strings = NULL)
++statistics_input_contract(ab, meta, "contig_id", opts$abundance)
++by_sample <- split(ab, ab$sample_id)
+ if ("group" %in% names(meta)) meta$group[!is.na(meta$group) & meta$group == "NA"] <- NA
+ grp_samples <- list()
+ if (nrow(meta) > 0) {
+@@ -181,8 +185,7 @@
+                     numeric(1))
+         b <- vapply(s2, function(s) by_sample[[s]][by_sample[[s]]$contig_id == cid, coverage][1],
+                     numeric(1))
+-        a[is.na(a)] <- 0
+-        b[is.na(b)] <- 0
++        if (anyNA(a) || anyNA(b)) die("incomplete sample-feature rectangle; missing measurements are not zero")
+         ma <- sum(a) / length(a)
+         mb <- sum(b) / length(b)
+         log2fc <- log2((ma + PSEUDOCOUNT) / (mb + PSEUDOCOUNT))
+diff --git a/bin/diversity.R b/bin/diversity.R
+--- a/bin/diversity.R
++++ b/bin/diversity.R
+@@ -28,6 +28,10 @@
+   library(vegan)
+   library(data.table)
+ })
++
++# Load the shared identity contract alongside the executable, including PATH invocation.
++script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1L])
++source(file.path(dirname(normalizePath(script_file)), "statistics_input_contract.R"))
+ 
+ die <- function(msg) {
+   cat(msg, "\n", file = stderr(), sep = "")
+@@ -88,7 +92,8 @@
+   metadata = list(required = TRUE),
+   "out-metrics" = list(required = TRUE),
+   "out-beta" = list(required = TRUE),
+-  "beta-normalization" = list(default = "none")
++  "beta-normalization" = list(default = "none"),
++  "out-status" = list(required = FALSE)
+ )
+ opts <- parse_args(commandArgs(trailingOnly = TRUE), spec)
+ beta_norm <- opts[["beta-normalization"]]
+@@ -115,27 +120,34 @@
+               na.strings = NULL)
+ # Preserve the existing missing-group policy without decoding identifier tokens.
+ if ("group" %in% names(meta)) meta$group[!is.na(meta$group) & meta$group == "NA"] <- NA
+-groups <- character(0)
+-if (nrow(meta) > 0) {
+-  groups <- stats::setNames(meta$group, meta$sample_id)
+-  # Python dict semantics: a repeated sample_id keeps the last row's group
+-  groups <- groups[!duplicated(names(groups), fromLast = TRUE)]
+-}
+-
+-samples <- sort(unique(ab$sample_id))
+-contigs <- sort(unique(ab$contig_id))
+-
+-wide <- dcast(ab, contig_id ~ sample_id, value.var = "coverage",
+-              fun.aggregate = function(x) x[length(x)], fill = 0)
+-setorder(wide, contig_id)
+-mat <- as.matrix(wide[, -1, with = FALSE])
+-rownames(mat) <- wide$contig_id
+-mat <- mat[contigs, samples, drop = FALSE]
++identity <- statistics_input_contract(ab, meta, "contig_id", opts$abundance)
++groups <- if ("group" %in% names(meta)) stats::setNames(meta$group, meta$sample_id) else character(0)
++samples <- identity$samples
++contigs <- identity$features
++if (length(contigs)) {
++  wide <- dcast(ab, contig_id ~ sample_id, value.var = "coverage")
++  setorder(wide, contig_id)
++  mat <- as.matrix(wide[, -1, with = FALSE])
++  rownames(mat) <- wide$contig_id
++  mat <- mat[contigs, samples, drop = FALSE]
++} else {
++  mat <- matrix(0, nrow=0L, ncol=length(samples), dimnames=list(character(), samples))
++}
+ 
+ site_mat <- t(mat)
+-rich <- specnumber(site_mat)
+-sh <- diversity(site_mat, index = "shannon")
+-simp <- diversity(site_mat, index = "simpson")
++# Explicit sample names are essential: vegan may simplify a one-column matrix
++# to an unnamed scalar/vector. Empty samples have alpha0 by existing policy.
++rich <- stats::setNames(rowSums(site_mat > 0), samples)
++sh <- simp <- stats::setNames(numeric(length(samples)), samples)
++nonempty <- rowSums(site_mat) > 0
++if (any(nonempty)) {
++  # One-column matrices are treated as one vector by vegan, pooling samples.
++  # Evaluate each community row explicitly, including the one-feature case.
++  sh[nonempty] <- vapply(which(nonempty), function(i)
++    diversity(as.numeric(site_mat[i, ]), index="shannon"), numeric(1))
++  simp[nonempty] <- vapply(which(nonempty), function(i)
++    diversity(as.numeric(site_mat[i, ]), index="simpson"), numeric(1))
++}
+ pielou <- vapply(seq_along(samples), function(i) {
+   s_i <- rich[i]
+   h_i <- sh[i]
+@@ -160,7 +172,9 @@
+   rs <- rowSums(beta_mat)
+   beta_mat <- beta_mat / ifelse(rs > 0, rs, 1)
+ }
+-if (nrow(beta_mat) >= 2) {
++if (ncol(beta_mat) == 0) {
++  bd <- matrix(0, nrow=length(samples), ncol=length(samples), dimnames=list(samples, samples))
++} else if (nrow(beta_mat) >= 2) {
+   bd <- suppressWarnings(as.matrix(vegdist(beta_mat, method = "bray")))
+   n_coerced <- sum(is.nan(bd[upper.tri(bd)]))
+   if (n_coerced > 0) {
+@@ -177,3 +191,10 @@
+ for (j in seq_len(ncol(bd))) beta[[j + 1]] <- sprintf("%.6f", bd[, j])
+ write.table(beta, file = opts[["out-beta"]], sep = "\t", quote = FALSE,
+             row.names = FALSE, col.names = c("sample_id", colnames(bd)))
++
++if (!is.null(opts[["out-status"]])) {
++  jsonlite::write_json(list(status=if (!length(contigs)) "zero_feature_input" else if (all(rowSums(site_mat)==0)) "measured_all_zero" else "measured",
++    sample_ids=as.list(samples), feature_count=length(contigs), zero_samples=as.list(samples[rowSums(site_mat)==0]),
++    alpha_empty_policy="richness/shannon/simpson/pielou0", beta_zero_pair_policy="Bray-Curtis undefined for two zeros; compatibility convention0, not measured similarity",
++    beta_normalization=beta_norm), opts[["out-status"]], auto_unbox=TRUE, pretty=TRUE)
++}
+diff --git a/bin/network_prepare.R b/bin/network_prepare.R
+--- a/bin/network_prepare.R
++++ b/bin/network_prepare.R
+@@ -11,11 +11,14 @@
+ # (--min-prevalence, phanta uses 0.2) and drop all-zero samples, which would
+ # otherwise give degenerate correlations.
+ #
+-# R equivalent of bin/network_prepare.py: the id column is contig_id or
+-# plasmid_id; the value is raw_count when non-empty, else coverage.
+-# Selected values must be finite and nonnegative before rounding.
++# Missing is never zero: use integer measured raw_count only.
++# Prevalence denominator is the initial nonzero cohort; then remove any
++# newly empty samples and test final eligibility. No iterative refiltering.
+ 
+ suppressPackageStartupMessages(library(data.table))
++
++script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1L])
++source(file.path(dirname(normalizePath(script_file)), "statistics_input_contract.R"))
+ 
+ die <- function(msg) {
+   cat(msg, "\n", file = stderr(), sep = "")
+@@ -74,7 +77,11 @@
+ spec <- list(
+   abundance = list(required = TRUE),
+   "min-prevalence" = list(default = "0.2"),
+-  out = list(required = TRUE)
++  out = list(required = TRUE),
++  metadata = list(required = FALSE),
++  "min-samples" = list(default = "2"),
++  "out-status" = list(required = FALSE),
++  "eligible-out" = list(required = FALSE)
+ )
+ opts <- parse_args(commandArgs(trailingOnly = TRUE), spec)
+ min_prev <- suppressWarnings(as.numeric(opts[["min-prevalence"]]))
+@@ -82,6 +89,12 @@
+   die(paste0("argument --min-prevalence: invalid value: '", opts[["min-prevalence"]],
+              "' (expected a number between 0 and 1)"))
+ }
++
++min_samples <- suppressWarnings(as.numeric(opts[["min-samples"]]))
++if (!is.finite(min_samples) || min_samples < 2 || min_samples != floor(min_samples))
++  die("--min-samples must be an integer >=2")
++if (!is.null(opts[["eligible-out"]]) && file.exists(opts[["eligible-out"]]))
++  die("refusing preexisting eligible matrix; use a fresh output directory")
+ 
+ ab <- suppressWarnings(fread(opts$abundance, fill = TRUE, colClasses = "character",
+                              na.strings = NULL))
+@@ -100,29 +113,31 @@
+   die(paste0(opts$abundance, ": missing raw_count column; coverage is not a count"))
+ value <- raw
+ num <- suppressWarnings(as.numeric(value))
+-bad <- which(!is.finite(num) | num < 0 | num != floor(num))
++bad <- which(!is.finite(num) | num < 0 | num != floor(num) | num > 2^53 - 1)
+ if (length(bad)) {
+   i <- bad[1L]
+-  die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=raw_count value='%s'; expected finite nonnegative integer raw count; coverage is not a count",
++  die(sprintf("Invalid numeric value in %s:%d sample=%s feature=%s field=raw_count value='%s'; expected finite nonnegative exactly representable integer raw count; coverage is not a count",
+               opts$abundance, i + 1L, ab$sample_id[i], cid[i], value[i]))
+ }
+ 
+-mat_dt <- data.table(contig = cid, sample = as.character(ab$sample_id),
+-                     value = num)
+-mat_dt[is.na(sample), sample := ""]
+-if (nrow(mat_dt) == 0L) {
+-  # Zero detections (e.g. no plasmid calls) are a legitimate result, not an
+-  # error: emit a valid empty FastSpar matrix and exit cleanly.
+-  fwrite(data.table(`#OTU ID` = character(0)), opts$out, sep = "\t", quote = FALSE)
+-  cat("fastspar input: 0 contig(s) x 0 sample(s)\n")
+-  quit(status = 0)
+-}
+-wide <- dcast(mat_dt, contig ~ sample, value.var = "value",
+-              fun.aggregate = function(x) x[length(x)], fill = 0)
+-setorder(wide, contig)
+-
+-samples <- sort(unique(mat_dt$sample))
+-contigs <- sort(unique(mat_dt$contig))
++if (!is.null(opts$metadata)) {
++  meta <- fread(opts$metadata, colClasses=c(sample_id="character"), na.strings=NULL)
++  identity <- statistics_input_contract(data.frame(sample_id=ab$sample_id, feature=cid), meta, "feature", opts$abundance)
++  samples <- identity$samples
++} else {
++  samples <- sort(unique(ab$sample_id))
++  if (length(samples)) statistics_input_contract(data.frame(sample_id=ab$sample_id, feature=cid),
++      data.frame(sample_id=samples), "feature", opts$abundance)
++}
++mat_dt <- data.table(contig=cid, sample=as.character(ab$sample_id), value=num)
++if (nrow(mat_dt)) {
++  wide <- dcast(mat_dt, contig ~ sample, value.var="value")
++  setorder(wide, contig)
++} else {
++  wide <- data.table(contig=character())
++  for (sample in samples) wide[[sample]] <- numeric()
++}
++features_before <- nrow(wide)
+ 
+ # FastSpar degenerates on all-zero samples (fastspar issue #1): drop them.
+ empty_samples <- character(0)
+@@ -155,14 +170,35 @@
+   n_filtered <- nrow(wide)
+   wide <- wide[0, ]
+ }
+-cat(sprintf("filtered %d low-prevalence contig(s), %d empty sample(s)\n",
+-            n_filtered, length(empty_samples)), file = stderr())
++# Prevalence filtering can create new empty sample columns. Remove them once;
++# preserve the already-applied prevalence denominator and threshold.
++post_empty <- kept_samples[vapply(kept_samples, function(sample) sum(wide[[sample]]) == 0, logical(1))]
++kept_samples <- setdiff(kept_samples, post_empty)
++cat(sprintf("filtered %d low-prevalence contig(s), dropped %d initially empty and %d newly empty sample(s)\n",
++            n_filtered, length(empty_samples), length(post_empty)), file=stderr())
+ 
+ out <- data.table("#OTU ID" = wide$contig)
+ for (s in kept_samples) {
+   v <- if (s %in% names(wide)) wide[[s]] else rep(0L, nrow(wide))
+-  out[[s]] <- as.integer(v)
++  out[[s]] <- sprintf("%.0f", v)
+ }
+ fwrite(out, opts$out, sep = "\t", quote = FALSE, na = "")
+ cat(sprintf("fastspar input: %d contig(s) x %d sample(s)\n",
+             nrow(out), length(kept_samples)))
++
++# FastSpar1.0.0 requires >=4 components (src/fastspar.cpp:127-131).
++# Producing a preparation/status file is distinct from running the estimator.
++reason <- if (nrow(out) < 4) "insufficient_features" else if (length(kept_samples) < min_samples) "insufficient_samples" else "eligible"
++status <- list(eligible=identical(reason,"eligible"), reason=reason,
++  min_features=4L, min_samples=min_samples,
++  features_before=features_before, features_after=nrow(out),
++  prevalence=min_prev, prevalence_denominator=length(samples)-length(empty_samples),
++  observed_or_expected_sample_ids=as.list(samples), included_sample_ids=as.list(kept_samples),
++  excluded_initial_zero=as.list(empty_samples), excluded_zero_after_prevalence=as.list(post_empty),
++  metadata_status=if (is.null(opts$metadata)) "not_provided" else "provided",
++  count_unit="primary_read_alignment", policy="single prevalence filter, then remove empty columns; no iterative filtering")
++if (!is.null(opts[["out-status"]])) jsonlite::write_json(status,opts[["out-status"]],auto_unbox=TRUE,pretty=TRUE)
++if (!is.null(opts[["eligible-out"]]) && status$eligible) {
++  if (!file.copy(opts$out,opts[["eligible-out"]])) die("cannot write eligible matrix")
++}
++cat(sprintf("network eligibility: %s; %d feature(s), %d sample(s)\n",reason,nrow(out),length(kept_samples)),file=stderr())
+diff --git a/bin/statistics_input_contract.R b/bin/statistics_input_contract.R
+new file mode 100644
+--- /dev/null
++++ b/bin/statistics_input_contract.R
+@@ -0,0 +1,20 @@
++# Shared sample/feature identity checks. Numeric validation belongs to consumers.
++# Missing sample-feature measurements are not biological zeroes.
++statistics_input_contract <- function(abundance, metadata, feature_column, location) {
++  fail <- function(message) stop(paste0(location, ": ", message), call. = FALSE)
++  if (!"sample_id" %in% names(metadata)) fail("metadata missing sample_id")
++  samples <- as.character(metadata[["sample_id"]])
++  if (!length(samples) || any(is.na(samples) | !nzchar(trimws(samples)))) fail("metadata needs nonempty sample IDs")
++  if (anyDuplicated(samples)) fail("duplicate metadata sample_id")
++  if (!all(c("sample_id", feature_column) %in% names(abundance))) fail("missing sample/feature identity columns")
++  observed <- as.character(abundance[["sample_id"]])
++  features <- as.character(abundance[[feature_column]])
++  if (any(is.na(observed) | !nzchar(trimws(observed))) || any(is.na(features) | !nzchar(trimws(features))))
++    fail("empty sample or feature ID")
++  if (anyDuplicated(data.frame(sample = observed, feature = features))) fail("duplicate sample-feature measurement")
++  if (length(observed)) {
++    if (!setequal(unique(observed), samples)) fail("abundance/metadata sample set mismatch; missing measurements are not zero")
++    if (length(observed) != length(samples) * length(unique(features))) fail("incomplete sample-feature rectangle; missing measurements are not zero")
++  }
++  list(samples = sort(samples), features = sort(unique(features)))
++}
+diff --git a/bin/validate_statistics_inputs.py b/bin/validate_statistics_inputs.py
+new file mode 100644
+--- /dev/null
++++ b/bin/validate_statistics_inputs.py
+@@ -0,0 +1,101 @@
++#!/usr/bin/env python3
++"""Validate the full cohort and measured state before any cross-sample analysis."""
++import argparse
++import csv
++from decimal import Decimal
++import hashlib
++import json
++from pathlib import Path
++import shutil
++import sqlite3
++import tempfile
++from collect_shared_abundance import read_rows, number
++
++
++def digest(path):
++    result = hashlib.sha256()
++    with path.open('rb') as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b''): result.update(chunk)
++    return result.hexdigest()
++
++
++def canonical_decimal(value):
++    # Decimal.normalize() rounds to the active context precision. Identity must
++    # retain every supplied digit, while accepting equivalent forms and +/-0.
++    if value.is_zero(): return '0'
++    sign, digits, exponent = value.as_tuple()
++    digits = list(digits)
++    while digits[-1] == 0:
++        digits.pop(); exponent += 1
++    return str(sign) + ':' + ''.join(map(str, digits)) + 'e' + str(exponent)
++
++
++def validate(contigs, plasmids, states, metadata, expected_samples, output):
++    _, cohort = read_rows(metadata)
++    ids = [r.get('sample_id', '') for r in cohort]
++    if not ids or any(not sid.strip() for sid in ids) or len(ids) != len(set(ids)):
++        raise ValueError('Metadata needs unique nonempty sample_id')
++    if len(ids) != expected_samples: raise ValueError('Metadata expected sample count mismatch')
++    fields, statuses = read_rows(states)
++    required = ['sample_id', 'reference_features', 'plasmid_features', 'eligible_read_alignments', 'plasmid_read_alignments', 'quantification_status']
++    if not set(required) <= set(fields): raise ValueError('Missing sample-state fields')
++    state = {r['sample_id']: r for r in statuses}
++    if len(state) != len(statuses) or set(state) != set(ids): raise ValueError('Quantification state sample set mismatch')
++    for row in state.values():
++        for field in required[1:-1]: row[field] = int(number(row[field], 'state:' + field, True))
++        expected = 'empty_catalogue' if row['reference_features'] == 0 else 'measured_zero' if row['eligible_read_alignments'] == 0 else 'measured'
++        if row['quantification_status'] != expected: raise ValueError('Quantification state/value mismatch')
++    if output.exists(): raise ValueError('Refusing preexisting statistics validation output')
++    output.parent.mkdir(parents=True, exist_ok=True)
++    stage = Path(tempfile.mkdtemp(prefix='.statistics-', dir=output.parent))
++    database = stage / 'measurement-index.sqlite'
++    connection = sqlite3.connect(database)
++    connection.execute('PRAGMA journal_mode=OFF')
++    connection.execute('PRAGMA cache_size=-4096')
++    connection.execute('PRAGMA temp_store=FILE')
++    connection.execute('CREATE TABLE measurements (role TEXT, sample TEXT, feature TEXT, count TEXT, coverage TEXT, PRIMARY KEY(role,sample,feature)) WITHOUT ROWID')
++    summaries = {}
++    try:
++        for role, path, feature_column, nfield, cfield in [('contigs', contigs, 'contig_id', 'reference_features', 'eligible_read_alignments'), ('plasmids', plasmids, 'plasmid_id', 'plasmid_features', 'plasmid_read_alignments')]:
++            totals = dict.fromkeys(ids, 0)
++            with path.open() as stream:
++                reader = csv.DictReader(stream, delimiter='\t')
++                fields = reader.fieldnames or []
++                required_columns = {feature_column, 'sample_id', 'coverage', 'raw_count'}
++                if len(fields) != len(set(fields)) or not required_columns <= set(fields): raise ValueError(role + ': missing/duplicate measurement columns')
++                for row in reader:
++                    if None in row or any(row.get(field) is None for field in required_columns): raise ValueError(role + ': malformed measurement row')
++                    sid, fid = row['sample_id'], row[feature_column]
++                    if sid not in state or not fid.strip(): raise ValueError(role + ': unexpected/empty sample-feature identity')
++                    count = int(number(row['raw_count'], role + ':' + sid + ':' + fid, True))
++                    coverage = canonical_decimal(Decimal(number(row['coverage'], role + ':' + sid + ':' + fid)))
++                    try: connection.execute('INSERT INTO measurements VALUES (?,?,?,?,?)', (role,sid,fid,str(count),str(coverage)))
++                    except sqlite3.IntegrityError: raise ValueError(role + ': duplicate sample-feature measurement') from None
++                    totals[sid] += count
++            feature_count = connection.execute('SELECT count(DISTINCT feature) FROM measurements WHERE role=?',(role,)).fetchone()[0]
++            for sid in ids:
++                n = connection.execute('SELECT count(*) FROM measurements WHERE role=? AND sample=?',(role,sid)).fetchone()[0]
++                if n != feature_count or n != state[sid][nfield]: raise ValueError(role + ': incomplete sample-feature rectangle or declared feature count mismatch; missing is not zero')
++                if totals[sid] != state[sid][cfield]: raise ValueError(role + ': count total differs from measured state')
++            summaries[role] = {'features':feature_count,'samples':len(ids)}
++        mismatch = connection.execute("SELECT 1 FROM measurements p LEFT JOIN measurements c ON c.role='contigs' AND c.sample=p.sample AND c.feature=p.feature WHERE p.role='plasmids' AND (c.feature IS NULL OR p.count!=c.count OR p.coverage!=c.coverage) LIMIT 1").fetchone()
++        if mismatch: raise ValueError('Plasmid subset measurement differs from contig reference')
++        connection.close(); database.unlink()
++        for path, name in [(contigs, 'contig_abundance.tsv'), (plasmids, 'plasmid_abundance.tsv'), (metadata, 'samples.tsv'), (states, 'sample_states.tsv')]:
++            shutil.copyfile(path, stage / name)
++        (stage / 'validation.json').write_text(json.dumps({'status': 'validated', 'sample_ids': sorted(ids), 'tables': summaries,
++            'input_sha256': {str(p): digest(p) for p in [contigs, plasmids, states, metadata]},
++            'empty_semantics': 'Empty feature sets require producer state0; measured zeros remain full-cohort rows; missing producers/measurements fail'}, indent=2) + '\n')
++        stage.rename(output)
++    except BaseException:
++        connection.close()
++        shutil.rmtree(stage); raise
++
++
++if __name__ == '__main__':
++    p = argparse.ArgumentParser(description=__doc__)
++    for name in ['contigs', 'plasmids', 'states', 'metadata', 'out-dir']: p.add_argument('--' + name, type=Path, required=True)
++    p.add_argument('--expected-samples', type=int, required=True)
++    a = p.parse_args()
++    try: validate(a.contigs, a.plasmids, a.states, a.metadata, a.expected_samples, a.out_dir)
++    except (ValueError, KeyError, OSError) as error: p.exit(2, str(error) + '\n')
+diff --git a/main.nf b/main.nf
+--- a/main.nf
++++ b/main.nf
+@@ -202,6 +202,7 @@
+     ch_plasmids = Channel.empty()
+     ch_contig_tables = Channel.empty()
+     ch_plasmid_tables = Channel.empty()
++    ch_quantification_states = Channel.empty()
+ 
+     if (params.platform == 'illumina') {
+         ch_samples = ch_rows.map { row ->
+@@ -214,6 +215,7 @@
+         ch_plasmids = ILLUMINA.out.plasmids
+         ch_contig_tables = ILLUMINA.out.contig_tables
+         ch_plasmid_tables = ILLUMINA.out.plasmid_tables
++        ch_quantification_states = ILLUMINA.out.quantification_states
+         ch_done = ILLUMINA.out.done
+     } else if (params.platform == 'ont') {
+         ch_samples = ch_rows.map { row ->
+@@ -226,6 +228,7 @@
+         ch_plasmids = ONT.out.plasmids
+         ch_contig_tables = ONT.out.contig_tables
+         ch_plasmid_tables = ONT.out.plasmid_tables
++        ch_quantification_states = ONT.out.quantification_states
+         ch_done = ONT.out.done
+     } else if (params.platform == 'pacbio_hifi') {
+         ch_samples = ch_rows.map { row ->
+@@ -238,6 +241,7 @@
+         ch_plasmids = PACBIO_HIFI.out.plasmids
+         ch_contig_tables = PACBIO_HIFI.out.contig_tables
+         ch_plasmid_tables = PACBIO_HIFI.out.plasmid_tables
++        ch_quantification_states = PACBIO_HIFI.out.quantification_states
+         ch_done = PACBIO_HIFI.out.done
+     } else if (params.platform == 'hybrid') {
+         ch_samples = ch_rows.map { row ->
+@@ -252,6 +256,7 @@
+         ch_plasmids = HYBRID.out.plasmids
+         ch_contig_tables = HYBRID.out.contig_tables
+         ch_plasmid_tables = HYBRID.out.plasmid_tables
++        ch_quantification_states = HYBRID.out.quantification_states
+         ch_done = HYBRID.out.done
+     } else if (params.platform == 'assembly') {
+         ch_samples = ch_rows.map { row ->
+@@ -268,6 +273,7 @@
+     CROSS_SAMPLE(
+         ch_contig_tables,
+         ch_plasmid_tables,
++        ch_quantification_states,
+         ch_plasmids,
+         ch_done,
+         n_samples,
+diff --git a/modules/cross_sample/deseq2.nf b/modules/cross_sample/deseq2.nf
+--- a/modules/cross_sample/deseq2.nf
++++ b/modules/cross_sample/deseq2.nf
+@@ -14,12 +14,16 @@
+     path abundance_table
+     path sample_metadata
+ 
++    path code_assets, stageAs: 'source_assets/*'
++
+     output:
+     path "differential_plasmids.tsv", emit: results
+ 
+     script:
+     """
+-    Rscript ${projectDir}/bin/deseq2_plasmid.R \\
++    mkdir -p analysis_code
++    cp -L source_assets/* analysis_code/
++    Rscript analysis_code/deseq2_plasmid.R \\
+         --abundance ${abundance_table} \\
+         --metadata ${sample_metadata} \\
+         --output differential_plasmids.tsv
+diff --git a/modules/cross_sample/differential.nf b/modules/cross_sample/differential.nf
+--- a/modules/cross_sample/differential.nf
++++ b/modules/cross_sample/differential.nf
+@@ -16,12 +16,16 @@
+     path abundance_table
+     path sample_metadata
+ 
++    path code_assets, stageAs: 'source_assets/*'
++
+     output:
+     path "differential_abundance.tsv", emit: results
+ 
+     script:
+     """
+-    differential_abundance.R --abundance ${abundance_table} \\
++    mkdir -p analysis_code
++    cp -L source_assets/* analysis_code/
++    Rscript analysis_code/differential_abundance.R --abundance ${abundance_table} \\
+         --metadata ${sample_metadata} \\
+         --min-replicates ${params.min_group_replicates} \\
+         --out differential_abundance.tsv
+diff --git a/modules/cross_sample/diversity.nf b/modules/cross_sample/diversity.nf
+--- a/modules/cross_sample/diversity.nf
++++ b/modules/cross_sample/diversity.nf
+@@ -16,14 +16,19 @@
+     path abundance_table
+     path sample_metadata
+ 
++    path code_assets, stageAs: 'source_assets/*'
++
+     output:
+     path "diversity_metrics.tsv", emit: metrics
+     path "bray_curtis_matrix.tsv", emit: beta
++    path "diversity_status.json", emit: status
+ 
+     script:
+     """
+-    diversity.R --abundance ${abundance_table} --metadata ${sample_metadata} \\
++    mkdir -p analysis_code
++    cp -L source_assets/* analysis_code/
++    Rscript analysis_code/diversity.R --abundance ${abundance_table} --metadata ${sample_metadata} \\
+         --out-metrics diversity_metrics.tsv \\
+-        --out-beta bray_curtis_matrix.tsv
++        --out-beta bray_curtis_matrix.tsv --out-status diversity_status.json
+     """
+ }
+diff --git a/modules/cross_sample/network_prepare.nf b/modules/cross_sample/network_prepare.nf
+--- a/modules/cross_sample/network_prepare.nf
++++ b/modules/cross_sample/network_prepare.nf
+@@ -14,12 +14,24 @@
+ 
+     input:
+     path abundance_table
++    path sample_metadata
++
++    path code_assets, stageAs: 'source_assets/*'
+ 
+     output:
+     path "fastspar_input.tsv", emit: network_input
++    path "network_status.json", emit: status
++    path "fastspar_eligible.tsv", optional: true, emit: eligible_input
+ 
+     script:
++    def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
++    def metadata_arg = sample_metadata ? "--metadata ${quote.call(sample_metadata)}" : ''
++    def minimum_samples = params.network_min_samples ?: 20
+     """
+-    network_prepare.R --abundance ${abundance_table} --out fastspar_input.tsv
++    mkdir -p analysis_code
++    cp -L source_assets/* analysis_code/
++    Rscript analysis_code/network_prepare.R --abundance ${abundance_table} ${metadata_arg} \\
++      --min-samples ${minimum_samples} --out fastspar_input.tsv \\
++      --out-status network_status.json --eligible-out fastspar_eligible.tsv
+     """
+ }
+diff --git a/modules/cross_sample/shared_abundance.nf b/modules/cross_sample/shared_abundance.nf
+--- a/modules/cross_sample/shared_abundance.nf
++++ b/modules/cross_sample/shared_abundance.nf
+@@ -11,6 +11,8 @@
+     tuple val(sample_ids), path(tables, stageAs: 'measurements??/*')
+     val mapper
+ 
++    path code_assets, stageAs: 'source_assets/*'
++
+     output:
+     path 'quantification/contig_abundance.tsv', emit: contigs
+     path 'quantification/plasmid_abundance.tsv', emit: plasmids
+@@ -21,7 +23,9 @@
+     def quoted = { values -> (values instanceof List ? values : [values])
+         .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ') }
+     """
+-    python3 "${moduleDir}/../../bin/collect_shared_abundance.py" \\
++    mkdir -p analysis_code
++    cp -L source_assets/* analysis_code/
++    python3 analysis_code/collect_shared_abundance.py \\
+         --catalogue ${catalogue} --sample-ids ${quoted.call(sample_ids)} \\
+         --tables ${quoted.call(tables)} --mapper '${mapper}' --out-dir quantification
+     """
+diff --git a/modules/cross_sample/shared_catalogue.nf b/modules/cross_sample/shared_catalogue.nf
+--- a/modules/cross_sample/shared_catalogue.nf
++++ b/modules/cross_sample/shared_catalogue.nf
+@@ -11,6 +11,8 @@
+     tuple val(sample_ids), path(assemblies, stageAs: 'assemblies??/*'), path(plasmids, stageAs: 'plasmids??/*')
+     val expected_samples
+ 
++    path code_assets, stageAs: 'source_assets/*'
++
+     output:
+     path 'catalogue', emit: catalogue
+ 
+@@ -18,7 +20,9 @@
+     def quoted = { values -> (values instanceof List ? values : [values])
+         .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ') }
+     """
+-    python3 "${moduleDir}/../../bin/build_shared_catalogue.py" \\
++    mkdir -p analysis_code
++    cp -L source_assets/* analysis_code/
++    python3 analysis_code/build_shared_catalogue.py \\
+         --sample-ids ${quoted.call(sample_ids)} \\
+         --assemblies ${quoted.call(assemblies)} \\
+         --plasmids ${quoted.call(plasmids)} \\
+diff --git a/modules/cross_sample/statistics_inputs.nf b/modules/cross_sample/statistics_inputs.nf
+new file mode 100644
+--- /dev/null
++++ b/modules/cross_sample/statistics_inputs.nf
+@@ -0,0 +1,30 @@
++process STATISTICS_INPUTS {
++    tag 'statistics_input_validation'
++    label 'process_single'
++    conda "${moduleDir}/../../envs/catalogue.yml"
++    container 'python:3.12-slim'
++    publishDir "${params.outdir}/tables/statistics_inputs", mode: params.publish_dir_mode,
++        saveAs: { filename -> filename.tokenize('/').last() }
++    input:
++    path(contigs, stageAs: 'contigs/*')
++    path(plasmids, stageAs: 'plasmids/*')
++    path(states, stageAs: 'states/*')
++    path(metadata, stageAs: 'cohort/*')
++    val expected_samples
++    path code_assets, stageAs: 'source_assets/*'
++
++    output:
++    path 'validated/contig_abundance.tsv', emit: contigs
++    path 'validated/plasmid_abundance.tsv', emit: plasmids
++    path 'validated/samples.tsv', emit: metadata
++    path 'validated/sample_states.tsv', emit: states
++    path 'validated/validation.json', emit: validation
++    script:
++    """
++    mkdir -p analysis_code
++    cp -L source_assets/* analysis_code/
++    python3 analysis_code/validate_statistics_inputs.py \\
++      --contigs ${contigs} --plasmids ${plasmids} --states ${states} \\
++      --metadata ${metadata} --expected-samples ${expected_samples} --out-dir validated
++    """
++}
+diff --git a/subworkflows/cross_sample.nf b/subworkflows/cross_sample.nf
+--- a/subworkflows/cross_sample.nf
++++ b/subworkflows/cross_sample.nf
+@@ -4,6 +4,7 @@
+  * differential abundance (11), FastSpar co-occurrence network (12), and the
+  * final report. Sample-count gates are set by the nextflow.config defaults.
+  */
++include { STATISTICS_INPUTS } from '../modules/cross_sample/statistics_inputs'
+ include { DIVERSITY } from '../modules/cross_sample/diversity'
+ include { DIFFERENTIAL_ABUNDANCE } from '../modules/cross_sample/differential'
+ include { DESEQ2 } from '../modules/cross_sample/deseq2'
+@@ -15,6 +16,7 @@
+     take:
+     ch_contig_tables    // path(shared contig long table); empty on assembly platform
+     ch_plasmid_tables   // path(shared plasmid long table); empty on assembly platform
++    ch_quantification_states // producer sample/feature/count state; required for reads platforms
+     ch_plasmids         // tuple(meta, fasta) — report/catalog trigger
+     ch_done             // channel of trigger items from all optional branches
+     n_samples           // val: number of samples in the samplesheet
+@@ -27,32 +29,47 @@
+ 
+     if (params.platform != 'assembly') {
+         // Tables already contain all samples on the same sequence reference.
+-        ch_contig_merged = ch_contig_tables
+-        ch_plasmid_merged = ch_plasmid_tables
++        ch_contig_one = ch_contig_tables.toList().map { files ->
++            if (files.size() != 1) error "Expected exactly one shared contig table, received ${files.size()}"
++            files[0]
++        }
++        ch_plasmid_one = ch_plasmid_tables.toList().map { files ->
++            if (files.size() != 1) error "Expected exactly one shared plasmid table, received ${files.size()}"
++            files[0]
++        }
++        ch_state_one = ch_quantification_states.toList().map { files ->
++            if (files.size() != 1) error "Expected exactly one quantification state table, received ${files.size()}"
++            files[0]
++        }
++        STATISTICS_INPUTS(ch_contig_one, ch_plasmid_one, ch_state_one, ch_metadata, n_samples,
++            [file("${moduleDir}/../bin/validate_statistics_inputs.py",checkIfExists:true), file("${moduleDir}/../bin/collect_shared_abundance.py",checkIfExists:true)])
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: STATISTICS_INPUTS.out], '11_diversity', 'STATISTICS_INPUTS'))
++        ch_contig_merged = STATISTICS_INPUTS.out.contigs
++        ch_plasmid_merged = STATISTICS_INPUTS.out.plasmids
++        ch_valid_metadata = STATISTICS_INPUTS.out.metadata
+         ch_stats_done = ch_stats_done.mix(ch_contig_merged, ch_plasmid_merged)
+ 
+         if (params.run_diversity && n_samples >= params.min_diversity_samples) {
+-            DIVERSITY(ch_contig_merged, ch_metadata)
++            DIVERSITY(ch_contig_merged, ch_valid_metadata, [file("${moduleDir}/../bin/diversity.R",checkIfExists:true), file("${moduleDir}/../bin/statistics_input_contract.R",checkIfExists:true)])
+             ch_report_events = ch_report_events.mix(reportEvidence([channels: DIVERSITY.out], '11_diversity', 'DIVERSITY'))
+             ch_stats_done = ch_stats_done.mix(DIVERSITY.out.metrics, DIVERSITY.out.beta)
+         }
+         if (params.run_differential_internal && n_groups >= 2) {
+-            DIFFERENTIAL_ABUNDANCE(ch_contig_merged, ch_metadata)
++            DIFFERENTIAL_ABUNDANCE(ch_contig_merged, ch_valid_metadata, [file("${moduleDir}/../bin/differential_abundance.R",checkIfExists:true), file("${moduleDir}/../bin/statistics_input_contract.R",checkIfExists:true)])
+             ch_report_events = ch_report_events.mix(reportEvidence([channels: DIFFERENTIAL_ABUNDANCE.out], '11_diversity', 'DIFFERENTIAL_ABUNDANCE'))
+             ch_stats_done = ch_stats_done.mix(DIFFERENTIAL_ABUNDANCE.out.results)
+         }
+         if (params.run_differential_deseq2 && n_groups >= 2) {
+-            DESEQ2(ch_plasmid_merged, ch_metadata)
++            DESEQ2(ch_plasmid_merged, ch_valid_metadata, [file("${moduleDir}/../bin/deseq2_plasmid.R",checkIfExists:true), file("${moduleDir}/../bin/statistics_input_contract.R",checkIfExists:true)])
+             ch_report_events = ch_report_events.mix(reportEvidence([channels: DESEQ2.out], '11_diversity', 'DESEQ2'))
+             ch_stats_done = ch_stats_done.mix(DESEQ2.out.results)
+         }
+         if (params.run_network && n_samples >= params.network_min_samples) {
+-            // FastSpar cannot run on an empty plasmid table; zero detections
+-            // are a legitimate outcome, so gate the branch on real rows.
+-            ch_plasmid_nonempty = ch_plasmid_merged.filter { f -> f.text.readLines().size() > 1 }
+-            NETWORK_PREPARE(ch_plasmid_nonempty)
++            // Preparation records empty/filtered cohorts explicitly. Only a
++            // matrix eligible AFTER filtering may enter the estimator.
++            NETWORK_PREPARE(ch_plasmid_merged, ch_valid_metadata, [file("${moduleDir}/../bin/network_prepare.R",checkIfExists:true), file("${moduleDir}/../bin/statistics_input_contract.R",checkIfExists:true)])
+             ch_report_events = ch_report_events.mix(reportEvidence([channels: NETWORK_PREPARE.out], '12_network', 'NETWORK_PREPARE'))
+-            FASTSPAR(NETWORK_PREPARE.out.network_input)
++            FASTSPAR(NETWORK_PREPARE.out.eligible_input)
+             ch_report_events = ch_report_events.mix(reportEvidence([channels: FASTSPAR.out], '12_network', 'FASTSPAR'))
+             ch_stats_done = ch_stats_done.mix(FASTSPAR.out.correlation, FASTSPAR.out.covariance)
+         }
+diff --git a/subworkflows/hybrid.nf b/subworkflows/hybrid.nf
+--- a/subworkflows/hybrid.nf
++++ b/subworkflows/hybrid.nf
+@@ -188,5 +188,6 @@
+     contig_tables  = SHARED_QUANTIFICATION.out.contigs
+     // Shared quantification uses only short reads for hybrid statistics
+     plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
++    quantification_states = SHARED_QUANTIFICATION.out.states
+     done = ch_report_events
+ }
+diff --git a/subworkflows/illumina.nf b/subworkflows/illumina.nf
+--- a/subworkflows/illumina.nf
++++ b/subworkflows/illumina.nf
+@@ -162,5 +162,6 @@
+     plasmids       = ch_plasmids
+     contig_tables  = SHARED_QUANTIFICATION.out.contigs
+     plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
++    quantification_states = SHARED_QUANTIFICATION.out.states
+     done = ch_report_events
+ }
+diff --git a/subworkflows/ont.nf b/subworkflows/ont.nf
+--- a/subworkflows/ont.nf
++++ b/subworkflows/ont.nf
+@@ -135,5 +135,6 @@
+     plasmids       = ch_plasmids
+     contig_tables  = SHARED_QUANTIFICATION.out.contigs
+     plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
++    quantification_states = SHARED_QUANTIFICATION.out.states
+     done = ch_report_events
+ }
+diff --git a/subworkflows/pacbio_hifi.nf b/subworkflows/pacbio_hifi.nf
+--- a/subworkflows/pacbio_hifi.nf
++++ b/subworkflows/pacbio_hifi.nf
+@@ -106,5 +106,6 @@
+     plasmids       = ch_plasmids
+     contig_tables  = SHARED_QUANTIFICATION.out.contigs
+     plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
++    quantification_states = SHARED_QUANTIFICATION.out.states
+     done = ch_report_events
+ }
+diff --git a/subworkflows/shared_quantification.nf b/subworkflows/shared_quantification.nf
+--- a/subworkflows/shared_quantification.nf
++++ b/subworkflows/shared_quantification.nf
+@@ -31,7 +31,7 @@
+             entries.each { entry -> if (entry[1] != entry[3]) error "Shared catalogue metadata mismatch: ${entry[0]}" }
+             tuple(entries.collect { it[0] }, entries.collect { it[2] }, entries.collect { it[4] })
+         }
+-    SHARED_CATALOGUE(ch_sources, n_samples)
++    SHARED_CATALOGUE(ch_sources, n_samples, [file("${moduleDir}/../bin/build_shared_catalogue.py",checkIfExists:true)])
+     ch_report_events = ch_report_events.mix(reportEvidence([channels: SHARED_CATALOGUE.out], '10_abundance', 'SHARED_CATALOGUE'))
+     ch_catalogue = SHARED_CATALOGUE.out.catalogue.first()
+     ch_reference = ch_catalogue.filter { dir -> dir.resolve('reference.fasta').size() > 0 }
+@@ -62,7 +62,8 @@
+     ch_tables = COVERM_SHARED.out.coverage.toList().map { entries ->
+         tuple(entries.collect { it[0].id }, entries.collect { it[1] })
+     }
+-    SHARED_ABUNDANCE_TABLES(ch_catalogue, ch_tables, read_mode == 'short' ? 'bowtie2' : 'minimap2')
++    SHARED_ABUNDANCE_TABLES(ch_catalogue, ch_tables, read_mode == 'short' ? 'bowtie2' : 'minimap2',
++        [file("${moduleDir}/../bin/collect_shared_abundance.py",checkIfExists:true)])
+     ch_report_events = ch_report_events.mix(reportEvidence([channels: SHARED_ABUNDANCE_TABLES.out], '10_abundance', 'SHARED_ABUNDANCE_TABLES'))
+ 
+     emit:
+diff --git a/tests/mock_e2e/run.py b/tests/mock_e2e/run.py
+--- a/tests/mock_e2e/run.py
++++ b/tests/mock_e2e/run.py
+@@ -5,6 +5,7 @@
+ import gzip
+ import hashlib
+ import json
++import math
+ import os
+ import shutil
+ import subprocess
+@@ -111,7 +112,7 @@
+         counts[name] = counts.get(name, 0) + 1
+     expected = {name: 6 for name in ['QUAST', 'GENOMAD', 'PLASMID_CONSENSUS',
+         'PLASMID_STRUCTURE', 'SAMTOOLS_MERGE', 'COVERM_CONTIG', 'METAPHLAN']}
+-    expected.update({name: 1 for name in ['SHARED_CATALOGUE', 'SHARED_ABUNDANCE_TABLES',
++    expected.update({name: 1 for name in ['STATISTICS_INPUTS', 'SHARED_CATALOGUE', 'SHARED_ABUNDANCE_TABLES',
+         'DIVERSITY', 'DIFFERENTIAL_ABUNDANCE', 'REPORT']})
+     expected.update(SAMTOOLS_VIEW_SHARED=6, COVERM_SHARED=6)
+     host_removal = json.loads((base / 'fixture/truth.json').read_text()).get('host_removal', False)
+@@ -183,6 +184,15 @@
+     assert '- [x] `11_diversity`' in report, 'Report ran before diversity outputs were available'
+     assert all(f'| {sid} | {0 if empty else 1} |' in report for sid in SAMPLES)
+     assert f'- Platform: `{platform}`' in report
++    cohort = json.loads((out / 'tables/statistics_inputs/validation.json').read_text())
++    assert cohort['status'] == 'validated' and set(cohort['sample_ids']) == set(SAMPLES)
++    metrics = rows(out / '11_diversity/diversity_metrics.tsv')
++    assert len(metrics) == 4 * len(SAMPLES) and {r['sample_id'] for r in metrics} == set(SAMPLES)
++    assert all(math.isfinite(float(r['value'])) for r in metrics), 'Nonfinite diversity value'
++    beta = rows(out / '11_diversity/bray_curtis_matrix.tsv')
++    assert len(beta) == len(SAMPLES) and {r['sample_id'] for r in beta} == set(SAMPLES)
++    assert all(set(row) == {'sample_id', *SAMPLES} for row in beta)
++    assert all(math.isfinite(float(row[sid])) for row in beta for sid in SAMPLES)
+     profiles = list((out / '07_host_prediction/metaphlan').glob('*.metaphlan.tsv'))
+     assert len(profiles) == 6, 'Host profiles must be unique per sample'
+     audits = [(a, json.loads(a.read_text())['argv'])
+diff --git a/tests/nextflow/shared_quantification.nf b/tests/nextflow/shared_quantification.nf
+--- a/tests/nextflow/shared_quantification.nf
++++ b/tests/nextflow/shared_quantification.nf
+@@ -39,7 +39,7 @@
+         report_events = report_events.mix(reportSamples(fasta_rows, 'plasmid_fasta', 'controlled_detection'),
+                                          reportSamples(consensus_rows, 'consensus', 'controlled_detection'),
+                                          reportSamples(structure_rows, 'structure', 'controlled_detection'))
+-        CROSS_SAMPLE(SHARED_QUANTIFICATION.out.contigs, SHARED_QUANTIFICATION.out.plasmids,
++        CROSS_SAMPLE(SHARED_QUANTIFICATION.out.contigs, SHARED_QUANTIFICATION.out.plasmids, SHARED_QUANTIFICATION.out.states,
+                      Channel.empty(), report_events, 4, 2)
+     }
+ }
+diff --git a/tests/nextflow/statistics_eligibility.nf b/tests/nextflow/statistics_eligibility.nf
+new file mode 100644
+--- /dev/null
++++ b/tests/nextflow/statistics_eligibility.nf
+@@ -0,0 +1,16 @@
++nextflow.enable.dsl=2
++include { CROSS_SAMPLE } from '../../subworkflows/cross_sample'
++include { reportSamples } from '../../lib/report_events'
++workflow {
++    root = params.fixture_dir
++    ids = params.sample_ids
++    contigs = Channel.of(file("${root}/contigs.tsv",checkIfExists:true))
++    if (params.duplicate_contig_table) contigs = contigs.mix(contigs)
++    states = params.omit_state ? Channel.empty() : Channel.of(file("${root}/states.tsv",checkIfExists:true))
++    fasta = Channel.fromList(ids).map { sid -> tuple([id:sid],file("${root}/${sid}/plasmids.fasta",checkIfExists:true)) }
++    consensus = Channel.fromList(ids).map { sid -> tuple([id:sid],file("${root}/${sid}/consensus.tsv",checkIfExists:true)) }
++    structure = Channel.fromList(ids).map { sid -> tuple([id:sid],file("${root}/${sid}/structure.tsv",checkIfExists:true)) }
++    events = reportSamples(fasta,'plasmid_fasta','controlled_detection')
++        .mix(reportSamples(consensus,'consensus','controlled_detection'), reportSamples(structure,'structure','controlled_detection'))
++    CROSS_SAMPLE(contigs,Channel.of(file("${root}/plasmids.tsv",checkIfExists:true)),states,Channel.empty(),events,ids.size(),2)
++}
+diff --git a/tests/nf-test/README.md b/tests/nf-test/README.md
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -424,3 +424,5 @@
+ `tests/run_sequence_taxonomy_input.py --work-dir <fresh> --before-dir <frozen-before>` 3个原任务复现旧taxonomy.tsv重定向截断源文件（任务仍0），并验证当前单表及双域同名输入均不变、分类准确。only disposable fixtures用于反例。HOST_LINKING可选/重复键11任务和54R smoke另验。原nf-test no-MAG场景仍仅为空结果，未升级为阳性/框架认证；新native harness不等于nf-test JUnit。
+ 
+ 所有比较保存在sequence_scores.tsv，method JSON明确tetra_markov256_v1与uncalibrated；0.7仍未校准。`bin/calibrate_sequence_threshold.py` 用具证据的显式标签和质粒/宿主组均隔离的calibration/holdout集合；7方法/3CLI控制只验证统计工具，人工0.8不得写回默认。完整数据约束、方法差异和待做真实宿主校准见 `docs/tool-audit/contracts/tetra-sequence-method.md`。TA-039仍ready/open；TA-040与新TA-058局部修复另记。
++
++2026-10-22统计边界补验：`tests/run_statistics_eligibility.py` 以原生R/FastSpar1.0.0和明确计数fixture检查非空正例、0/1特征、全零、过滤后新零列及缺失生产者；13场景37条trace（含3预期失败），不能当作nf-test框架或真实ENA科学效果通过。`tests/run_statistics_cache.py` 只改变独立临时项目中的脚本/辅助库，检查resume失效条件；旧module+新helper反例用于修复过程回归，不冒充基线已有helper。原生共享定量三模式现为58任务，六个平台/空结果场景793任务中外部工具仍为observer。FastSpar固定1.0.0实际要求至少4个特征，过滤后样本数必须再次达标；历史coverage-only ENA表需按统一参考重映射产生整数raw_count。P4断言已加强有限指标、完整样本与实际执行分支，但nf-test launcher及完整真实P4尚未运行，TT-003仍open。详见 `results/tool-audit/20261022-statistics-eligibility/receipt.json`；旧段落TA-013/014/038未决为历史scope，当前状态以台账为准。
+diff --git a/tests/nf-test/integration.nf.test b/tests/nf-test/integration.nf.test
+--- a/tests/nf-test/integration.nf.test
++++ b/tests/nf-test/integration.nf.test
+@@ -43,6 +43,10 @@
+                     assert abundance.text.readLines().size() > 1
+                     assert abundance.text.contains('sample_id')
+                     assert path("${params.outdir}/tables/plasmid_abundance.tsv").text.contains('plasmid_id')
++                    def cohort = new groovy.json.JsonSlurper().parse(path("${params.outdir}/tables/statistics_inputs/validation.json").toFile())
++                    assert cohort.status == 'validated'
++                    assert cohort.sample_ids.size() == expectedSamples
++                    assert cohort.tables.contigs.samples == expectedSamples
+                 }
+                 // No differential or network claims from <3 biological replicates/group.
+                 assert !path("${params.outdir}/11_diversity/differential_abundance.tsv").exists()
+diff --git a/tests/nf-test/nodes-cross-sample-ena.nf.test b/tests/nf-test/nodes-cross-sample-ena.nf.test
+--- a/tests/nf-test/nodes-cross-sample-ena.nf.test
++++ b/tests/nf-test/nodes-cross-sample-ena.nf.test
+@@ -2,7 +2,7 @@
+ // day 6, 3 infected vs 3 control runs (locked in ena-multisample.lock.json,
+ // prepared by prepare_data.py --dataset ena-multi; ENA_TEST_DATA points there).
+ // geNomad test database still comes from AUTOPLASM_TEST_DATA (real-nodes).
+-// Drives MERGE_ABUNDANCE / DIVERSITY / DIFFERENTIAL_ABUNDANCE / DESEQ2 /
++// Drives shared quantification / STATISTICS_INPUTS / DIVERSITY / DESeq2 /
+ // NETWORK_PREPARE / FASTSPAR / REPORT on genuine biological replicates.
+ // network_min_samples is lowered from the production default (20) to 6 to
+ // exercise the code path; this tests execution, not statistical power.
+@@ -44,21 +44,58 @@
+             assert contig.size() > 6
+             // diversity on real replicates (long format: sample_id, metric, value, group)
+             def metrics = path("${params.outdir}/11_diversity/diversity_metrics.tsv").text.readLines()
+-            assert metrics.size() > 1
++            assert metrics.size() == samples.size() * 4 + 1
+             assert metrics[0].split('\t', -1).toList() == ['sample_id', 'metric', 'value', 'group']
+             def mSamples = metrics.drop(1).collect { it.split('\t', -1)[0] }.toSet()
+             assert mSamples == samples.toSet()
+             assert metrics.drop(1).any { it.endsWith('\tinfected') }
+             assert metrics.drop(1).any { it.endsWith('\tcontrol') }
++            // Independent alpha formula over the actual coverage measurements.
++            def coverageIndex = header.indexOf('coverage')
++            def values = samples.collectEntries { [(it): []] }
++            contig.drop(1).each { line ->
++                def cells = line.split('\t', -1)
++                def value = Double.parseDouble(cells[coverageIndex])
++                assert Double.isFinite(value) && value >= 0
++                values[cells[header.indexOf('sample_id')]] << value
++            }
++            samples.each { sid ->
++                def cells = metrics.drop(1).collect { it.split('\t', -1) }.findAll { it[0] == sid }
++                assert cells.size() == 4
++                assert cells.collect { it[1] }.toSet() == ['richness','shannon','simpson','pielou'].toSet()
++                def positive = values[sid].findAll { it > 0 }
++                def total = positive.sum() ?: 0.0
++                def proportions = positive.collect { it / total }
++                def richness = positive.size()
++                def shannon = -(proportions.collect { it * Math.log(it) }.sum() ?: 0.0)
++                def simpson = proportions ? 1.0 - proportions.collect { it * it }.sum() : 0.0
++                def expected = [richness:richness, shannon:shannon, simpson:simpson,
++                                pielou:richness > 1 ? shannon / Math.log(richness) : 0.0]
++                cells.each { row ->
++                    def actual = Double.parseDouble(row[2])
++                    assert Double.isFinite(actual)
++                    assert Math.abs(actual - expected[row[1]]) <= 1e-6
++                }
++            }
++            def inputState = new groovy.json.JsonSlurper().parse(path("${params.outdir}/tables/statistics_inputs/validation.json").toFile())
++            assert inputState.status == 'validated'
++            assert inputState.sample_ids.toSet() == samples.toSet()
+             // internal differential between the two real groups
+             assert path("${params.outdir}/11_diversity/differential_abundance.tsv").text.readLines().size() >= 1
+             // DESeq2 on the merged plasmid table (may legitimately find nothing)
+             assert path("${params.outdir}/11_diversity/differential_plasmids.tsv").exists()
+-            // FastSpar network runs only when real plasmid rows exist; zero
+-            // detections on these low-biomass samples legitimately skip it.
+-            def plasmidRows = path("${params.outdir}/tables/plasmid_abundance.tsv").text.readLines()
+-            if (plasmidRows.size() > 1) {
++            // Nonempty source rows do not prove final network eligibility.
++            def networkState = new groovy.json.JsonSlurper().parse(path("${params.outdir}/12_network/network_status.json").toFile())
++            def estimators = workflow.trace.succeeded().findAll { it.name.contains('FASTSPAR') }
++            if (networkState.eligible) {
++                assert networkState.features_after >= 4
++                assert networkState.included_sample_ids.size() >= 6
++                assert estimators.size() == 1
+                 assert path("${params.outdir}/12_network/correlation.tsv").exists()
++            } else {
++                assert estimators.isEmpty()
++                assert !path("${params.outdir}/12_network/correlation.tsv").exists()
++                assert networkState.reason in ['insufficient_features','insufficient_samples']
+             }
+             // final report
+             def report = path("${params.outdir}/report/report.md").text
+diff --git a/tests/nf-test/nodes-cross-sample-fastspar.nf.test b/tests/nf-test/nodes-cross-sample-fastspar.nf.test
+--- a/tests/nf-test/nodes-cross-sample-fastspar.nf.test
++++ b/tests/nf-test/nodes-cross-sample-fastspar.nf.test
+@@ -1,5 +1,5 @@
+ // P3 real-data node chain: NETWORK_PREPARE -> FASTSPAR (cross_sample domain).
+-// Input: real ENA contig abundance table (P4 product; 482 contigs x 6 real
++// Input: regenerated ENA measured raw-count contig abundance table (P4 product; 482 contigs x 6 real
+ // samples). The P4 run itself skips this branch legitimately (zero plasmid
+ // calls), hence this dedicated chain test.
+ // Backend: podman.
+@@ -14,6 +14,7 @@
+         when {
+             params {
+                 test_data = "${System.getenv('ENA_TEST_DATA')}"
++                network_min_samples = 6 // explicit execution-only six-sample fixture, below production20
+                 outdir = "$outputDir"
+             }
+         }
+@@ -29,6 +30,18 @@
+             def lines = corr[0].text.readLines()
+             assert lines.size() > 2
+             assert lines[0].split('\t').size() == lines[1].split('\t').size()
++            def state = new groovy.json.JsonSlurper().parse(path("${params.outdir}/12_network/network_status.json").toFile())
++            assert state.eligible
++            assert state.features_after >= 4
++            assert state.included_sample_ids.size() >= 6
++            def matrix = lines.drop(1).collect { it.split('\t', -1) }
++            def ids = lines[0].split('\t', -1).drop(1).toSet()
++            assert matrix.collect { it[0] }.toSet() == ids
++            assert matrix.size() == ids.size()
++            assert matrix.every { row -> row.drop(1).every { value ->
++                def number = Double.parseDouble(value)
++                Double.isFinite(number) && number >= -1.000001 && number <= 1.000001
++            } }
+         }
+     }
+ }
+diff --git a/tests/nf-test/workflows/network_real.nf b/tests/nf-test/workflows/network_real.nf
+--- a/tests/nf-test/workflows/network_real.nf
++++ b/tests/nf-test/workflows/network_real.nf
+@@ -1,9 +1,7 @@
+-// P3 real-data chain: NETWORK_PREPARE + FASTSPAR on the real ENA contig
+-// abundance table (482 contigs x 6 samples; P4 product, see
+-// results/nf-test/ena-multi/cross/PROVENANCE.md). The P4 ENA run legitimately
+-// skips this branch (zero plasmid calls), so this wrapper exercises the two
+-// nodes with a real non-empty table.
+-// Backend: podman (autoplasm-r-analysis + fastspar images).
++// P3 network chain. test_data/cross/contig_abundance.tsv must contain
++// measured integer raw_count on a shared reference. Historical coverage-only
++// ENA tables must be regenerated; they are not valid count input. The caller
++// selects the minimum eligible cohort explicitly for smaller fixtures.
+ nextflow.enable.dsl = 2
+ 
+ include { NETWORK_PREPARE } from '../../../modules/cross_sample/network_prepare'
+@@ -11,6 +9,6 @@
+ 
+ workflow {
+     def table = file("${params.test_data}/cross/contig_abundance.tsv", checkIfExists: true)
+-    NETWORK_PREPARE(table)
+-    FASTSPAR(NETWORK_PREPARE.out.network_input)
++    NETWORK_PREPARE(table, [], [file("${moduleDir}/../../../bin/network_prepare.R",checkIfExists:true), file("${moduleDir}/../../../bin/statistics_input_contract.R",checkIfExists:true)])
++    FASTSPAR(NETWORK_PREPARE.out.eligible_input)
+ }
+diff --git a/tests/run_mag_selection_validation.py b/tests/run_mag_selection_validation.py
+--- a/tests/run_mag_selection_validation.py
++++ b/tests/run_mag_selection_validation.py
+@@ -50,7 +50,7 @@
+             checks = {'rejected': result.returncode != 0, 'precise_diagnostic': diagnostic in result.stdout + result.stderr, 'zero_tasks': not tasks, 'zero_command_files': not commands}
+             runs.append({'scope': scope, 'case': name, 'stderr_diagnostic': diagnostic, 'command': command, 'exit': result.returncode, 'artifacts': str(p.relative_to(ROOT)), 'checks': checks})
+             print(scope, name, checks, flush=True)
+-            receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'main_sha256': hashlib.sha256((ROOT / 'main.nf').read_bytes()).hexdigest(), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in ['main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'tests/run_mag_selection_validation.py']}, 'limitations': ['actual rejection paths with zero analysis tasks; not successful main end-to-end or nf-test framework certification', 'new unique main MAG scenarios=8; direct include checks and replays are not new main cases']}
++            receipt = {'runs': runs, 'expected_runs': len(cases) + len(NEW_CASES), 'pass': len(runs) == len(cases) + len(NEW_CASES) and all(all(r['checks'].values()) for r in runs), 'main_sha256': hashlib.sha256((ROOT / 'main.nf').read_bytes()).hexdigest(), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in ['main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'tests/run_mag_selection_validation.py']}, 'limitations': ['actual rejection paths with zero analysis tasks; not successful main end-to-end or nf-test framework certification', 'new unique main MAG scenarios=8; direct include checks and replays are not new main cases']}
+             (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
+     return receipt['pass']
+ 
+diff --git a/tests/run_shared_quantification.py b/tests/run_shared_quantification.py
+--- a/tests/run_shared_quantification.py
++++ b/tests/run_shared_quantification.py
+@@ -90,7 +90,7 @@
+         (folder / 'long.fastq').write_text(''.join(long_reads))
+     (base / 'coordinate-oracle.json').write_text(json.dumps({'source_accessions': {'A': 'NC_007941.1', 'B': 'NC_003903.1', 'C': 'reverse complement NC_007941.1', 'D': 'explicit unmapped Ns'}, 'zero_based_starts': coordinates, 'short': '150bp mates at start and start+350, reverse second mate', 'long': '2000bp at start', 'count_unit': 'primary_read_alignment'}, indent=2) + '\n')
+     (fixture / 'samples.tsv').write_text('sample_id\tgroup\nA\tgroup1\nB\tgroup1\nC\tgroup2\nD\tgroup2\n')
+-    sources = ['bin/build_shared_catalogue.py', 'bin/collect_shared_abundance.py', 'modules/cross_sample/shared_catalogue.nf',
++    sources = ['bin/statistics_input_contract.R', 'bin/validate_statistics_inputs.py', 'modules/cross_sample/statistics_inputs.nf', 'modules/cross_sample/diversity.nf', 'bin/build_shared_catalogue.py', 'bin/collect_shared_abundance.py', 'modules/cross_sample/shared_catalogue.nf',
+                'modules/cross_sample/shared_abundance.nf', 'subworkflows/shared_quantification.nf', 'conf/shared_quantification.config',
+                'tests/nextflow/shared_quantification.nf', 'tests/run_shared_quantification.py', 'subworkflows/cross_sample.nf',
+                'bin/diversity.R', 'bin/differential_abundance.R', 'bin/generate_report.R', 'subworkflows/host_linking.nf', 'bin/coabundance_link.R']
+@@ -106,7 +106,7 @@
+             "process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nprocess.maxForks=1\n"
+             "conda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\nparams.publish_dir_mode='copy'\n"
+             "process {\n" + f"withName: 'COVERM_SHARED' {{ beforeScript = 'export PATH=\"{coverm}/bin:$PATH\"' }}\n"
+-            + f"withName: 'SHARED_CATALOGUE|SHARED_ABUNDANCE_TABLES' {{ beforeScript = 'export PATH=\"{python_prefix}/bin:$PATH\"' }}\n"
++            + f"withName: 'SHARED_CATALOGUE|SHARED_ABUNDANCE_TABLES|STATISTICS_INPUTS' {{ beforeScript = 'export PATH=\"{python_prefix}/bin:$PATH\"' }}\n"
+             + f"withName: 'MINIMAP2_ALIGN_SHARED' {{ beforeScript = 'export PATH=\"{minimap}/bin:$PATH\"' }}\n"
+             + f"withName: 'SAMTOOLS_VIEW_SHARED' {{ beforeScript = 'export PATH=\"{coverm}/bin:$PATH\"' }}\n"
+             + "}\n")
+@@ -128,7 +128,7 @@
+         (p / 'stderr.log').write_text(result.stderr)
+         assert result.returncode == 0, result.stdout + result.stderr
+         tasks = table(p / 'trace.tsv')
+-        assert len(tasks) == (19 if mode == 'short' else 18), len(tasks)
++        assert len(tasks) == (20 if mode == 'short' else 19), len(tasks)
+         assert all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks)
+         catalogue = out / '10_abundance/shared_reference/catalogue'
+         features = table(catalogue / 'features.tsv')
+@@ -179,7 +179,7 @@
+             assert len(mapped) == (0 if sid == 'D' else (40 if mode == 'short' else 20))
+             assert all(line.split('\t')[2] == feature[sid] and not (int(line.split('\t')[1]) & 2308) and 10 <= int(line.split('\t')[4]) < 255 for line in mapped)
+         runs.append({'mode': mode, 'command': command, 'exit': result.returncode, 'tasks': tasks, 'checks': 'two exact/RC references, colliding local IDs, C no own candidates still measured, D true zero, full sample-feature rectangle, raw counts/coverage and retained BAM oracle'})
+-        receipt = {'pass': True, 'runs': runs, 'source_sha256': hashes, 'fixture_sha256': fixture_hashes,
++        receipt = {'pass': len(runs) == len(modes), 'expected_modes': modes, 'runs': runs, 'source_sha256': hashes, 'fixture_sha256': fixture_hashes,
+                    'limitations': ['locked real reference DNA with explicit in-silico reads and controlled host profiles, not wet-lab abundance/biological accuracy',
+                                    'actual shared quantification plus CROSS_SAMPLE diversity/internal replication guard/report; platform calls changed but full platform/classifier execution not certified',
+                                    'near-homologue ambiguity/globally empty cases are recorded separately; not image/nf-test/full platform/scientific accuracy certification']}
+diff --git a/tests/run_statistics_cache.py b/tests/run_statistics_cache.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_statistics_cache.py
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python3
++"""Native resume controls: an analysis executable/helper is part of task identity.
++
++Only disposable project copies change. A deliberately different private formula
++provides a visible stale-cache oracle; production code is never altered here.
++"""
++import argparse,csv,hashlib,json,math,os,shutil,subprocess
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def main():
++    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--work-dir',type=Path,required=True);parser.add_argument('--before-dir',type=Path,required=True);a=parser.parse_args();base=a.work_dir.resolve();base.mkdir(parents=True,exist_ok=False);sources=['modules/cross_sample/diversity.nf','bin/diversity.R','bin/statistics_input_contract.R','tests/run_statistics_cache.py'];hashes={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in sources};runs=[]
++    for old in [True,False]:
++        project=base/('before' if old else 'current');(project/'modules/cross_sample').mkdir(parents=True);(project/'bin').mkdir()
++        module=a.before_dir.resolve()/'modules/cross_sample/diversity.nf' if old else ROOT/'modules/cross_sample/diversity.nf';shutil.copy2(module,project/'modules/cross_sample/diversity.nf')
++        for name in ['diversity.R','statistics_input_contract.R']:shutil.copy2(ROOT/'bin'/name,project/'bin'/name)
++        ab=project/'counts.tsv';ab.write_text('sample_id\tcontig_id\tcoverage\nS1\tF1\t1\nS1\tF2\t1\nS2\tF1\t3\nS2\tF2\t1\n');meta=project/'metadata.tsv';meta.write_text('sample_id\tgroup\nS1\tA\nS2\tB\n');(project/'main.nf').write_text("nextflow.enable.dsl=2\ninclude { DIVERSITY } from './modules/cross_sample/diversity'\nworkflow { DIVERSITY(file('"+str(ab)+"'),file('"+str(meta)+"')"+("" if old else ",[file('"+str(project/'bin/diversity.R')+"'),file('"+str(project/'bin/statistics_input_contract.R')+"')]")+") }\n")
++        config=project/'native.config';config.write_text(f"params.outdir='{project}/out'\nparams.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\n");env=os.environ.copy();env['PATH']=str(project/'bin')+':'+env['PATH'];steps=['first','changed-helper'] if old else ['first','unchanged','changed-helper','changed-analysis']
++        for step in steps:
++            if step=='changed-helper':
++                helper=project/'bin/statistics_input_contract.R';helper.write_text(helper.read_text()+'\n# Deliberate private dependency formula control; never production.\ndiversity <- function(x,index="shannon",...) { if(index=="shannon") 0.125 else vegan::diversity(x,index=index,...) }\n')
++            if step=='changed-analysis':
++                script=project/'bin/diversity.R';text=script.read_text();assert 'index="shannon"' in text;text=text.replace('index="shannon"','index="simpson"');script.write_text(text)
++            trace=project/(step+'.trace.tsv');cmd=[shutil.which('nextflow') or 'nextflow','-C',str(config),'run',str(project/'main.nf'),'-work-dir',str(project/'work'),'-with-trace',str(trace),'-ansi-log','false']
++            if step!='first':cmd.append('-resume')
++            r=subprocess.run(cmd,cwd=project,text=True,capture_output=True,env=env);(project/(step+'.console.log')).write_text(r.stdout+r.stderr);assert r.returncode==0,r.stdout+r.stderr;tasks=list(csv.DictReader(trace.open(),delimiter='\t'));assert len(tasks)==1
++            expected='CACHED' if (old and step=='changed-helper') or (not old and step=='unchanged') else 'COMPLETED';assert tasks[0]['status']==expected,tasks
++            rows=list(csv.DictReader((project/'out/11_diversity/diversity_metrics.tsv').open(),delimiter='\t'));value=float(next(x['value'] for x in rows if x['sample_id']=='S1' and x['metric']=='shannon'));target=(.5 if step=='changed-analysis' else .125) if not old and step in ['changed-helper','changed-analysis'] else math.log(2);assert math.isclose(value,target,abs_tol=1e-6)
++            if old and step=='changed-helper':
++                direct=[ 'Rscript',str(project/'bin/diversity.R'),'--abundance',str(ab),'--metadata',str(meta),'--out-metrics',str(project/'direct.tsv'),'--out-beta',str(project/'direct-beta.tsv') ];dr=subprocess.run(direct,text=True,capture_output=True,check=True,env=env);actual=float(next(x['value'] for x in csv.DictReader((project/'direct.tsv').open(),delimiter='\t') if x['sample_id']=='S1' and x['metric']=='shannon'));assert math.isclose(actual,.125,abs_tol=1e-6);assert actual!=value
++            runs.append({'before':old,'step':step,'command':cmd,'exit':r.returncode,'tasks':tasks,'S1_output_named_shannon':value,'deliberate_private_formula':'helper shannon0.125 after changed-helper; analysis uses Simpson after changed-analysis'})
++    assert hashes=={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in sources};(base/'run.json').write_text(json.dumps({'pass':True,'runs':runs,'source_sha256':hashes,'limitations':['only disposable project code changed; formula substitution is a visible cache-control fault, not a production algorithm change','native R/Nextflow cache behavior, no nf-test/image/remote executor/model accuracy certification','declared path inputs bind the analysis script and helper to task identity; this old-module/current-helper counterexample tests a regression introduced during the repair, not a historical helper in the original baseline; other wrappers are not certified']},indent=2)+'\n');print('PASS6 trace entries: old stale formula cached, current unchanged cached/helper and formula changes recomputed')
++
++
++if __name__=='__main__':main()
+diff --git a/tests/run_statistics_eligibility.py b/tests/run_statistics_eligibility.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_statistics_eligibility.py
+@@ -0,0 +1,98 @@
++#!/usr/bin/env python3
++"""Actual CROSS_SAMPLE, native R and FastSpar; explicit count/cohort controls.
++
++No assemblies, classifiers or wet-lab association accuracy is certified here.
++"""
++import argparse,csv,hashlib,json,math,os,random,re,shutil,subprocess
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def table(path):
++    with path.open() as f:return list(csv.DictReader(f,delimiter='\t'))
++
++
++def generate(folder,kind):
++    folder.mkdir();ids=['001','1','NA']+[f'S{i}' for i in range(3,20)];rng=random.Random(1301438)
++    if kind in ['empty']:values=[]
++    elif kind in ['single']:values=[[5+i for i in range(20)]]
++    elif kind=='one-nonzero':values=[[10+j if i==0 else 0 for i in range(20)] for j in range(4)]
++    elif kind=='all-zero':values=[[0]*20 for _ in range(4)]
++    elif kind=='low-features':values=[[5+i+j for i in range(20)] for j in range(3)]
++    elif kind=='filtered-zero':values=[[10 if i==j else 0 for i in range(20)] for j in range(20)]
++    elif kind=='new-zero':values=[[5+j if i<4 else 0 for i in range(20)] for j in range(4)]+[[10 if i==j else 0 for i in range(20)] for j in range(4,20)]
++    else:values=[[rng.randint(50,500) for i in range(20)] for j in range(8)]
++    features=[f'F{i}' for i in range(len(values))];meta='sample_id\tgroup\n'+''.join(sid+'\t'+('A' if i<10 else 'B')+'\n' for i,sid in enumerate(ids));(folder/'samples.tsv').write_text(meta)
++    for role,featurecol in [('contigs','contig_id'),('plasmids','plasmid_id')]:
++        text=featurecol+'\tsample_id\tcoverage\traw_count\n'
++        for j,fid in enumerate(features):
++            for i,sid in enumerate(ids):
++                if kind=='missing-sample' and sid=='NA':continue
++                text+=f'{fid}\t{sid}\t{values[j][i]/10}\t{values[j][i]}\n'
++        (folder/(role+'.tsv')).write_text(text)
++    states='sample_id\treference_features\tplasmid_features\teligible_read_alignments\tplasmid_read_alignments\tquantification_status\n'
++    for i,sid in enumerate(ids):
++        total=sum(row[i] for row in values);status='empty_catalogue' if not features else 'measured_zero' if not total else 'measured';declared=999999 if kind=='bad-state' and i==0 else total;states+=f'{sid}\t{len(features)}\t{len(features)}\t{declared}\t{total}\t{status}\n'
++        sample=folder/sid;sample.mkdir();rng_dna=random.Random(1438);dna=[''.join(rng_dna.choices('ACGT',k=1200)) for _ in features]
++        (sample/'plasmids.fasta').write_text(''.join('>'+fid+'\n'+seq+'\n' for fid,seq in zip(features,dna)))
++        (sample/'consensus.tsv').write_text('sample_id\tcontig_id\tplasmid_call\tsupporting_tools\n'+''.join(sid+'\t'+fid+'\tplasmid\tcontrolled_fixture\n' for fid in features))
++        (sample/'structure.tsv').write_text('sample_id\tplasmid_id\tis_circular\n'+''.join(sid+'\t'+fid+'\tfalse\n' for fid in features))
++    (folder/'states.tsv').write_text(states)
++    return ids,features,values
++
++
++def before_harness(base,before):
++    # Freeze old CROSS_SAMPLE and all changed process interfaces. Other includes
++    # resolve to current unchanged dependencies; R executables use frozen PATH.
++    old=(before/'subworkflows/cross_sample.nf').read_text()
++    def target(match):
++        name=match.group(1);resolved=(ROOT/'subworkflows'/name).resolve()
++        if name in ['../modules/cross_sample/'+n for n in ['network_prepare','diversity','differential','deseq2']]:resolved=before/'modules/cross_sample'/Path(name).name
++        return "from '"+str(resolved)+"'"
++    old=re.sub(r"from '([^']+)'",target,old);(base/'old-cross.nf').write_text(old)
++    text=(ROOT/'tests/nextflow/statistics_eligibility.nf').read_text().replace("'../../subworkflows/cross_sample'",repr(str(base/'old-cross'))).replace("'../../lib/report_events'",repr(str(ROOT/'lib/report_events'))).replace('file("${root}/plasmids.tsv",checkIfExists:true)),states,Channel.empty()','file("${root}/plasmids.tsv",checkIfExists:true)),Channel.empty()')
++    (base/'probe.nf').write_text(text);return base/'probe.nf'
++
++
++def square(path,features,correlation=False):
++    with path.open() as f:r=csv.DictReader(f,delimiter='\t');fields=r.fieldnames;rows=list(r)
++    assert set(fields[1:])==set(features) and len(rows)==len(features);first=fields[0];assert {r[first] for r in rows}==set(features)
++    values={r[first]:{fid:float(r[fid]) for fid in features} for r in rows}
++    for fid in features:
++        for other in features:
++            v=values[fid][other];assert math.isfinite(v);assert math.isclose(v,values[other][fid],abs_tol=1e-5)
++            if correlation:assert -1.000001<=v<=1.000001
++        if correlation:assert math.isclose(values[fid][fid],1,abs_tol=1e-6)
++    return values
++
++
++def main():
++    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--work-dir',type=Path,required=True);p.add_argument('--fastspar-prefix',type=Path,required=True);p.add_argument('--before-dir',type=Path,required=True);p.add_argument('--python-prefix',type=Path,required=True);a=p.parse_args();base=a.work_dir.resolve();base.mkdir(parents=True,exist_ok=False);before=a.before_dir.resolve();fastspar=a.fastspar_prefix.resolve()/'bin';python_bin=a.python_prefix.resolve()/'bin';python_version=subprocess.run([str(python_bin/'python3'),'--version'],capture_output=True,text=True,check=True).stdout.strip();assert python_version.startswith('Python 3.12.')
++    sources=['bin/collect_shared_abundance.py','main.nf','subworkflows/cross_sample.nf','modules/cross_sample/statistics_inputs.nf','modules/cross_sample/network_prepare.nf','modules/cross_sample/fastspar.nf','modules/cross_sample/diversity.nf','bin/validate_statistics_inputs.py','bin/statistics_input_contract.R','bin/diversity.R','bin/network_prepare.R','tests/run_statistics_eligibility.py','tests/nextflow/statistics_eligibility.nf'];hashes={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in sources};runs=[]
++    cases=['before-filtered-zero','positive','single','empty','all-zero','one-nonzero','low-features','filtered-zero','new-zero','missing-sample','bad-state','missing-state-channel','duplicate-table-channel']
++    for name in cases:
++        old=name.startswith('before-');kind='filtered-zero' if old else name;d=base/name;d.mkdir();fixture=d/'fixtures';ids,features,values=generate(fixture,kind);fixture_hash={str(q.relative_to(fixture)):hashlib.sha256(q.read_bytes()).hexdigest() for q in fixture.rglob('*') if q.is_file()};(d/'inputs-before.json').write_text(json.dumps(fixture_hash,indent=2)+'\n')
++        harness=before_harness(d,before) if old else ROOT/'tests/nextflow/statistics_eligibility.nf';config=d/'native.config';config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nprocess.maxForks=1\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\n")
++        params={'fixture_dir':str(fixture),'sample_ids':ids,'samplesheet':str(fixture/'samples.tsv'),'outdir':str(d/'out'),'publish_dir_mode':'copy','platform':'illumina','run_diversity':not old,'min_diversity_samples':3,'run_differential_internal':False,'run_differential_deseq2':False,'run_network':True,'network_min_samples':20,'project_name':'controlled_statistics_not_biological_benchmark','omit_state':name=='missing-state-channel','duplicate_contig_table':name=='duplicate-table-channel'};(d/'params.json').write_text(json.dumps(params))
++        cmd=[shutil.which('nextflow') or 'nextflow','-C',str(config),'run',str(harness),'-params-file',str(d/'params.json'),'-work-dir',str(d/'work'),'-with-trace',str(d/'trace.tsv'),'-ansi-log','false'];env=os.environ.copy();env['PATH']=str(fastspar)+':'+str(python_bin)+':'+str(before/'bin' if old else ROOT/'bin')+':'+env['PATH'];r=subprocess.run(cmd,text=True,capture_output=True,env=env);(d/'console.log').write_text(r.stdout+r.stderr);tasks=table(d/'trace.tsv') if (d/'trace.tsv').exists() else [];names=[t['name'].split(' (')[0].split(':')[-1] for t in tasks];negative=name in ['missing-sample','bad-state','missing-state-channel','duplicate-table-channel'];expected_failure=old or negative
++        assert (r.returncode!=0)==expected_failure,(name,r.stdout+r.stderr)
++        if expected_failure:
++            if old:assert 'FASTSPAR' in names and 'SparCC algorithm requires at least 4' in ''.join(q.read_text() for q in (d/'work').rglob('.command.err'))
++            else:assert not set(names)&{'DIVERSITY','NETWORK_PREPARE','FASTSPAR','REPORT'}
++            assert not (d/'out/report/report_data.json').exists()
++        else:
++            assert all(t['status']=='COMPLETED' and t['exit']=='0' for t in tasks);status=json.load(open(d/'out/12_network/network_status.json'));eligible=name=='positive';assert status['eligible']==eligible;assert names.count('FASTSPAR')==int(eligible)
++            alpha=table(d/'out/11_diversity/diversity_metrics.tsv');assert len(alpha)==80 and {r['sample_id'] for r in alpha}==set(ids);assert all(math.isfinite(float(r['value'])) for r in alpha)
++            if name in ['single','empty','all-zero']:assert all(float(row['value'])==0 for row in alpha if row['metric']!='richness')
++            if name in ['empty','all-zero']:assert all(float(row['value'])==0 for row in alpha)
++            if name=='single':assert all(float(row['value'])==1 for row in alpha if row['metric']=='richness')
++            if name=='one-nonzero':assert status['included_sample_ids']==[ids[0]] and status['reason']=='insufficient_samples'
++            if name=='new-zero':assert status['reason']=='insufficient_samples' and len(status['included_sample_ids'])==4 and len(status['excluded_zero_after_prevalence'])==16
++            report=json.load(open(d/'out/report/report_data.json'));assert {r['sample_id'] for r in report['samples']}==set(ids)
++            if eligible:
++                corr=square(d/'out/12_network/correlation.tsv',features,True);cov=square(d/'out/12_network/covariance.tsv',features)
++                direct=d/'direct';direct.mkdir();matrix=d/'out/12_network/fastspar_eligible.tsv';dcmd=[str(fastspar/'fastspar'),'--otu_table',str(matrix),'--correlation',str(direct/'correlation.tsv'),'--covariance',str(direct/'covariance.tsv'),'--threads','1'];direct_result=subprocess.run(dcmd,text=True,capture_output=True,env=env);(direct/'console.log').write_text(direct_result.stdout+direct_result.stderr);assert direct_result.returncode==0;assert square(direct/'correlation.tsv',features,True)==corr and square(direct/'covariance.tsv',features)==cov
++        assert fixture_hash=={str(q.relative_to(fixture)):hashlib.sha256(q.read_bytes()).hexdigest() for q in fixture.rglob('*') if q.is_file()};assert hashes=={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in sources};runs.append({'case':name,'command':cmd,'exit':r.returncode,'tasks':tasks,'expected_failure':expected_failure});(base/'run.json').write_text(json.dumps({'pass':len(runs)==len(cases),'expected_cases':len(cases),'validator_python':python_version,'runs':runs,'source_sha256':hashes,'limitations':['explicit synthetic full-cohort integer count/reference-state and detection fixtures; no real mapping/classifier/biological network accuracy','native R/FastSpar1.0.0 positive output identities/numeric invariants and directCLI parity, not independent ecological truth or significance estimation','frozen before workflow/NETWORK_PREPARE/R used only controlled empty-after-filter counterexample','no image/remote executor/nf-test framework/full model/platform certification']},indent=2)+'\n');print('PASS',name,len(tasks),'trace tasks',flush=True)
++
++
++if __name__=='__main__':main()
+diff --git a/tests/test_diversity_semantics.py b/tests/test_diversity_semantics.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_diversity_semantics.py
+@@ -0,0 +1,38 @@
++"""Independent alpha/Bray formula checks, including shape and legitimate zeros."""
++import csv,json,math,subprocess,tempfile,unittest
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1]
++SCRIPT=ROOT/'bin/diversity.R'
++
++
++class DiversitySemanticsTests(unittest.TestCase):
++    def run_case(self, values, norm='none'):
++        with tempfile.TemporaryDirectory() as directory:
++            d=Path(directory);ids=['001','1','NA'][:len(values)];features=len(values[0]);ab=d/'ab.tsv';ab.write_text('sample_id\tcontig_id\tcoverage\n'+''.join(f'{sid}\tF{j}\t{v}\n' for sid,row in zip(ids,values) for j,v in enumerate(row)));meta=d/'meta.tsv';meta.write_text('sample_id\tgroup\n'+''.join(s+'\tG\n' for s in ids));cmd=['Rscript',str(SCRIPT),'--abundance',str(ab),'--metadata',str(meta),'--out-metrics',str(d/'alpha.tsv'),'--out-beta',str(d/'beta.tsv'),'--out-status',str(d/'status.json'),'--beta-normalization',norm];r=subprocess.run(cmd,capture_output=True,text=True);self.assertEqual(r.returncode,0,r.stderr)
++            with (d/'alpha.tsv').open() as f:alpha=list(csv.DictReader(f,delimiter='\t'))
++            with (d/'beta.tsv').open() as f:beta=list(csv.DictReader(f,delimiter='\t'))
++            self.assertEqual(len(alpha),4*len(ids));self.assertEqual({x['sample_id'] for x in alpha},set(ids));self.assertEqual({x['sample_id'] for x in beta},set(ids))
++            for sid,row in zip(ids,values):
++                total=sum(row);p=[v/total for v in row if v>0] if total else [];rich=len(p);h=-sum(x*math.log(x) for x in p);simpson=1-sum(x*x for x in p) if p else 0;expected={'richness':rich,'shannon':h,'simpson':simpson,'pielou':h/math.log(rich) if rich>1 else 0}
++                actual={x['metric']:float(x['value']) for x in alpha if x['sample_id']==sid}
++                for key,value in expected.items():self.assertTrue(math.isfinite(actual[key]));self.assertAlmostEqual(actual[key],value,places=6)
++            adjusted=[[v/sum(row) for v in row] if norm=='tss' and sum(row) else row for row in values]
++            for row in beta:
++                i=ids.index(row['sample_id'])
++                for j,sid in enumerate(ids):
++                    den=sum(adjusted[i])+sum(adjusted[j]);expected=sum(abs(a-b) for a,b in zip(adjusted[i],adjusted[j]))/den if den else 0
++                    self.assertAlmostEqual(float(row[sid]),expected,places=6)
++            return json.loads((d/'status.json').read_text())
++
++    def test_single_feature_multiple_samples_including_zero(self):self.run_case([[0],[2],[5]])
++    def test_single_feature_tss(self):self.run_case([[0],[2],[5]],'tss')
++    def test_single_sample(self):self.assertEqual(self.run_case([[3,1]])["sample_ids"],["001"])
++    def test_multiple_features_independent_values(self):self.run_case([[1,1],[3,1],[0,0]])
++    def test_multiple_features_tss(self):self.run_case([[1,1],[3,1],[0,0]],'tss')
++    def test_zero_features_preserves_full_metadata_cohort(self):
++        self.assertEqual(self.run_case([[],[],[]])['status'],'zero_feature_input')
++    def test_zero_measurements_are_finite_and_declared(self):
++        self.assertEqual(self.run_case([[0,0],[0,0]])['status'],'measured_all_zero')
++
++
++if __name__=='__main__':unittest.main()
+diff --git a/tests/test_network_eligibility.py b/tests/test_network_eligibility.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_network_eligibility.py
+@@ -0,0 +1,36 @@
++"""Final network matrix invariants; preparation is distinct from inference."""
++import csv,json,subprocess,tempfile,unittest
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1]
++
++
++class NetworkEligibilityTests(unittest.TestCase):
++    def invoke(self, values, minimum=20):
++        with tempfile.TemporaryDirectory() as directory:
++            d=Path(directory);ids=['S'+str(i) for i in range(20)];ab=d/'ab.tsv';ab.write_text('sample_id\tplasmid_id\traw_count\tcoverage\n'+''.join(f'{s}\tF{j}\t{v}\t0.125\n' for j,row in enumerate(values) for s,v in zip(ids,row)));meta=d/'meta.tsv';meta.write_text('sample_id\tgroup\n'+''.join(s+'\tA\n' for s in ids));cmd=['Rscript',str(ROOT/'bin/network_prepare.R'),'--abundance',str(ab),'--metadata',str(meta),'--min-samples',str(minimum),'--out',str(d/'matrix.tsv'),'--out-status',str(d/'status.json'),'--eligible-out',str(d/'eligible.tsv')];r=subprocess.run(cmd,capture_output=True,text=True);self.assertEqual(r.returncode,0,r.stderr);status=json.loads((d/'status.json').read_text())
++            with (d/'matrix.tsv').open() as f:reader=csv.DictReader(f,delimiter='\t');fields=reader.fieldnames;rows=list(reader)
++            self.assertEqual((d/'eligible.tsv').exists(),status['eligible'])
++            if rows:
++                for sid in fields[1:]:self.assertGreater(sum(int(row[sid]) for row in rows),0)
++            if status['eligible']:self.assertEqual((d/'matrix.tsv').read_bytes(),(d/'eligible.tsv').read_bytes())
++            return status,rows,fields
++    def test_positive_final_matrix_is_eligible(self):
++        status,rows,fields=self.invoke([[100+i+j*3 for i in range(20)] for j in range(4)]);self.assertTrue(status['eligible']);self.assertEqual(len(rows),4);self.assertEqual(len(fields),21)
++    def test_new_zero_columns_after_prevalence_are_removed(self):
++        common=[[10+j if i<4 else 0 for i in range(20)] for j in range(4)];rare=[[5 if i==j else 0 for i in range(20)] for j in range(4,20)];status,rows,fields=self.invoke(common+rare);self.assertEqual(status['reason'],'insufficient_samples');self.assertEqual(len(fields),5);self.assertEqual(len(status['excluded_zero_after_prevalence']),16);self.assertEqual(status['prevalence_denominator'],20)
++    def test_every_feature_filtered_produces_no_eligible_file(self):
++        status,rows,fields=self.invoke([[3 if i==j else 0 for i in range(20)] for j in range(20)]);self.assertEqual(status['reason'],'insufficient_features');self.assertEqual(rows,[]);self.assertEqual(fields,['#OTU ID'])
++    def test_fast_spar_requires_four_components(self):
++        status,rows,_=self.invoke([[5+i+j for i in range(20)] for j in range(3)]);self.assertEqual(status['min_features'],4);self.assertFalse(status['eligible']);self.assertEqual(len(rows),3)
++    def test_all_measured_zero_is_not_an_inference(self):
++        status,rows,_=self.invoke([[0]*20 for _ in range(4)]);self.assertFalse(status['eligible']);self.assertEqual(len(status['excluded_initial_zero']),20);self.assertEqual(rows,[])
++    def test_global_empty_keeps_expected_cohort_in_status(self):
++        status,rows,_=self.invoke([]);self.assertFalse(status['eligible']);self.assertEqual(len(status['observed_or_expected_sample_ids']),20);self.assertEqual(rows,[])
++    def test_single_included_id_is_an_array_and_does_not_meet_cohort_gate(self):
++        status,rows,fields=self.invoke([[5+j if i==0 else 0 for i in range(20)] for j in range(4)])
++        self.assertEqual(status['included_sample_ids'],['S0']);self.assertEqual(status['reason'],'insufficient_samples')
++    def test_counts_above_R_integer_range_are_not_coerced_to_NA(self):
++        count=2**31+123;status,rows,_=self.invoke([[count+i+j for i in range(20)] for j in range(4)]);self.assertTrue(status['eligible']);self.assertEqual(rows[0]['S0'],str(count));self.assertFalse(any('NA'==v for row in rows for v in row.values()))
++
++
++if __name__=='__main__':unittest.main()
+diff --git a/tests/test_statistics_cohort.py b/tests/test_statistics_cohort.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_statistics_cohort.py
+@@ -0,0 +1,29 @@
++"""Every consumer must distinguish missing measurements from measured zeros."""
++import csv,subprocess,tempfile,unittest
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1]
++
++
++class StatisticsCohortTests(unittest.TestCase):
++    def check_rejection(self, change, diagnostic):
++        for script in ['diversity.R','differential_abundance.R','deseq2_plasmid.R','network_prepare.R']:
++            with self.subTest(script=script),tempfile.TemporaryDirectory() as directory:
++                d=Path(directory);column='plasmid_id' if script=='deseq2_plasmid.R' else 'contig_id';rows=[['001','F1','2','2'],['1','F1','0','0'],['001','F2','3','3'],['1','F2','4','4']];meta=[['001','A'],['1','B']]
++                if change=='missing_sample':rows=[r for r in rows if r[0]!='1']
++                elif change=='missing_cell':rows.pop()
++                elif change=='duplicate_cell':rows.append(rows[0])
++                elif change=='unexpected_sample':rows[0][0]='UNKNOWN'
++                elif change=='duplicate_metadata':meta.append(meta[0])
++                elif change=='blank_metadata':meta[0][0]=''
++                ab=d/'ab.tsv';ab.write_text('sample_id\t'+column+'\tcoverage\traw_count\n'+'\n'.join('\t'.join(r) for r in rows)+'\n');metadata=d/'meta.tsv';metadata.write_text('sample_id\tgroup\n'+'\n'.join('\t'.join(r) for r in meta)+'\n');out=d/'out.tsv';cmd=['Rscript',str(ROOT/'bin'/script),'--abundance',str(ab),'--metadata',str(metadata)]
++                cmd+=['--out-metrics',str(out),'--out-beta',str(d/'beta.tsv')] if script=='diversity.R' else ['--output' if script=='deseq2_plasmid.R' else '--out',str(out)]
++                r=subprocess.run(cmd,capture_output=True,text=True);self.assertNotEqual(r.returncode,0);self.assertIn(diagnostic,r.stderr);self.assertFalse(out.exists())
++    def test_missing_sample_is_not_zero(self):self.check_rejection('missing_sample','sample set mismatch')
++    def test_missing_cell_is_not_zero(self):self.check_rejection('missing_cell','incomplete sample-feature')
++    def test_duplicate_measurement_rejected(self):self.check_rejection('duplicate_cell','duplicate sample-feature')
++    def test_unexpected_sample_rejected(self):self.check_rejection('unexpected_sample','sample set mismatch')
++    def test_duplicate_metadata_rejected(self):self.check_rejection('duplicate_metadata','duplicate metadata')
++    def test_blank_metadata_id_rejected(self):self.check_rejection('blank_metadata','nonempty sample IDs')
++
++
++if __name__=='__main__':unittest.main()
+diff --git a/tests/test_statistics_input_validation.py b/tests/test_statistics_input_validation.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_statistics_input_validation.py
+@@ -0,0 +1,50 @@
++"""Producer-state evidence distinguishes an empty reference from missing results."""
++import csv,importlib.util,json,sys,tempfile,unittest
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'bin'))
++from validate_statistics_inputs import validate
++
++
++class StatisticsInputValidationTests(unittest.TestCase):
++    def setUp(self):
++        self.temp=tempfile.TemporaryDirectory();self.base=Path(self.temp.name);self.ids=['001','1','NA'];self.contigs=self.base/'contigs.tsv';self.plasmids=self.base/'plasmids.tsv';self.states=self.base/'states.tsv';self.metadata=self.base/'meta.tsv';self.out=self.base/'validated';self.values={'F1':[2,0,5],'F2':[3,0,4]};self.crows=[];self.prows=[];self.srows=[]
++        for j,sid in enumerate(self.ids):
++            for fid,v in self.values.items():
++                row={'contig_id':fid,'sample_id':sid,'coverage':str(v[j]/10),'raw_count':str(v[j])};self.crows.append(row)
++                if fid=='F1':self.prows.append(dict(plasmid_id=fid,**{k:x for k,x in row.items() if k!='contig_id'}))
++            total=sum(v[j] for v in self.values.values());self.srows.append(dict(sample_id=sid,reference_features=2,plasmid_features=1,eligible_read_alignments=total,plasmid_read_alignments=self.values['F1'][j],quantification_status='measured' if total else 'measured_zero'))
++        self.metadata.write_text('sample_id\tgroup\n'+''.join(s+'\tG\n' for s in self.ids))
++    def tearDown(self):self.temp.cleanup()
++    def table(self,path,rows,fields):
++        with path.open('w') as f:w=csv.DictWriter(f,fields,delimiter='\t');w.writeheader();w.writerows(rows)
++    def invoke(self):
++        self.table(self.contigs,self.crows,['contig_id','sample_id','coverage','raw_count']);self.table(self.plasmids,self.prows,['plasmid_id','sample_id','coverage','raw_count']);self.table(self.states,self.srows,['sample_id','reference_features','plasmid_features','eligible_read_alignments','plasmid_read_alignments','quantification_status']);validate(self.contigs,self.plasmids,self.states,self.metadata,3,self.out)
++    def rejected(self,text):
++        with self.assertRaisesRegex(ValueError,text):self.invoke()
++        self.assertFalse(self.out.exists())
++    def test_full_rectangle_zero_sample_and_literal_ids_kept(self):
++        self.invoke();self.assertEqual(json.load(open(self.out/'validation.json'))['sample_ids'],['001','1','NA']);self.assertEqual((self.out/'contig_abundance.tsv').read_bytes(),self.contigs.read_bytes())
++    def test_missing_sample_is_not_zero(self):
++        self.crows=[r for r in self.crows if r['sample_id']!='1'];self.rejected('incomplete sample-feature')
++    def test_missing_measurement_is_not_zero(self):self.crows.pop();self.rejected('incomplete sample-feature')
++    def test_duplicate_measurement_rejected(self):self.crows.append(self.crows[0]);self.rejected('duplicate sample-feature')
++    def test_missing_state_rejected(self):self.srows.pop();self.rejected('state sample set mismatch')
++    def test_declared_empty_table_with_positive_features_rejected(self):self.prows=[];self.rejected('declared feature count')
++    def test_false_state_total_rejected(self):self.srows[0]['eligible_read_alignments']=999;self.rejected('count total differs')
++    def test_plasmid_measurement_cannot_differ_from_competitive_reference(self):
++        self.prows[0]['coverage']='9.9';self.rejected('subset measurement differs')
++    def test_equivalent_decimal_forms_are_equal(self):
++        self.prows[0]['coverage']='0.2000000000000000000000';self.invoke()
++    def test_negative_zero_is_the_same_measurement(self):
++        self.prows[1]['coverage']='-0';self.invoke()
++    def test_precision_beyond_decimal_context_cannot_mask_a_mismatch(self):
++        self.crows[0]['coverage']='0.123456789012345678901234567890111'
++        self.prows[0]['coverage']='0.123456789012345678901234567890222'
++        self.rejected('subset measurement differs')
++    def test_zero_features_require_explicit_empty_producer_state(self):
++        self.crows=[];self.prows=[]
++        for r in self.srows:r.update(reference_features=0,plasmid_features=0,eligible_read_alignments=0,plasmid_read_alignments=0,quantification_status='empty_catalogue')
++        self.invoke();self.assertEqual(json.load(open(self.out/'validation.json'))['tables']['contigs']['features'],0)
++
++
++if __name__=='__main__':unittest.main()

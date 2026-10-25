@@ -1,0 +1,2240 @@
+--- a/bin/generate_report.R
++++ b/bin/generate_report.R
+@@ -1,10 +1,9 @@
+ #!/usr/bin/env Rscript
+ # Generate the AutoPlasm summary report (Markdown + HTML + methods + JSON).
+ #
+-# Pipeline step ``report_markdown``: scans the published results
+-# directory, summarizes per-sample plasmid
+-# counts from the consensus tables, circularity from structure tables, and
+-# lists the available analysis sections.
++# Pipeline step ``report_markdown``: validates explicit current-run inputs,
++# summarizes per-sample consensus/circular candidates, and lists observed
++# producer outputs. Published directories are never read.
+ #
+ # Reporting follows the nf-core two-tier pattern (nf-core/differentialabundance):
+ # a data-collection step emits report_data.json, and report.html is rendered
+@@ -81,88 +80,138 @@
+   "not confirmed topology. Terminal inverted repeats alone do not establish ",
+   "circularity; an unsupported call has unknown topology, not confirmed linearity.")
+ 
+-count_fasta_records <- function(path) {
+-  tryCatch(sum(startsWith(readLines(path, warn = FALSE), ">")),
+-           error = function(e) 0)
+-}
+-
+-summarize_consensus <- function(path) {
+-  total <- 0
+-  plasmids <- 0
+-  tools <- character(0)
+-  tryCatch({
+-    rec <- read.delim(path, stringsAsFactors = FALSE, quote = "",
+-                      comment.char = "")
+-    total <- nrow(rec)
+-    call <- if ("plasmid_call" %in% names(rec)) as.character(rec$plasmid_call) else character(0)
+-    hits <- which(call == "plasmid")
+-    plasmids <- length(hits)
+-    if ("supporting_tools" %in% names(rec)) {
+-      st <- as.character(rec$supporting_tools[hits])
+-      st <- st[!is.na(st)]
+-      pieces <- unlist(strsplit(st, ";", fixed = TRUE))
+-      tools <- sort(unique(pieces[nzchar(pieces)]))
++# Reporting has no published-directory discovery mode. Every measurement is
++# an explicit current-execution input, with sample membership checked first.
++read_tsv <- function(path, required) {
++  if (!file.exists(path) || dir.exists(path)) die(paste0("Missing report input: ", path))
++  rec <- tryCatch(read.delim(path, stringsAsFactors = FALSE, colClasses = "character",
++                            na.strings = NULL, quote = "", comment.char = "", check.names = FALSE),
++                  error = function(e) die(paste0(path, ": ", conditionMessage(e))))
++  if (anyDuplicated(names(rec))) die(paste0(path, ": duplicate TSV columns"))
++  if (!all(required %in% names(rec))) die(paste0(path, ": missing required columns"))
++  rec
++}
++
++fasta_ids <- function(path) {
++  con <- file(path, "rt")
++  on.exit(close(con))
++  ids <- character(0)
++  active <- FALSE
++  has_sequence <- FALSE
++  repeat {
++    chunk <- readLines(con, n = 10000L, warn = FALSE)
++    if (!length(chunk)) break
++    for (line in chunk) {
++      if (!nzchar(trimws(line))) next
++      if (startsWith(line, ">")) {
++        if (active && !has_sequence) die(paste0(path, ": empty FASTA record"))
++        name <- strsplit(trimws(substring(line, 2)), "[[:space:]]+")[[1L]][1L]
++        if (is.na(name) || !nzchar(name)) die(paste0(path, ": empty FASTA ID"))
++        ids[length(ids) + 1L] <- name
++        active <- TRUE
++        has_sequence <- FALSE
++      } else {
++        if (!active || !grepl("^[ACGTRYSWKMBDHVNacgtryswkmbdhvn]+$", trimws(line)))
++          die(paste0(path, ": malformed FASTA sequence"))
++        has_sequence <- TRUE
++      }
+     }
+-  }, error = function(e) NULL)
+-  list(total = total, plasmids = plasmids, tools = tools)
+-}
+-
+-summarize_structure <- function(path) {
+-  circular <- 0
+-  tryCatch({
+-    rec <- read.delim(path, stringsAsFactors = FALSE, quote = "",
+-                      comment.char = "")
+-    if ("is_circular" %in% names(rec))
+-      circular <- sum(as.character(rec$is_circular) == "true")
+-  }, error = function(e) NULL)
+-  circular
++  }
++  if (active && !has_sequence) die(paste0(path, ": empty FASTA record"))
++  if (anyDuplicated(ids)) die(paste0(path, ": duplicate FASTA ID"))
++  ids
+ }
+ 
+ spec <- list(
+-  outdir = list(required = TRUE),
+-  platform = list(default = ""),
+-  "project-name" = list(default = "plasmid_analysis"),
++  manifest = list(required = TRUE),
++  samplesheet = list(required = TRUE),
+   "out-prefix" = list(default = "."),
+   template = list(default = "")
+ )
+ opts <- parse_args(commandArgs(trailingOnly = TRUE), spec)
+-
+-outdir <- opts$outdir
+-det_dir <- file.path(outdir, "04_plasmid_detection")
++manifest <- tryCatch(jsonlite::fromJSON(opts$manifest, simplifyVector = FALSE),
++                     error = function(e) die(paste0("Invalid report manifest: ", conditionMessage(e))))
++if (!identical(manifest$schema_version, 1L) || !is.list(manifest$records) || !is.list(manifest$settings))
++  die("Invalid report manifest schema")
++settings <- manifest$settings
++project_name <- settings$project_name
++platform <- settings$platform
++if (!is.character(project_name) || length(project_name) != 1L ||
++    !is.character(platform) || length(platform) != 1L) die("Report settings require project_name and platform")
++metadata <- read_tsv(opts$samplesheet, "sample_id")
++expected <- metadata$sample_id
++if (!length(expected) || any(!nzchar(expected)) || anyDuplicated(expected))
++  die("Report samplesheet requires nonempty unique sample IDs")
++
++section_names <- c("00_basecalling", "01_qc", "02_assembly", "03_assembly_qc", "04_plasmid_detection",
++                   "05_plasmid_binning", "06_plasmid_typing", "07_host_prediction",
++                   "08_annotation", "09_comparative_genomics", "10_abundance", "11_diversity", "12_network")
++records <- manifest$records
++required_kinds <- c("plasmid_fasta", "consensus", "structure")
++inputs <- list()
++for (record in records) {
++  if (!is.character(record$kind) || length(record$kind) != 1L ||
++      !is.character(record$producer) || length(record$producer) != 1L ||
++      !nzchar(record$producer) || !is.character(record$section) || length(record$section) != 1L ||
++      !record$section %in% section_names) die("Invalid report event identity/section")
++  if (record$kind %in% required_kinds) {
++    if (!is.character(record$sample_id) || length(record$sample_id) != 1L || !record$sample_id %in% expected)
++      die("Report input has unexpected sample ID")
++    files <- unlist(record$files, use.names = FALSE)
++    if (length(files) != 1L || !file.exists(files) || dir.exists(files))
++      die(paste0("Missing report input for ", record$sample_id, ": ", record$kind))
++    key <- paste(record$sample_id, record$kind, sep = "/")
++    if (!is.null(inputs[[key]])) die(paste0("Duplicate report input: ", key))
++    inputs[[key]] <- files
++  } else if (!record$kind %in% c("evidence", "provided_input")) {
++    die("Unknown report event kind")
++  }
++}
+ samples <- list()
+-consensus_dir <- file.path(det_dir, "consensus")
+-structure_dir <- file.path(det_dir, "structure")
+-if (dir.exists(consensus_dir)) {
+-  fastas <- sort(list.files(consensus_dir, pattern = "\\.plasmid_contigs\\.fasta$"))
+-  for (fasta in fastas) {
+-    sid <- sub("\\.plasmid_contigs\\.fasta$", "", fasta)
+-    entry <- list(contigs = count_fasta_records(file.path(consensus_dir, fasta)),
+-                  total = 0, plasmids = 0, tools = character(0), circular = 0)
+-    cons <- file.path(consensus_dir, paste0(sid, ".plasmid_consensus.tsv"))
+-    if (file.exists(cons)) {
+-      s <- summarize_consensus(cons)
+-      entry$total <- s$total
+-      entry$plasmids <- s$plasmids
+-      entry$tools <- s$tools
+-    }
+-    struct <- file.path(structure_dir, paste0(sid, ".plasmid_structure.tsv"))
+-    if (file.exists(struct))
+-      entry$circular <- summarize_structure(struct)
+-    samples[[sid]] <- entry
+-  }
+-}
+-
+-section_names <- c("01_qc", "02_assembly", "03_assembly_qc", "04_plasmid_detection",
+-                   "05_plasmid_binning", "06_plasmid_typing", "07_host_prediction",
+-                   "08_annotation", "09_comparative_genomics", "10_abundance",
+-                   "11_diversity", "12_network")
+-sections <- stats::setNames(file.path(outdir, section_names) |>
+-                              vapply(dir.exists, logical(1)), section_names)
++for (sid in expected) {
++  paths <- vapply(required_kinds, function(kind) {
++    key <- paste(sid, kind, sep = "/")
++    if (is.null(inputs[[key]])) die(paste0("Missing report input: ", key))
++    inputs[[key]]
++  }, character(1))
++  ids <- fasta_ids(paths[["plasmid_fasta"]])
++  consensus <- read_tsv(paths[["consensus"]], c("contig_id", "sample_id", "plasmid_call", "supporting_tools"))
++  structure <- read_tsv(paths[["structure"]], c("sample_id", "plasmid_id", "is_circular"))
++  if (any(consensus$sample_id != sid) || any(structure$sample_id != sid))
++    die(paste0(sid, ": report table sample identity mismatch"))
++  if (any(!consensus$plasmid_call %in% c("plasmid", "chromosome")))
++    die(paste0(sid, ": invalid consensus call"))
++  if (anyDuplicated(consensus$contig_id) || anyDuplicated(structure$plasmid_id) ||
++      any(!nzchar(consensus$contig_id)) || any(!nzchar(structure$plasmid_id)))
++    die(paste0(sid, ": duplicate/empty report feature ID"))
++  if (!setequal(ids, consensus$contig_id[consensus$plasmid_call == "plasmid"]) ||
++      !setequal(ids, structure$plasmid_id)) die(paste0(sid, ": report FASTA/consensus/structure feature mismatch"))
++  if (any(!structure$is_circular %in% c("true", "false"))) die(paste0(sid, ": invalid circularity value"))
++  hits <- consensus$plasmid_call == "plasmid"
++  tools <- sort(unique(unlist(strsplit(consensus$supporting_tools[hits], ";", fixed = TRUE))))
++  tools <- tools[!is.na(tools) & nzchar(tools)]
++  samples[[sid]] <- list(contigs = length(ids), circular = sum(structure$is_circular == "true"), tools = tools)
++}
++sections <- stats::setNames(vapply(section_names, function(section) {
++  any(vapply(records, function(record) identical(record$section, section), logical(1)))
++}, logical(1)), section_names)
++section_status <- vapply(section_names, function(section) {
++  matching <- Filter(function(record) identical(record$section, section), records)
++  if (!length(matching)) return("not_observed")
++  if (all(vapply(matching, function(record) identical(record$kind, "provided_input"), logical(1))))
++    return("provided_input")
++  "observed_outputs"
++}, character(1))
++# Validate everything before producing any report products.
++final_directory <- opts[["out-prefix"]]
++dir.create(final_directory, recursive = TRUE, showWarnings = FALSE)
++opts[["out-prefix"]] <- tempfile(pattern = ".report-", tmpdir = final_directory)
++dir.create(opts[["out-prefix"]])
+ 
+ lines <- c(
+-  sprintf("# AutoPlasm report — %s", opts[["project-name"]]),
++  sprintf("# AutoPlasm report — %s", project_name),
+   "",
+-  sprintf("- Platform: `%s`", opts$platform),
++  sprintf("- Platform: `%s`", platform),
+   sprintf("- Date: %s", Sys.Date()),
+   sprintf("- Samples: %d", length(samples)),
+   "",
+@@ -177,6 +226,7 @@
+                             e$circular, paste(e$tools, collapse = ", ")))
+ }
+ lines <- c(lines, "", "## Analysis sections", "")
++lines <- c(lines, "Unmarked sections have no recorded output; they may be disabled or gated by empty inputs.")
+ for (nm in section_names)
+   lines <- c(lines, sprintf("- %s `%s`", ifelse(sections[nm], "[x]", "[ ]"), nm))
+ lines <- c(lines, "", "## Limitations", "", sprintf("- %s", WARNING),
+@@ -191,17 +241,21 @@
+ }
+ write_char(md, file.path(opts[["out-prefix"]], "report.md"))
+ 
+-methods <- paste0(
+-  "# Methods\n\n",
+-  "Metagenomic plasmid analysis was performed with AutoPlasm (Nextflow DSL2 ",
+-  "implementation). Reads were quality-filtered (fastp for short reads; ",
+-  "NanoPlot/Filtlong for ONT; HiFiAdapterFilt for PacBio HiFi). Assembly used ",
+-  "platform-appropriate assemblers (MEGAHIT/metaSPAdes, metaFlye, ",
+-  "hifiasm-meta, OPERA-MS/hybridSPAdes). Plasmid contigs were detected with ",
+-  "geNomad and integrated across tools by consensus voting ",
+-  sprintf("(%s platform). Typing used PlasmidFinder and MOB-typer; ", opts$platform),
+-  "annotation used Bakta, AMRFinderPlus, ISEScan and IntegronFinder. ",
+-  "Abundance was estimated with CoverM.\n")
++observed_producers <- sort(unique(vapply(records, function(record) record$producer, character(1))))
++versions <- Filter(function(record) identical(record$kind, "evidence") &&
++                     startsWith(if (is.null(record$output)) "" else record$output, "versions_"), records)
++methods <- paste0("# Methods\n\n",
++  "This report uses only declared outputs from the current execution.\n",
++  "Observed producers (a version/output record is not proof of a biological hit):\n\n",
++  paste0("- ", observed_producers, collapse = "\n"), "\n\n",
++  "Version evidence as reported by process outputs (some declarations are static, not runtime probes):\n\n",
++  if (length(versions)) paste(unique(vapply(versions, function(record) {
++    paste0("- ", record$producer, "/", record$output, ": ", jsonlite::toJSON(record$evidence, auto_unbox = TRUE))
++  }, character(1))), collapse = "\n") else "- No version evidence recorded.",
++  "\n\nRequested settings (configuration, not evidence that a tool ran):\n\n```json\n",
++  jsonlite::toJSON(settings, auto_unbox = TRUE, pretty = TRUE), "\n```\n\n",
++  "Complete runtime CLI arguments and database/model identities are not recorded for every producer. ",
++  "Missing evidence must not be filled from defaults or inferred from directory names.\n")
+ 
+ # Machine-readable data layer (consumed by assets/plasmid_report.Rmd and any
+ # downstream tooling; the nf-core reporting pattern keeps data collection
+@@ -222,13 +276,16 @@
+   )
+ }
+ report_data <- list(
+-  project_name = opts[["project-name"]],
+-  platform = opts$platform,
++  project_name = project_name,
++  platform = platform,
+   date = as.character(Sys.Date()),
+   samples = samples_df,
+   sections = data.frame(name = section_names,
+                         present = unname(sections[section_names]),
++                        status = unname(section_status),
+                         stringsAsFactors = FALSE),
++  input_manifest_md5 = unname(tools::md5sum(opts$manifest)),
++  samplesheet_md5 = unname(tools::md5sum(opts$samplesheet)),
+   methods = sub("^# Methods\n\n", "", methods)
+ )
+ # Absolute path: rmarkdown knits the template in its own directory context.
+@@ -247,8 +304,8 @@
+   rendered <- tryCatch({
+     suppressPackageStartupMessages(library(rmarkdown))
+     rmarkdown::render(opts$template,
+-                      params = list(project_name = opts[["project-name"]],
+-                                    platform = opts$platform,
++                      params = list(project_name = project_name,
++                                    platform = platform,
+                                     data_json = data_json),
+                       output_file = "report.html",
+                       output_dir = opts[["out-prefix"]],
+@@ -264,11 +321,16 @@
+ if (!rendered) {
+   html <- paste0(
+     "<!DOCTYPE html><html><head><meta charset='utf-8'>",
+-    sprintf("<title>AutoPlasm report — %s</title>", html_escape(opts[["project-name"]])),
++    sprintf("<title>AutoPlasm report — %s</title>", html_escape(project_name)),
+     "<style>body{font-family:sans-serif;max-width:60em;margin:2em auto}</style>",
+     sprintf("</head><body><pre>%s</pre></body></html>\n", html_escape(md)))
+   write_char(html, file.path(opts[["out-prefix"]], "report.html"))
+ }
+ 
+ write_char(methods, file.path(opts[["out-prefix"]], "methods.md"))
++for (name in c("report.md", "report.html", "methods.md", "report_data.json")) {
++  if (!file.rename(file.path(opts[["out-prefix"]], name), file.path(final_directory, name)))
++    die(paste0("Could not publish report product: ", name))
++}
++unlink(opts[["out-prefix"]], recursive = TRUE)
+ cat("report generated: report.md, report.html, methods.md\n")
+--- a/modules/cross_sample/report.nf
++++ b/modules/cross_sample/report.nf
+@@ -1,32 +1,72 @@
+-/*
+- * AutoPlasm Markdown + HTML report (pipeline step: report_markdown,
+- * implemented by bin/generate_report.R). The script scans the published
+- * results directory and writes a summary report plus a methods section.
+- */
++/* Current-run files are path inputs. publishDir is only an output sink. */
+ process REPORT {
+     tag 'report'
+     label 'process_single'
+-    conda "${projectDir}/envs/r_analysis.yml"
+-    // R 包集合以 envs/r_analysis.yml 为准；镜像需提供 data.table/vegan/Biostrings/Rsamtools
++    conda "${moduleDir}/../../envs/r_analysis.yml"
+     container 'autoplasm-r-analysis:latest'
+-
+     publishDir "${params.outdir}/report", mode: params.publish_dir_mode
+ 
+     input:
+-    val trigger
++    tuple val(records), path(report_files, stageAs: 'inputs????/*')
++    path samplesheet, stageAs: 'run_samplesheet.tsv'
++    path report_template, stageAs: 'report_template.Rmd'
++    path reporter, stageAs: 'generate_report.R'
++    val settings
+ 
+     output:
+-    path "report.md", emit: report_md
+-    path "report.html", emit: report_html
+-    path "methods.md", emit: methods_md
++    path 'report.md', emit: report_md
++    path 'report.html', emit: report_html
++    path 'methods.md', emit: methods_md
++    path 'report_data.json', emit: data_json
++    path 'report_inputs.json', emit: inputs_json
+ 
+     script:
++    def paths = report_files instanceof List ? report_files : [report_files]
++    def manifest = [schema_version: 1, settings: settings, records: records.collect { record ->
++        record.findAll { key, value -> key != 'file_indices' } +
++            [files: (record.file_indices ?: []).collect { index -> paths[index].toString() }]
++    }]
++    def json = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest))
+     """
+-    generate_report.R \\
+-        --outdir ${params.outdir} \\
+-        --platform ${params.platform} \\
+-        --project-name ${params.project_name} \\
+-        --template ${projectDir}/assets/plasmid_report.Rmd \\
+-        --out-prefix .
++cat > report_inputs.json <<'AUTOPLASM_REPORT_INPUTS_JSON'
++${json}
++AUTOPLASM_REPORT_INPUTS_JSON
++Rscript ${reporter} \\
++    --manifest report_inputs.json --samplesheet ${samplesheet} \\
++    --template ${report_template} --out-prefix .
+     """
+ }
++
++workflow REPORTING {
++    take:
++    ch_events
++    samplesheet
++    settings
++
++    main:
++    ch_inputs = ch_events.toList().map { entries ->
++        entries = entries.sort { a, b ->
++            groovy.json.JsonOutput.toJson(a[0]) <=> groovy.json.JsonOutput.toJson(b[0]) ?:
++                a[1].collect { it.toString() }.join('\n') <=> b[1].collect { it.toString() }.join('\n')
++        }
++        def files = []
++        def records = entries.collect { descriptor, sources ->
++            if (!(descriptor instanceof Map)) error 'Invalid untyped report event'
++            def indices = sources.collect { source ->
++                files.add(source)
++                files.size() - 1
++            }
++            descriptor + [file_indices: indices]
++        }
++        tuple(records, files)
++    }
++    REPORT(ch_inputs, samplesheet, file("${moduleDir}/../../assets/plasmid_report.Rmd"),
++           file("${moduleDir}/../../bin/generate_report.R"), settings)
++
++    emit:
++    data_json = REPORT.out.data_json
++    inputs_json = REPORT.out.inputs_json
++    report_md = REPORT.out.report_md
++    report_html = REPORT.out.report_html
++    methods_md = REPORT.out.methods_md
++}
+--- a/assets/plasmid_report.Rmd
++++ b/assets/plasmid_report.Rmd
+@@ -34,9 +34,13 @@
+ ```{r sections}
+ sections <- data$sections
+ knitr::kable(data.frame(Section = sections$name,
+-                        Present = ifelse(sections$present, "yes", "no")),
++                        Status = ifelse(sections$status == "provided_input", "Provided input",
++                                 ifelse(sections$present, "Outputs observed", "No output recorded"))),
+              row.names = FALSE)
+ ```
++
++No recorded output can mean a disabled branch or a branch gated by empty inputs;
++it is not a statement that an analysis found no biological hits.
+ 
+ ## Limitations
+ 
+--- a/README.md
++++ b/README.md
+@@ -101,7 +101,7 @@
+ | 11 | `11_diversity/` | 默认 contig 多样性（≥3 样本）与内部 contig 差异分析；可选 plasmid 表 DESeq2（默认关） |
+ | 12 | `12_network/` | FastSpar 相关 / 协方差矩阵（默认关，≥20 样本）；当前未接 bootstrap / p 值步骤 |
+ | — | `tables/` | 合并的 contig/plasmid 丰度长表 |
+-| — | `report/` | 汇总 Markdown/HTML 报告 + methods.md；目前仍扫描 publish 目录，完整性需复核 |
++| — | `report/` | 本轮显式输入生成 Markdown/HTML、methods.md、report_data.json 和 report_inputs.json；不扫描发布目录 |
+ 
+ 平台边界：当前 `hybrid` 长读路径按 ONT 处理（`map-ont`），不能无条件解释为
+ 任意短读 + HiFi 的混合模式。`pacbio_hifi` 使用 `map-hifi`，但当前未接入 MultiQC。
+@@ -319,10 +319,16 @@
+ - 多样性当前基于 contig coverage；Bray–Curtis 默认未做 TSS，脚本虽支持
+   `--beta-normalization tss`，流程模块尚未传入。全零样本对的 NaN 被转为 0
+   并警告，不能将此解读为生物学上相同。
+-- 报告为汇总版（样本质粒数、环化数、启用的分析板块），HTML 由
++- 报告为汇总版（本轮样本的质粒数、环状候选数、已观察到输出的分析板块），HTML 由
+   `assets/plasmid_report.Rmd` 模板渲染（rmarkdown+pandoc 缺失时回退为简版
+-  静态页）。
+-- hybrid 平台的跨样本 **质粒** 表使用短读丰度链；**contig** 覆盖度合并长短读
+-  BAM，因此默认多样性 / 内部差异并非仅基于短读。
++  静态页）。输入来自声明的文件及分支输出记录，忽略旧样本和空发布目录；缺少当前
++  样本的 FASTA/共识/结构、样本或特征不一致会失败。未观察到输出可能表示禁用或
++  空输入门控，不表示已执行且无生物学命中。方法只列出有记录的 producer，并将
++  版本声明与请求配置分开；完整 CLI、数据库/模型身份仍未全部记录，不能当作完整
++  可复现方法。清单中的文件路径可能指向工作目录，不是原始数据的自包含归档。
++  独立调用 `generate_report.R` 需提供 `--manifest` 和 `--samplesheet`；旧的
++  `--outdir` 扫描接口已移除，不能用共享发布目录替代本轮输入。
++- hybrid 平台的跨样本 **质粒** 和 **contig** 表均由统一参考上的短读重映射提供；
++  局部 MAG 等用途的覆盖度仍可合并长短读 BAM。
+ - PLASMe/PlasX/COPLA 等工具输出列格式存在版本差异，解析器做了宽松启发式
+   处理（按列名候选匹配）。
+--- a/tests/test_generate_report.py
++++ b/tests/test_generate_report.py
+@@ -16,6 +16,8 @@
+         self.published = self.root / "published"
+         self.output = self.root / "report"
+         self.output.mkdir()
++        self.records = []
++        self.sample_ids = []
+ 
+     def tearDown(self):
+         self.temp.cleanup()
+@@ -37,14 +39,25 @@
+             "".join(f"{sample_id}\tp{i}\t{'true' if i < circular else 'false'}\n"
+                     for i in range(contigs))
+         )
++        self.sample_ids.append(sample_id)
++        for kind, path in [('plasmid_fasta', consensus / f'{sample_id}.plasmid_contigs.fasta'),
++                           ('consensus', consensus / f'{sample_id}.plasmid_consensus.tsv'),
++                           ('structure', structure / f'{sample_id}.plasmid_structure.tsv')]:
++            self.records.append({'sample_id': sample_id, 'section': '04_plasmid_detection',
++                                 'producer': 'controlled_detection', 'kind': kind, 'files': [str(path)]})
++
++    def invoke(self):
++        manifest = self.root / 'inputs.json'
++        manifest.write_text(json.dumps({'schema_version': 1, 'records': self.records,
++                                      'settings': {'platform': 'assembly', 'project_name': 'identity_test'}}))
++        samplesheet = self.root / 'samples.tsv'
++        samplesheet.write_text('sample_id\n' + '\n'.join(self.sample_ids) + '\n')
++        return subprocess.run(['Rscript', str(SCRIPT), '--manifest', str(manifest),
++                               '--samplesheet', str(samplesheet), '--out-prefix', str(self.output)],
++                              text=True, capture_output=True)
+ 
+     def run_report(self):
+-        result = subprocess.run(
+-            ["Rscript", str(SCRIPT), "--outdir", str(self.published),
+-             "--platform", "assembly", "--project-name", "identity_test",
+-             "--out-prefix", str(self.output)],
+-            text=True, capture_output=True, check=False,
+-        )
++        result = self.invoke()
+         self.assertEqual(result.returncode, 0, result.stderr)
+         return json.loads((self.output / "report_data.json").read_text())
+ 
+@@ -85,6 +98,78 @@
+                                             "circular": 1, "detection_tools": "genomad"}])
+         self.assertIn("| S1 | 2 | 1 | genomad |", (self.output / "report.md").read_text())
+ 
++    def assert_rejected(self, diagnostic):
++        result = self.invoke()
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn(diagnostic, result.stderr)
++        self.assertFalse((self.output / 'report_data.json').exists())
++        self.assertFalse((self.output / 'report.md').exists())
++
++    def test_stale_samples_and_empty_published_directories_are_ignored(self):
++        self.sample('CURRENT', 1, 0, 'genomad')
++        records, ids = self.records.copy(), self.sample_ids.copy()
++        self.sample('OLD', 2, 2, 'platon')
++        (self.published / '08_annotation').mkdir()
++        self.records, self.sample_ids = records, ids
++        data = self.run_report()
++        self.assertEqual([r['sample_id'] for r in data['samples']], ['CURRENT'])
++        section = next(r for r in data['sections'] if r['name'] == '08_annotation')
++        self.assertEqual((section['present'], section['status']), (False, 'not_observed'))
++
++    def test_missing_current_sample_input_is_not_zero_detection(self):
++        self.sample('CURRENT', 0, 0, 'genomad')
++        self.records.pop()
++        self.assert_rejected('Missing report input')
++
++    def test_duplicate_role_is_rejected(self):
++        self.sample('CURRENT', 1, 0, 'genomad')
++        self.records.append(self.records[0].copy())
++        self.assert_rejected('Duplicate report input')
++
++    def test_unexpected_sample_is_rejected(self):
++        self.sample('CURRENT', 1, 0, 'genomad')
++        self.records[0]['sample_id'] = 'OLD'
++        self.assert_rejected('unexpected sample ID')
++
++    def test_wrong_table_sample_id_is_rejected(self):
++        self.sample('CURRENT', 1, 0, 'genomad')
++        path = Path(self.records[1]['files'][0])
++        path.write_text(path.read_text().replace('\tCURRENT\t', '\tOTHER\t'))
++        self.assert_rejected('sample identity mismatch')
++
++    def test_missing_or_broken_table_cannot_silently_produce_zero(self):
++        self.sample('CURRENT', 1, 0, 'genomad')
++        path = Path(self.records[1]['files'][0])
++        path.write_text('broken\n')
++        self.assert_rejected('missing required columns')
++
++    def test_disagreeing_feature_sets_are_rejected(self):
++        self.sample('CURRENT', 1, 0, 'genomad')
++        path = Path(self.records[2]['files'][0])
++        path.write_text(path.read_text().replace('p0', 'unrelated'))
++        self.assert_rejected('feature mismatch')
++
++    def test_duplicate_table_header_is_rejected(self):
++        self.sample('CURRENT', 1, 0, 'genomad')
++        path = Path(self.records[1]['files'][0])
++        path.write_text(path.read_text().replace('supporting_tools', 'contig_id'))
++        self.assert_rejected('duplicate TSV columns')
++
++    def test_observed_optional_output_drives_section_and_methods(self):
++        self.sample('CURRENT', 0, 0, 'genomad')
++        self.records.append({'section': '08_annotation', 'producer': 'LATE_TOOL', 'kind': 'evidence',
++                             'output': 'versions_tool', 'evidence': ['LATE_TOOL', 'tool', '1.2.3'], 'files': []})
++        data = self.run_report()
++        self.assertTrue(next(r for r in data['sections'] if r['name'] == '08_annotation')['present'])
++        self.assertIn('LATE_TOOL/versions_tool', data['methods'])
++        self.assertNotIn('Reads were quality-filtered', data['methods'])
++        self.assertNotIn('Typing used PlasmidFinder', data['methods'])
++
++    def test_literal_numeric_and_na_sample_ids_preserve_identity(self):
++        for sid in ['001', '1', 'NA']:
++            self.sample(sid, 1, 0, 'genomad')
++        self.assertEqual([r['sample_id'] for r in self.run_report()['samples']], ['001', '1', 'NA'])
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+--- a/tests/r_mock/run_r_mock_tests.sh
++++ b/tests/r_mock/run_r_mock_tests.sh
+@@ -200,8 +200,19 @@
+ cp plasmids.fasta results/04_plasmid_detection/consensus/S1.plasmid_contigs.fasta
+ cp consensus.tsv results/04_plasmid_detection/consensus/S1.plasmid_consensus.tsv
+ cp plasmid_structure.tsv results/04_plasmid_detection/structure/S1.plasmid_structure.tsv
+-Rscript "$BIN/generate_report.R" --outdir results --platform illumina \
+-  --project-name mock_run --template "$ROOT/assets/plasmid_report.Rmd" --out-prefix . 2>report.err
++# Production structure consumes the selected plasmids, not the full assembly.
++Rscript "$BIN/plasmid_structure.R" --contigs plasmids.fasta --sample-id S1 --out report_structure.tsv 2>report_structure.err
++Rscript - <<'RS'
++records <- lapply(c("plasmid_fasta", "consensus", "structure"), function(kind) {
++  path <- switch(kind, plasmid_fasta="plasmids.fasta", consensus="consensus.tsv", structure="report_structure.tsv")
++  list(kind=kind, producer="R_SMOKE", section="04_plasmid_detection", sample_id="S1", files=list(normalizePath(path)))
++})
++records <- c(records, list(list(kind="evidence", section="11_diversity", producer="DIVERSITY", output="metrics", evidence="controlled smoke output", files=list())))
++writeLines(jsonlite::toJSON(list(schema_version=1L, settings=list(platform="illumina", project_name="mock_run"), records=records), auto_unbox=TRUE), "report_inputs.json")
++writeLines(c("sample_id", "S1"), "report_samples.tsv")
++RS
++Rscript "$BIN/generate_report.R" --manifest report_inputs.json --samplesheet report_samples.tsv \
++  --template "$ROOT/assets/plasmid_report.Rmd" --out-prefix . 2>report.err
+ check "generate_report exits 0" test $? -eq 0
+ check_grep "report title" report.md "# AutoPlasm report — mock_run"
+ check_grep "detection table row" report.md "| S1 | 1 | 1 |"
+@@ -211,8 +222,8 @@
+ check_grep "methods written" methods.md "# Methods"
+ check_grep "data layer json" report_data.json '"project_name": "mock_run"'
+ # fallback path without --template
+-mkdir -p fallback && Rscript "$BIN/generate_report.R" --outdir results --platform illumina \
+-  --project-name mock_run --out-prefix fallback 2>/dev/null
++mkdir -p fallback && Rscript "$BIN/generate_report.R" --manifest report_inputs.json \
++  --samplesheet report_samples.tsv --out-prefix fallback 2>/dev/null
+ check "generate_report fallback exits 0" test $? -eq 0
+ check_grep "fallback html" fallback/report.html "<pre>"
+ 
+--- a/tests/nextflow/structure_topology.nf
++++ b/tests/nextflow/structure_topology.nf
+@@ -1,14 +1,19 @@
+ nextflow.enable.dsl=2
+ 
+ include { PLASMID_STRUCTURE } from '../../modules/detection/structure'
+-include { REPORT } from '../../modules/cross_sample/report'
++include { REPORTING } from '../../modules/cross_sample/report'
+ 
+ workflow {
+-    // The runner waits for structure completion and explicitly prepares a fresh
+-    // published directory before the separate REPORT invocation. This does not
+-    // certify production publishDir synchronization (TA-015 remains open).
+     if (params.report_only) {
+-        REPORT(Channel.value(true))
++        ids = ['SCP1', 'pUTI89', 'metadata_circle', 'mixed', 'empty']
++        events = Channel.fromList(ids).flatMap { sid ->
++            [['plasmid_fasta', "${params.fixture_dir}/${sid}.fasta"],
++             ['consensus', "${params.outdir}/04_plasmid_detection/consensus/${sid}.plasmid_consensus.tsv"],
++             ['structure', "${params.outdir}/04_plasmid_detection/structure/${sid}.plasmid_structure.tsv"]].collect { kind, path ->
++                tuple([section:'04_plasmid_detection', producer:'controlled_completed_inputs', kind:kind, sample_id:sid], [file(path, checkIfExists:true)])
++            }
++        }
++        REPORTING(events, file("${params.fixture_dir}/samples.tsv", checkIfExists:true), [platform:'assembly', project_name:params.project_name])
+     } else {
+         inputs = Channel.fromList(['SCP1', 'pUTI89', 'metadata_circle', 'mixed', 'empty'])
+             .map { sid -> tuple([id: sid], file("${params.fixture_dir}/${sid}.fasta", checkIfExists: true)) }
+--- a/tests/run_structure_topology.py
++++ b/tests/run_structure_topology.py
+@@ -61,6 +61,7 @@
+     rc = head.translate(str.maketrans('ACGT', 'TGCA'))[::-1]
+     (fixture / 'mixed.fasta').write_text('>itr\n' + head + body + rc + '\n>dtr\n' + head + body + head + '\n')
+     (fixture / 'empty.fasta').write_text('')
++    (fixture / 'samples.tsv').write_text('sample_id\nSCP1\npUTI89\nmetadata_circle\nmixed\nempty\n')
+     sources = ['bin/plasmid_structure.R', 'bin/generate_report.R', 'assets/plasmid_report.Rmd',
+                'modules/detection/structure.nf', 'modules/cross_sample/report.nf',
+                'tests/nextflow/structure_topology.nf', 'tests/run_structure_topology.py',
+--- a/tests/nextflow/shared_quantification.nf
++++ b/tests/nextflow/shared_quantification.nf
+@@ -1,6 +1,7 @@
+ nextflow.enable.dsl=2
+ include { SHARED_QUANTIFICATION } from '../../subworkflows/shared_quantification'
+ include { CROSS_SAMPLE } from '../../subworkflows/cross_sample'
++include { reportSamples } from '../../lib/report_events'
+ include { HOST_LINKING } from '../../subworkflows/host_linking'
+ 
+ workflow {
+@@ -31,7 +32,14 @@
+     HOST_LINKING(Channel.empty(), Channel.empty(), Channel.empty(),
+                  SHARED_QUANTIFICATION.out.plasmids, profiles, Channel.empty(), Channel.empty(), false)
+     if (params.run_cross_sample) {
++        report_events = SHARED_QUANTIFICATION.out.report_events.mix(HOST_LINKING.out.report_events)
++        fasta_rows = Channel.fromList(['A', 'B', 'C', 'D']).map { sid -> tuple([id:sid], file("${params.fixture_dir}/${sid}/plasmids.fasta", checkIfExists:true)) }
++        consensus_rows = Channel.fromList(['A', 'B', 'C', 'D']).map { sid -> tuple([id:sid], file("${params.fixture_dir}/${sid}/consensus.tsv", checkIfExists:true)) }
++        structure_rows = Channel.fromList(['A', 'B', 'C', 'D']).map { sid -> tuple([id:sid], file("${params.fixture_dir}/${sid}/structure.tsv", checkIfExists:true)) }
++        report_events = report_events.mix(reportSamples(fasta_rows, 'plasmid_fasta', 'controlled_detection'),
++                                         reportSamples(consensus_rows, 'consensus', 'controlled_detection'),
++                                         reportSamples(structure_rows, 'structure', 'controlled_detection'))
+         CROSS_SAMPLE(SHARED_QUANTIFICATION.out.contigs, SHARED_QUANTIFICATION.out.plasmids,
+-                     Channel.empty(), SHARED_QUANTIFICATION.out.states, 4, 2)
++                     Channel.empty(), report_events, 4, 2)
+     }
+ }
+--- a/tests/run_shared_quantification.py
++++ b/tests/run_shared_quantification.py
+@@ -54,6 +54,9 @@
+         fasta = '>' + cid + '\n' + source + '\n' if source else ''
+         (folder / 'assembly.fasta').write_text(fasta)
+         (folder / 'plasmids.fasta').write_text(fasta if sid in ['A', 'B'] else '')
++        # Controlled detection products for the report interface only.
++        (folder / 'consensus.tsv').write_text('sample_id\tcontig_id\tplasmid_call\tsupporting_tools\n' + (sid + '\t' + cid + '\tplasmid\tcontrolled_input\n' if sid in ['A', 'B'] else ''))
++        (folder / 'structure.tsv').write_text('sample_id\tplasmid_id\tis_circular\n' + (sid + '\t' + cid + '\tfalse\n' if sid in ['A', 'B'] else ''))
+         (folder / (sid + '.metaphlan.tsv')).write_text('clade_name\trelative_abundance\ns__controlled_host\t' + ('10' if sid in ['A', 'C'] else '0') + '\n')
+         short = [[], []]
+         long_reads = []
+--- a/tests/mock_e2e/run.py
++++ b/tests/mock_e2e/run.py
+@@ -25,7 +25,49 @@
+         return list(csv.DictReader(fh, delimiter='\t'))
+ 
+ 
++def validate_report(base, platform, empty):
++    out = base / 'out/report'
++    assert all((out / name).is_file() for name in ['report.md', 'report.html', 'methods.md', 'report_data.json', 'report_inputs.json'])
++    data = json.loads((out / 'report_data.json').read_text())
++    manifest = json.loads((out / 'report_inputs.json').read_text())
++    assert {r['sample_id'] for r in data['samples']} == set(SAMPLES)
++    assert all(r['consensus_plasmids'] == (0 if empty else 1) for r in data['samples'])
++    producers = {r['producer'] for r in manifest['records']}
++    executed = {r['name'].split(' (')[0].split(':')[-1] for r in rows(base / 'trace.tsv')}
++    assert executed - {'REPORT'} <= producers, f'Undocumented process outputs: {executed - producers - {"REPORT"}}'
++    assert not next(r for r in data['sections'] if r['name'] == '12_network')['present']
++    if platform == 'assembly':
++        assert not producers.intersection({'FASTP', 'FILTLONG', 'METAPHLAN', 'COVERM_SHARED'})
++        assert not next(r for r in data['sections'] if r['name'] == '01_qc')['present']
++    assert 'OLD_SAMPLE' not in json.dumps(data)
++    assert 'Reads were quality-filtered' not in data['methods']
++    sys.path.insert(0, str(ROOT / 'tests'))
++    from run_report_inputs import Cells
++    parser = Cells(); parser.feed((out / 'report.html').read_text())
++    for row in data['samples']:
++        assert [row['sample_id'], str(row['consensus_plasmids']), str(row['circular']), row['detection_tools']] in parser.rows
++
++
++def validate_assembly(base, empty):
++    tasks = rows(base / 'trace.tsv')
++    assert all(t['status'] == 'COMPLETED' for t in tasks)
++    counts = {}
++    for task in tasks:
++        name = task['name'].split(' (')[0].split(':')[-1]
++        counts[name] = counts.get(name, 0) + 1
++    expected = {name: 6 for name in ['QUAST', 'GENOMAD', 'PLASMID_CONSENSUS', 'PLASMID_STRUCTURE']}
++    if not empty:
++        expected.update({name: 6 for name in ['PLASMIDFINDER', 'MOB_TYPER', 'BAKTA', 'AMRFINDERPLUS', 'ISESCAN', 'INTEGRONFINDER']})
++        expected.update(PLASMID_CATALOG_PREPARE=1, MMSEQS2=1)
++    expected['REPORT'] = 1
++    assert counts == expected, (counts, expected)
++    validate_report(base, 'assembly', empty)
++    return {'status': 'PASS', 'platform': 'assembly', 'empty_plasmids': empty,
++            'tasks': len(tasks), 'mode': 'controlled external CLI observers, actual assembly workflow/R/report'}
++
++
+ def validate(base, empty, platform='illumina', assembler='opera_ms', long_input='fastq'):
++    if platform == 'assembly': return validate_assembly(base, empty)
+     out = base / 'out'
+     trace = rows(base / 'trace.tsv')
+     assert trace and all(row['status'] == 'COMPLETED' for row in trace), 'Failed/missing tasks'
+@@ -70,6 +112,7 @@
+             expected.update(MINIMAP2_ALIGN_ABUNDANCE=6, COVERM_ABUNDANCE_LONG=6)
+         expected.update(PLASMID_CATALOG_PREPARE=1, MMSEQS2=1)
+     assert counts == expected, f'Process coverage differs: actual={counts}, expected={expected}'
++    validate_report(base, platform, empty)
+     contigs = rows(out / 'tables/contig_abundance.tsv')
+     plasmids = rows(out / 'tables/plasmid_abundance.tsv')
+     assert len(contigs) == 12 and {r['sample_id'] for r in contigs} == set(SAMPLES)
+@@ -157,7 +200,7 @@
+     parser.add_argument('--outdir', required=True, help='New run directory; existing directories are rejected')
+     parser.add_argument('--nextflow', default='nextflow')
+     parser.add_argument('--empty-plasmids', action='store_true')
+-    parser.add_argument('--platform', choices=['illumina', 'ont', 'pacbio_hifi', 'hybrid'], default='illumina')
++    parser.add_argument('--platform', choices=['illumina', 'ont', 'pacbio_hifi', 'hybrid', 'assembly'], default='illumina')
+     parser.add_argument('--hybrid-assembler', choices=['opera_ms', 'hybridspades'], default='opera_ms')
+     parser.add_argument('--long-input', choices=['fastq', 'bam', 'pod5', 'mixed'], default='fastq')
+     args = parser.parse_args()
+@@ -168,6 +211,11 @@
+     base = Path(args.outdir).resolve()
+     base.mkdir(parents=True, exist_ok=False)
+     fixture = generate(base / 'fixture')
++    # Existing publication is deliberately untrusted input for the report.
++    stale = base / 'out/04_plasmid_detection/consensus'
++    stale.mkdir(parents=True)
++    (stale / 'OLD_SAMPLE.plasmid_contigs.fasta').write_text('>old\nACGT\n')
++    (base / 'out/12_network').mkdir()
+     configure_long_input(fixture, args.platform, args.long_input)
+     bindir = base / 'mock-bin'
+     bindir.mkdir()
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -394,3 +394,13 @@
+ Python目录/测量15方法（同时使用3.12验证）、原始计数4方法、既有identity7/numeric6/merge5方法及R smoke54断言覆盖接口；不把方法数当作独立生物学案例数。`mock_e2e/run.py` 同步新共享任务数、DNA对应特征ID及独立指定的mock计数，hybrid统计断言短读数值。其计数依然是明确observer按文件名给出的控制值，TT-001旧oracle局限保留；原生独立映射数据补证不等于该mock已变成真实模型。
+ 
+ DESeq2固定部署1.42的完整正例/零计数环境尚未执行（本机模型1.52），TA-011不能据此称部署正例通过；图/reads拓扑、FastSpar模型、完整真实平台、镜像/nf-test及报告发布屏障TA-015不由本批认证。全零网络过滤后的eligibility TA-038、单特征alpha TA-014及剩余metadata边界继续未决。
++
++### 本轮报告输入、可选完成链与缓存（TA-015/017）
++
++`python3 tests/run_report_inputs.py --work-dir <fresh-directory>` 需要Nextflow26.10、R/jsonlite/rmarkdown及pandoc；报告R脚本和模板作为path输入，测试实际Rmd HTML与JSON/Markdown数值。5场景包含：延迟可选writer且禁止发布仍被本轮记录；无可选任务与旧目录/旧样本隔离；resume不变缓存；同名输入改变重算；可选失败阻止报告。8个trace条目为4完成/3缓存/1预期失败，不混算成8个全新阳性任务。writer/检测数据是明确控制的接口fixture，不是分类或注释效果验证。
++
++`test_generate_report.py` 现13方法（保留原3方法），新增严格显式manifest/samplesheet及错配拒绝，不以默认0掩盖损坏/缺文件。CLI不再支持--outdir发现；R smoke相应传清单，并把结构fixture改为生产实际的质粒FASTA子集。五份产品report.md/report.html/methods.md/report_data.json/report_inputs.json均需发布；本轮文件同名采用编号暂存防止碰撞。
++
++mock_e2e新增assembly平台并核对报告JSON/HTML/Markdown、实际trace producer与板块状态；注入旧样本和空network目录，不能把目录存在当完成证据。5平台正例+空质粒共788连接任务仍是明确外部CLI替身+实际R/Python，不升级真实模型认证；TT-001旧的按文件名给mock覆盖度/计数局限继续开放。实际共享定量55任务、结构6任务和MAG32任务回归另记。
++
++方法文字只能说明已记录的输出；process报告版本可能是静态声明，不足以证明所有实际运行版本。完整CLI/数据库/模型身份仍是TA-016开放项，不能把默认参数、启用工具列表或文件夹当作完整方法学证据。历史结构/共享运行中TA-015未验证的限制只对应各自scope，本批报告专用suite补上本轮完成链及发布/缓存证据。
+--- a/subworkflows/cross_sample.nf
++++ b/subworkflows/cross_sample.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples; reportSettings } from '../lib/report_events'
+ /*
+  * Cross-sample subworkflow: merged abundance tables (tables/), diversity and
+  * differential abundance (11), FastSpar co-occurrence network (12), and the
+@@ -8,7 +9,7 @@
+ include { DESEQ2 } from '../modules/cross_sample/deseq2'
+ include { NETWORK_PREPARE } from '../modules/cross_sample/network_prepare'
+ include { FASTSPAR } from '../modules/cross_sample/fastspar'
+-include { REPORT } from '../modules/cross_sample/report'
++include { REPORTING } from '../modules/cross_sample/report'
+ 
+ workflow CROSS_SAMPLE {
+     take:
+@@ -20,6 +21,7 @@
+     n_groups            // val: number of distinct groups
+ 
+     main:
++    ch_report_events = Channel.empty()
+     ch_metadata = Channel.value(file(params.samplesheet, checkIfExists: true))
+     ch_stats_done = Channel.empty()
+ 
+@@ -31,14 +33,17 @@
+ 
+         if (params.run_diversity && n_samples >= params.min_diversity_samples) {
+             DIVERSITY(ch_contig_merged, ch_metadata)
++            ch_report_events = ch_report_events.mix(reportEvidence([channels: DIVERSITY.out], '11_diversity', 'DIVERSITY'))
+             ch_stats_done = ch_stats_done.mix(DIVERSITY.out.metrics, DIVERSITY.out.beta)
+         }
+         if (params.run_differential_internal && n_groups >= 2) {
+             DIFFERENTIAL_ABUNDANCE(ch_contig_merged, ch_metadata)
++            ch_report_events = ch_report_events.mix(reportEvidence([channels: DIFFERENTIAL_ABUNDANCE.out], '11_diversity', 'DIFFERENTIAL_ABUNDANCE'))
+             ch_stats_done = ch_stats_done.mix(DIFFERENTIAL_ABUNDANCE.out.results)
+         }
+         if (params.run_differential_deseq2 && n_groups >= 2) {
+             DESEQ2(ch_plasmid_merged, ch_metadata)
++            ch_report_events = ch_report_events.mix(reportEvidence([channels: DESEQ2.out], '11_diversity', 'DESEQ2'))
+             ch_stats_done = ch_stats_done.mix(DESEQ2.out.results)
+         }
+         if (params.run_network && n_samples >= params.network_min_samples) {
+@@ -46,13 +51,14 @@
+             // are a legitimate outcome, so gate the branch on real rows.
+             ch_plasmid_nonempty = ch_plasmid_merged.filter { f -> f.text.readLines().size() > 1 }
+             NETWORK_PREPARE(ch_plasmid_nonempty)
++            ch_report_events = ch_report_events.mix(reportEvidence([channels: NETWORK_PREPARE.out], '12_network', 'NETWORK_PREPARE'))
+             FASTSPAR(NETWORK_PREPARE.out.network_input)
++            ch_report_events = ch_report_events.mix(reportEvidence([channels: FASTSPAR.out], '12_network', 'FASTSPAR'))
+             ch_stats_done = ch_stats_done.mix(FASTSPAR.out.correlation, FASTSPAR.out.covariance)
+         }
+     }
+ 
+-    // Wait for platform outputs and the enabled cross-sample analyses.
+-    // publishDir is asynchronous; completion alone is not a publication barrier.
+-    ch_report_trigger = ch_done.mix(ch_plasmids.map { meta, f -> f }, ch_stats_done).collect()
+-    REPORT(ch_report_trigger)
++    // Every enabled branch contributes its declared outputs, including late
++    // optional tasks. Only explicit detection files are staged for summaries.
++    REPORTING(ch_done.mix(ch_report_events), ch_metadata, reportSettings(params))
+ }
+--- a/subworkflows/assembly.nf
++++ b/subworkflows/assembly.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ /*
+  * Assembly platform subworkflow (platform: assembly): the
+  * user-provided assembly FASTA passes through directly (pipeline step
+@@ -15,28 +16,38 @@
+     ch_samples // tuple(meta, assembly fasta)
+ 
+     main:
++    ch_report_events = Channel.empty()
+     ch_assembly = ch_samples
+ 
+     QUAST(ch_assembly.map { meta, fasta -> tuple(meta, [fasta]) },
+         Channel.value([[:], []]), Channel.value([[:], []]))
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: QUAST.out], '03_assembly_qc', 'QUAST'))
+ 
+     PLASMID_DETECTION(ch_assembly)
++    ch_report_events = ch_report_events.mix(PLASMID_DETECTION.out.report_events)
+     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
+ 
+     PLASMID_DOWNSTREAM(
+         ch_plasmids, Channel.empty(), Channel.empty(),
+         Channel.empty(), Channel.empty(), Channel.empty()
+     )
++    ch_report_events = ch_report_events.mix(PLASMID_DOWNSTREAM.out.report_events)
+ 
+     HOST_PREDICTION(Channel.empty(), Channel.empty(), ch_plasmids, false, true)
++    ch_report_events = ch_report_events.mix(HOST_PREDICTION.out.report_events)
+ 
+     COMPARATIVE(ch_plasmids, PLASMID_DOWNSTREAM.out.bakta_dir)
++    ch_report_events = ch_report_events.mix(COMPARATIVE.out.report_events)
++
++    ch_report_events = ch_report_events.mix(ch_assembly.map { meta, source ->
++        tuple([section: '02_assembly', producer: 'assembly_provided', kind: 'provided_input',
++               sample_id: meta.id.toString(), evidence: source.toString()], [])
++    })
+ 
+     emit:
++    report_events = ch_report_events
+     plasmids       = ch_plasmids
+     contig_tables  = Channel.empty()
+     plasmid_tables = Channel.empty()
+-    done = PLASMID_DETECTION.out.consensus.map { meta, f -> f }
+-        .mix(PLASMID_DETECTION.out.structure.map { meta, f -> f })
+-        .mix(QUAST.out.tsv.map { meta, f -> f })
++    done = ch_report_events
+ }
+--- a/subworkflows/comparative.nf
++++ b/subworkflows/comparative.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+ /*
+@@ -24,16 +25,19 @@
+     ch_bakta_dir // tuple(meta, bakta out dir); may be empty
+ 
+     main:
++    ch_report_events = Channel.empty()
+     if (selectedTools(params.comparative_tools).contains('mmseqs2')) {
+         ch_catalog_files = ch_plasmids
+             .map { meta, fasta -> fasta }
+             .collect()
+             .filter { files -> !files.isEmpty() }
+         PLASMID_CATALOG_PREPARE(ch_catalog_files)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMID_CATALOG_PREPARE.out], '09_comparative_genomics', 'PLASMID_CATALOG_PREPARE'))
+         // The nf-core module takes a meta-tagged sequence channel; the meta id
+         // doubles as the easy-cluster output prefix, so published file names
+         // stay plasmid_catalog_cluster.tsv / plasmid_catalog_rep_seq.fasta.
+         MMSEQS2(PLASMID_CATALOG_PREPARE.out.combined.map { fasta -> tuple([id: 'plasmid_catalog'], fasta) })
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MMSEQS2.out], '09_comparative_genomics', 'MMSEQS2'))
+     }
+     if (selectedTools(params.comparative_optional_tools).contains('blast')) {
+         BLASTN(
+@@ -43,11 +47,16 @@
+             [],     // taxids
+             false   // negative_tax
+         )
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: BLASTN.out], '09_comparative_genomics', 'BLASTN'))
+     }
+     if (selectedTools(params.comparative_optional_tools).contains('mummer')) {
+         MUMMER(ch_plasmids, Channel.value(file(params.reference_plasmids, checkIfExists: true)))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MUMMER.out], '09_comparative_genomics', 'MUMMER'))
+     }
+     if (selectedTools(params.comparative_optional_tools).contains('clinker')) {
+         CLINKER(ch_bakta_dir)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: CLINKER.out], '09_comparative_genomics', 'CLINKER'))
+     }
++    emit:
++    report_events = ch_report_events
+ }
+--- a/subworkflows/contig_coverage.nf
++++ b/subworkflows/contig_coverage.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ /*
+  * Contig coverage subworkflow (contig_coverage): map reads to
+  * the assembly and estimate coverage with CoverM. Short-read samples use
+@@ -30,10 +31,12 @@
+     long_preset    // val: minimap2 preset ('map-ont' or 'map-hifi')
+ 
+     main:
++    ch_report_events = Channel.empty()
+     // ---- short-read chain: bowtie2 index build + align (sorted BAM) ----
+     ch_short_in = ch_assembly.join(ch_short_reads)
+         .map { meta, fasta, r1, r2 -> tuple(meta + [suffix: '.short'], fasta, r1, r2) }
+     BOWTIE2_BUILD_COVERAGE(ch_short_in.map { meta, fasta, _r1, _r2 -> tuple(meta, fasta) })
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_BUILD_COVERAGE.out], '02_assembly', 'BOWTIE2_BUILD_COVERAGE'))
+     // The asynchronous index must join its reads/reference before fan-out.
+     ch_short_matched = ch_short_in.join(BOWTIE2_BUILD_COVERAGE.out.index,
+         failOnDuplicate: true, failOnMismatch: true)
+@@ -44,6 +47,7 @@
+         false, // save_unaligned
+         true   // sort_bam
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_ALIGN_COVERAGE.out], '02_assembly', 'BOWTIE2_ALIGN_COVERAGE'))
+     ch_short_bam = BOWTIE2_ALIGN_COVERAGE.out.bam
+         .map { meta, bam -> tuple(stripChainMeta(meta), bam) }
+ 
+@@ -58,6 +62,7 @@
+         false, // cigar_paf_format
+         false  // cigar_bam
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_COVERAGE.out], '02_assembly', 'MINIMAP2_ALIGN_COVERAGE'))
+     ch_long_bam = MINIMAP2_ALIGN_COVERAGE.out.bam
+         .map { meta, bam -> tuple(stripChainMeta(meta), bam) }
+ 
+@@ -68,10 +73,13 @@
+             tuple(meta, bams, []) // no BAM indexes to merge
+         }
+     ch_bam = SAMTOOLS_MERGE(ch_per_sample, [[], [], [], []], '').bam
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_MERGE.out], '02_assembly', 'SAMTOOLS_MERGE'))
+ 
+     ch_table = COVERM_CONTIG(ch_bam, [[], []], true, false, false).coverage
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: COVERM_CONTIG.out], '02_assembly', 'COVERM_CONTIG'))
+ 
+     emit:
++    report_events = ch_report_events
+     bam      = ch_bam
+     long_bam = ch_long_bam
+     table    = ch_table
+--- a/subworkflows/host_linking.nf
++++ b/subworkflows/host_linking.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+ /*
+@@ -24,6 +25,7 @@
+     has_long_reads       // val boolean
+ 
+     main:
++    ch_report_events = Channel.empty()
+     ch_links = Channel.empty()
+ 
+     if (params.host_plasmid_linking) {
+@@ -38,6 +40,7 @@
+                 tuple(entries.collect { entry -> entry[0].id }, entries.collect { entry -> entry[1] })
+             }
+             LINK_COABUNDANCE(ch_plasmid_abundance, ch_profile_input)
++            ch_report_events = ch_report_events.mix(reportEvidence([channels: LINK_COABUNDANCE.out], '07_host_prediction', 'LINK_COABUNDANCE'))
+             ch_links = ch_links.mix(LINK_COABUNDANCE.out.links)
+         }
+         // sequence similarity: needs MAG bins
+@@ -51,20 +54,24 @@
+                 .filter { meta, payload, tax -> payload != null }
+                 .map { meta, payload, tax -> tuple(meta, payload[0], payload[1], tax ?: []) }
+             LINK_SEQUENCE(ch_seq_in)
++            ch_report_events = ch_report_events.mix(reportEvidence([channels: LINK_SEQUENCE.out], '07_host_prediction', 'LINK_SEQUENCE'))
+             ch_links = ch_links.mix(LINK_SEQUENCE.out.links.map { meta, f -> f })
+         }
+         // long-read bridge evidence
+         if (selectedTools(params.host_linking_methods).contains('long_read') && has_long_reads) {
+             LINK_LONGREAD(ch_plasmids.join(ch_assembly).join(ch_longread_bam))
++            ch_report_events = ch_report_events.mix(reportEvidence([channels: LINK_LONGREAD.out], '07_host_prediction', 'LINK_LONGREAD'))
+             ch_links = ch_links.mix(LINK_LONGREAD.out.links.map { meta, f -> f })
+         }
+         // HOTSPOT Transformer host prediction (optional; needs --hotspot_home/--hotspot_db/--hotspot_models)
+         if (selectedTools(params.host_linking_optional_methods).contains('hotspot')) {
+             LINK_HOTSPOT(ch_plasmids)
++            ch_report_events = ch_report_events.mix(reportEvidence([channels: LINK_HOTSPOT.out], '07_host_prediction', 'LINK_HOTSPOT'))
+             ch_links = ch_links.mix(LINK_HOTSPOT.out.links.map { meta, f -> f })
+         }
+     }
+ 
+     emit:
++    report_events = ch_report_events
+     links = ch_links
+ }
+--- a/subworkflows/host_prediction.nf
++++ b/subworkflows/host_prediction.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+ /*
+@@ -39,6 +40,7 @@
+     is_assembly     // val boolean
+ 
+     main:
++    ch_report_events = Channel.empty()
+     ch_host_profile = Channel.empty()
+     if (selectedTools(params.host_prediction_tools).contains('metaphlan') && !is_assembly) {
+         HOST_PROFILE_READS(ch_short_reads, ch_long_reads)
+@@ -47,6 +49,7 @@
+             Channel.value(file(params.metaphlan_db, checkIfExists: true)),
+             false   // save_samfile
+         )
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: METAPHLAN.out], '07_host_prediction', 'METAPHLAN'))
+         ch_host_profile = METAPHLAN.out.profile
+     }
+     if (selectedTools(params.host_prediction_tools).contains('kraken2') && is_illumina) {
+@@ -56,11 +59,14 @@
+             false,  // save_output_fastqs
+             false   // save_reads_assignment
+         )
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: KRAKEN2.out], '07_host_prediction', 'KRAKEN2'))
+     }
+     if (selectedTools(params.host_prediction_tools).contains('plasmidhostfinder') && is_assembly) {
+         PLASMIDHOSTFINDER(ch_plasmids, Channel.value(file(params.plasmidhostfinder_db, checkIfExists: true)))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMIDHOSTFINDER.out], '07_host_prediction', 'PLASMIDHOSTFINDER'))
+     }
+ 
+     emit:
++    report_events = ch_report_events
+     host_profile = ch_host_profile  // tuple(meta, metaphlan profile txt); may be empty
+ }
+--- a/subworkflows/hybrid.nf
++++ b/subworkflows/hybrid.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ /*
+  * Hybrid platform subworkflow (platform: hybrid): short reads
+  * go through fastp (+ optional bowtie2 host removal), long reads through
+@@ -40,13 +41,17 @@
+     ch_samples // tuple(meta, read1, read2, pod5, bam, long_reads)
+ 
+     main:
++    ch_report_events = Channel.empty()
+     // ---------------- short-read QC (01) ----------------
+     ch_short = ch_samples.map { meta, r1, r2, pod5, bam, lr -> tuple(meta, r1, r2) }
+     FASTP(ch_short.map { meta, r1, r2 -> tuple(meta, [r1, r2], []) }, false, false, false)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: FASTP.out], '01_qc', 'FASTP'))
+     ch_clean = FASTP.out.reads.map { meta, reads -> tuple(meta, reads[0], reads[1]) }
+     if (params.run_fastqc) {
+         FASTQC(ch_short.map { meta, r1, r2 -> tuple(meta + [stage: 'raw'], [r1, r2]) })
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: FASTQC.out], '01_qc', 'FASTQC'))
+         FASTQC_CLEAN(ch_clean.map { meta, r1, r2 -> tuple(meta + [stage: 'clean'], [r1, r2]) })
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: FASTQC_CLEAN.out], '01_qc', 'FASTQC_CLEAN'))
+     }
+     ch_br = ch_clean.branch { meta, _r1, _r2 ->
+         host: meta.host_reference != null
+@@ -54,6 +59,7 @@
+     }
+     ch_host_ref = ch_br.host.map { meta, _r1, _r2 -> tuple(meta, file(meta.host_reference)) }
+     BOWTIE2_BUILD_HOST(ch_host_ref)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_BUILD_HOST.out], '01_qc', 'BOWTIE2_BUILD_HOST'))
+     ch_host_matched = ch_br.host.join(ch_host_ref,
+         failOnDuplicate: true, failOnMismatch: true)
+         .join(BOWTIE2_BUILD_HOST.out.index, failOnDuplicate: true, failOnMismatch: true)
+@@ -64,6 +70,7 @@
+         true,  // save_unaligned — the unmapped pairs are the host-free reads
+         false  // sort_bam
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_ALIGN_HOST.out], '01_qc', 'BOWTIE2_ALIGN_HOST'))
+     ch_final_short = ch_br.nohost.mix(
+         BOWTIE2_ALIGN_HOST.out.fastq.map { meta, fqs ->
+             def pair = fqs in List ? fqs : [fqs]
+@@ -79,14 +86,18 @@
+         fastq: true
+     }
+     DORADO_BASECALL(ch_lb.pod5.map { meta, pod5, bam, lr -> tuple(meta, pod5) })
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: DORADO_BASECALL.out], '00_basecalling', 'DORADO_BASECALL'))
+     // Long-read BAMs carry unpaired records: samtools fastq buckets them into
+     // the -0 "other" output (nf-core module naming: <prefix>_other.fastq.gz).
+     SAMTOOLS_FASTQ(ch_lb.bam.map { meta, pod5, bam, lr -> tuple(meta, bam) }, false)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_FASTQ.out], '01_qc', 'SAMTOOLS_FASTQ'))
+     ch_long_raw = ch_lb.fastq.map { meta, pod5, bam, lr -> tuple(meta, lr) }
+         .mix(DORADO_BASECALL.out.long_reads, SAMTOOLS_FASTQ.out.other)
+ 
+     NANOPLOT(ch_long_raw)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: NANOPLOT.out], '01_qc', 'NANOPLOT'))
+     FILTLONG(ch_long_raw.map { meta, fq -> tuple(meta, [], fq) })
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: FILTLONG.out], '01_qc', 'FILTLONG'))
+ 
+     ch_hr = FILTLONG.out.reads.branch { meta, _fq ->
+         host: meta.host_reference != null
+@@ -101,6 +112,7 @@
+         false, // cigar_paf_format
+         false  // cigar_bam
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_HOST.out], '01_qc', 'MINIMAP2_ALIGN_HOST'))
+     // Drop the 'preset' helper key (only needed for MINIMAP2_ALIGN_HOST's
+     // ext.args) so downstream metas match the no-host-removal branch exactly.
+     ch_host_bam = MINIMAP2_ALIGN_HOST.out.bam
+@@ -112,7 +124,9 @@
+         [[], []],     // no BED
+         ''            // no index
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_VIEW_HOST.out], '01_qc', 'SAMTOOLS_VIEW_HOST'))
+     SAMTOOLS_FASTQ_HOST(SAMTOOLS_VIEW_HOST.out.bam, true) // interleaved long reads
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_FASTQ_HOST.out], '01_qc', 'SAMTOOLS_FASTQ_HOST'))
+     ch_final_long = ch_hr.nohost.mix(SAMTOOLS_FASTQ_HOST.out.interleaved)
+ 
+     // ---------------- hybrid assembly (02) ----------------
+@@ -120,46 +134,58 @@
+     ch_recycler_graph = Channel.empty()
+     if (params.hybrid_assembler == 'hybridspades') {
+         HYBRIDSPADES(ch_asm_in.map { meta, r1, r2, lr -> tuple(meta, [r1, r2], [], [lr]) }, [], [])
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: HYBRIDSPADES.out], '02_assembly', 'HYBRIDSPADES'))
+         ch_assembly = HYBRIDSPADES.out.contigs
+         ch_recycler_graph = HYBRIDSPADES.out.recycler_graph
+     } else {
+         OPERA_MS(ch_asm_in)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: OPERA_MS.out], '02_assembly', 'OPERA_MS'))
+         ch_assembly = OPERA_MS.out.assembly
+     }
+ 
+     QUAST(ch_assembly.map { meta, fasta -> tuple(meta, [fasta]) },
+         Channel.value([[:], []]), Channel.value([[:], []]))
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: QUAST.out], '03_assembly_qc', 'QUAST'))
+ 
+     // ---------------- contig coverage (both mappers, BAMs merged) ----------------
+     CONTIG_COVERAGE(ch_assembly, ch_final_short, ch_final_long, 'map-ont')
++    ch_report_events = ch_report_events.mix(CONTIG_COVERAGE.out.report_events)
+ 
+     // ---------------- plasmid detection (04) ----------------
+     PLASMID_DETECTION(ch_assembly)
++    ch_report_events = ch_report_events.mix(PLASMID_DETECTION.out.report_events)
+     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
+ 
+     PLASMID_DOWNSTREAM(
+         ch_plasmids, Channel.empty(), CONTIG_COVERAGE.out.bam,
+         CONTIG_COVERAGE.out.table, ch_final_short, ch_recycler_graph
+     )
++    ch_report_events = ch_report_events.mix(PLASMID_DOWNSTREAM.out.report_events)
+ 
+     // ---------------- abundance (10): short and long chains ----------------
+     PLASMID_ABUNDANCE(ch_plasmids, ch_final_short, ch_final_long, 'map-ont', true)
++    ch_report_events = ch_report_events.mix(PLASMID_ABUNDANCE.out.report_events)
+ 
+     // ---------------- host prediction / MAG / linking ----------------
+     HOST_PREDICTION(ch_final_short, Channel.empty(), ch_plasmids, false, false)
++    ch_report_events = ch_report_events.mix(HOST_PREDICTION.out.report_events)
+     MAG_HOST(ch_assembly, CONTIG_COVERAGE.out.bam, CONTIG_COVERAGE.out.table)
++    ch_report_events = ch_report_events.mix(MAG_HOST.out.report_events)
+     // All samples remap to one competitive nucleotide reference for statistics.
+     // Include zero-candidate samples; local coverage remains for MAG/linking.
+     SHARED_QUANTIFICATION(ch_assembly, PLASMID_DETECTION.out.plasmid_contigs,
+                           ch_final_short, ch_final_long, 'short', ch_samples.count())
++    ch_report_events = ch_report_events.mix(SHARED_QUANTIFICATION.out.report_events)
+ 
+     HOST_LINKING(
+         ch_plasmids, ch_assembly, CONTIG_COVERAGE.out.long_bam,
+         SHARED_QUANTIFICATION.out.plasmids, HOST_PREDICTION.out.host_profile,
+         MAG_HOST.out.mag_bins, MAG_HOST.out.taxonomy, true
+     )
++    ch_report_events = ch_report_events.mix(HOST_LINKING.out.report_events)
+ 
+     COMPARATIVE(ch_plasmids, PLASMID_DOWNSTREAM.out.bakta_dir)
++    ch_report_events = ch_report_events.mix(COMPARATIVE.out.report_events)
+ 
+     if (params.run_multiqc) {
+         ch_fastqc_raw = Channel.empty()
+@@ -172,6 +198,7 @@
+         MULTIQC(SHORT_READ_MULTIQC_INPUTS.out.files.map { files ->
+             tuple([id: 'multiqc_illumina'], files, [], [], [], [])
+         })
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MULTIQC.out], '01_qc', 'MULTIQC'))
+         // NanoPlot writes one report set per sample task; stage every HTML/TXT
+         // into the MultiQC input so per-sample reports stay distinguishable.
+         ch_nanoplot_qc = NANOPLOT.out.html
+@@ -180,19 +207,14 @@
+             .flatten()
+             .collect()
+         MULTIQC_ONT(ch_nanoplot_qc.map { files -> tuple([id: 'multiqc_ont'], files, [], [], [], []) })
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MULTIQC_ONT.out], '01_qc', 'MULTIQC_ONT'))
+     }
+ 
+     emit:
++    report_events = ch_report_events
+     plasmids       = ch_plasmids
+     contig_tables  = SHARED_QUANTIFICATION.out.contigs
+     // Shared quantification uses only short reads for hybrid statistics
+     plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
+-    done = SHARED_QUANTIFICATION.out.states.mix(SHARED_QUANTIFICATION.out.method, SHARED_QUANTIFICATION.out.catalogue)
+-        .mix(PLASMID_DETECTION.out.consensus.map { meta, f -> f })
+-        .mix(PLASMID_DETECTION.out.structure.map { meta, f -> f })
+-        .mix(CONTIG_COVERAGE.out.table.map { meta, f -> f })
+-        .mix(PLASMID_ABUNDANCE.out.short_abundance.map { meta, f -> f })
+-        .mix(PLASMID_ABUNDANCE.out.long_abundance.map { meta, f -> f })
+-        .mix(HOST_PREDICTION.out.host_profile.map { meta, f -> f })
+-        .mix(QUAST.out.tsv.map { meta, f -> f })
++    done = ch_report_events
+ }
+--- a/subworkflows/illumina.nf
++++ b/subworkflows/illumina.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ /*
+  * Illumina platform subworkflow (platform: illumina):
+  * fastp → [fastqc] → [bowtie2 host removal] → MEGAHIT/metaSPAdes → QUAST →
+@@ -33,13 +34,17 @@
+     ch_samples // tuple(meta, read1, read2)
+ 
+     main:
++    ch_report_events = Channel.empty()
+     // ---------------- QC (01) ----------------
+     FASTP(ch_samples.map { meta, r1, r2 -> tuple(meta, [r1, r2], []) }, false, false, false)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: FASTP.out], '01_qc', 'FASTP'))
+     ch_clean = FASTP.out.reads.map { meta, reads -> tuple(meta, reads[0], reads[1]) }
+ 
+     if (params.run_fastqc) {
+         FASTQC(ch_samples.map { meta, r1, r2 -> tuple(meta + [stage: 'raw'], [r1, r2]) })
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: FASTQC.out], '01_qc', 'FASTQC'))
+         FASTQC_CLEAN(ch_clean.map { meta, r1, r2 -> tuple(meta + [stage: 'clean'], [r1, r2]) })
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: FASTQC_CLEAN.out], '01_qc', 'FASTQC_CLEAN'))
+     }
+ 
+     // ---------------- host removal (optional, per-sample reference) ----------------
+@@ -49,6 +54,7 @@
+     }
+     ch_host_ref = ch_br.host.map { meta, _r1, _r2 -> tuple(meta, file(meta.host_reference)) }
+     BOWTIE2_BUILD_HOST(ch_host_ref)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_BUILD_HOST.out], '01_qc', 'BOWTIE2_BUILD_HOST'))
+     ch_host_matched = ch_br.host.join(ch_host_ref,
+         failOnDuplicate: true, failOnMismatch: true)
+         .join(BOWTIE2_BUILD_HOST.out.index, failOnDuplicate: true, failOnMismatch: true)
+@@ -59,6 +65,7 @@
+         true,  // save_unaligned — the unmapped pairs are the host-free reads
+         false  // sort_bam
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_ALIGN_HOST.out], '01_qc', 'BOWTIE2_ALIGN_HOST'))
+     ch_final_reads = ch_br.nohost.mix(
+         BOWTIE2_ALIGN_HOST.out.fastq.map { meta, fqs ->
+             def pair = fqs in List ? fqs : [fqs]
+@@ -72,23 +79,28 @@
+     ch_recycler_graph = Channel.empty()
+     if (params.short_read_assembler == 'metaspades') {
+         METASPADES(ch_final_reads.map { meta, r1, r2 -> tuple(meta, [r1, r2], [], []) }, [], [])
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: METASPADES.out], '02_assembly', 'METASPADES'))
+         ch_assembly = METASPADES.out.contigs
+         ch_graph = METASPADES.out.fastg
+         ch_recycler_graph = METASPADES.out.recycler_graph
+     } else {
+         MEGAHIT(ch_final_reads)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MEGAHIT.out], '02_assembly', 'MEGAHIT'))
+         ch_assembly = MEGAHIT.out.contigs
+     }
+ 
+     // ---------------- assembly QC (03) ----------------
+     QUAST(ch_assembly.map { meta, fasta -> tuple(meta, [fasta]) },
+         Channel.value([[:], []]), Channel.value([[:], []]))
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: QUAST.out], '03_assembly_qc', 'QUAST'))
+ 
+     // ---------------- contig coverage (02/coverage) ----------------
+     CONTIG_COVERAGE(ch_assembly, ch_final_reads, Channel.empty(), 'map-ont')
++    ch_report_events = ch_report_events.mix(CONTIG_COVERAGE.out.report_events)
+ 
+     // ---------------- plasmid detection (04) ----------------
+     PLASMID_DETECTION(ch_assembly)
++    ch_report_events = ch_report_events.mix(PLASMID_DETECTION.out.report_events)
+     // Skip samples whose consensus is empty so downstream tools never see
+     // an empty FASTA
+     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
+@@ -98,30 +110,37 @@
+         ch_plasmids, ch_graph, CONTIG_COVERAGE.out.bam,
+         CONTIG_COVERAGE.out.table, ch_final_reads, ch_recycler_graph
+     )
++    ch_report_events = ch_report_events.mix(PLASMID_DOWNSTREAM.out.report_events)
+ 
+     // ---------------- abundance (10) ----------------
+     PLASMID_ABUNDANCE(ch_plasmids, ch_final_reads, Channel.empty(), 'map-ont', false)
++    ch_report_events = ch_report_events.mix(PLASMID_ABUNDANCE.out.report_events)
+ 
+     // ---------------- host prediction (07) ----------------
+     HOST_PREDICTION(ch_final_reads, Channel.empty(), ch_plasmids, true, false)
++    ch_report_events = ch_report_events.mix(HOST_PREDICTION.out.report_events)
+ 
+     // ---------------- MAG host genomes (07/mag) ----------------
+     MAG_HOST(ch_assembly, CONTIG_COVERAGE.out.bam, CONTIG_COVERAGE.out.table)
++    ch_report_events = ch_report_events.mix(MAG_HOST.out.report_events)
+ 
+     // ---------------- host-plasmid linking (07) ----------------
+     // All samples remap to one competitive nucleotide reference for statistics.
+     // Include zero-candidate samples; local coverage remains for MAG/linking.
+     SHARED_QUANTIFICATION(ch_assembly, PLASMID_DETECTION.out.plasmid_contigs,
+                           ch_final_reads, Channel.empty(), 'short', ch_samples.count())
++    ch_report_events = ch_report_events.mix(SHARED_QUANTIFICATION.out.report_events)
+ 
+     HOST_LINKING(
+         ch_plasmids, ch_assembly, Channel.empty(),
+         SHARED_QUANTIFICATION.out.plasmids, HOST_PREDICTION.out.host_profile,
+         MAG_HOST.out.mag_bins, MAG_HOST.out.taxonomy, false
+     )
++    ch_report_events = ch_report_events.mix(HOST_LINKING.out.report_events)
+ 
+     // ---------------- comparative genomics (09) ----------------
+     COMPARATIVE(ch_plasmids, PLASMID_DOWNSTREAM.out.bakta_dir)
++    ch_report_events = ch_report_events.mix(COMPARATIVE.out.report_events)
+ 
+     // ---------------- MultiQC ----------------
+     if (params.run_multiqc) {
+@@ -135,17 +154,13 @@
+         MULTIQC(SHORT_READ_MULTIQC_INPUTS.out.files.map { files ->
+             tuple([id: 'multiqc_illumina'], files, [], [], [], [])
+         })
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MULTIQC.out], '01_qc', 'MULTIQC'))
+     }
+ 
+     emit:
++    report_events = ch_report_events
+     plasmids       = ch_plasmids
+     contig_tables  = SHARED_QUANTIFICATION.out.contigs
+     plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
+-    done = SHARED_QUANTIFICATION.out.states.mix(SHARED_QUANTIFICATION.out.method, SHARED_QUANTIFICATION.out.catalogue)
+-        .mix(PLASMID_DETECTION.out.consensus.map { meta, f -> f })
+-        .mix(PLASMID_DETECTION.out.structure.map { meta, f -> f })
+-        .mix(CONTIG_COVERAGE.out.table.map { meta, f -> f })
+-        .mix(PLASMID_ABUNDANCE.out.short_abundance.map { meta, f -> f })
+-        .mix(HOST_PREDICTION.out.host_profile.map { meta, f -> f })
+-        .mix(QUAST.out.tsv.map { meta, f -> f })
++    done = ch_report_events
+ }
+--- a/subworkflows/mag_host.nf
++++ b/subworkflows/mag_host.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ include { magSelectionError } from '../lib/mag_selection'
+ 
+@@ -36,6 +37,7 @@
+     ch_contig_table // tuple(meta, coverm tsv); unused by the nf-core CONCOCT chain
+ 
+     main:
++    ch_report_events = Channel.empty()
+     def magError = magSelectionError(params.mag_tools)
+     if (magError) error(magError)
+     // Only index when a MAG tool actually consumes the BAM; the bridge is
+@@ -44,35 +46,44 @@
+     if (selectedTools(params.mag_tools).any { it in ['metabat2', 'concoct'] }) {
+         ch_bam_bai = ch_contig_bam
+             .join(SAMTOOLS_INDEX(ch_contig_bam).bai, failOnDuplicate: true, failOnMismatch: true)
++            ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_INDEX.out], '07_host_prediction', 'SAMTOOLS_INDEX'))
+     }
+ 
+     ch_metabat2_bins = Channel.empty()
+     if (selectedTools(params.mag_tools).contains('metabat2')) {
+         METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS(ch_bam_bai)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.out], '07_host_prediction', 'METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS'))
+         METABAT2(ch_assembly.join(METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.out.depth,
+                                  failOnDuplicate: true, failOnMismatch: true))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: METABAT2.out], '07_host_prediction', 'METABAT2'))
+         ch_metabat2_bins = METABAT2.out.fasta
+     }
+ 
+     ch_concoct_bins = Channel.empty()
+     if (selectedTools(params.mag_tools).contains('concoct')) {
+         CONCOCT_CUTUPFASTA(ch_assembly, Channel.value(true))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: CONCOCT_CUTUPFASTA.out], '07_host_prediction', 'CONCOCT_CUTUPFASTA'))
+         CONCOCT_CONCOCTCOVERAGETABLE(
+             CONCOCT_CUTUPFASTA.out.bed.join(ch_bam_bai, failOnDuplicate: true, failOnMismatch: true)
+         )
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: CONCOCT_CONCOCTCOVERAGETABLE.out], '07_host_prediction', 'CONCOCT_CONCOCTCOVERAGETABLE'))
+         CONCOCT_CONCOCT(
+             CONCOCT_CONCOCTCOVERAGETABLE.out.tsv.join(CONCOCT_CUTUPFASTA.out.fasta,
+                                                    failOnDuplicate: true, failOnMismatch: true)
+         )
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: CONCOCT_CONCOCT.out], '07_host_prediction', 'CONCOCT_CONCOCT'))
+         CONCOCT_MERGECUTUPCLUSTERING(CONCOCT_CONCOCT.out.clustering_csv)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: CONCOCT_MERGECUTUPCLUSTERING.out], '07_host_prediction', 'CONCOCT_MERGECUTUPCLUSTERING'))
+         CONCOCT(ch_assembly.join(CONCOCT_MERGECUTUPCLUSTERING.out.csv,
+                                 failOnDuplicate: true, failOnMismatch: true))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: CONCOCT.out], '07_host_prediction', 'CONCOCT'))
+         ch_concoct_bins = CONCOCT.out.fasta
+     }
+ 
+     ch_semibin_bins = Channel.empty()
+     if (selectedTools(params.mag_tools).contains('semibin')) {
+         SEMIBIN(ch_assembly.join(ch_contig_bam, failOnDuplicate: true, failOnMismatch: true))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: SEMIBIN.out], '07_host_prediction', 'SEMIBIN'))
+         ch_semibin_bins = SEMIBIN.out.output_fasta
+     }
+ 
+@@ -80,8 +91,11 @@
+     ch_final_bins = ch_metabat2_bins.mix(ch_concoct_bins, ch_semibin_bins)
+     if (selectedTools(params.mag_tools).contains('das_tool')) {
+         ch_s2b_metabat2 = SCAFFOLDS2BIN_METABAT2(ch_metabat2_bins, Channel.value('fa')).fastatocontig2bin
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: SCAFFOLDS2BIN_METABAT2.out], '07_host_prediction', 'SCAFFOLDS2BIN_METABAT2'))
+         ch_s2b_concoct = SCAFFOLDS2BIN_CONCOCT(ch_concoct_bins, Channel.value('fa')).fastatocontig2bin
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: SCAFFOLDS2BIN_CONCOCT.out], '07_host_prediction', 'SCAFFOLDS2BIN_CONCOCT'))
+         ch_s2b_semibin = SCAFFOLDS2BIN_SEMIBIN(ch_semibin_bins, Channel.value('fa')).fastatocontig2bin
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: SCAFFOLDS2BIN_SEMIBIN.out], '07_host_prediction', 'SCAFFOLDS2BIN_SEMIBIN'))
+         ch_das_in = ch_assembly
+             // Group all available predictions by sample. A binner returning no
+             // bins must not discard another binner's nonempty predictions.
+@@ -93,6 +107,7 @@
+             }
+             .map { meta, assembly, tsvs -> tuple(meta, assembly, tsvs, []) }
+         DAS_TOOL(ch_das_in, [])
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: DAS_TOOL.out], '07_host_prediction', 'DAS_TOOL'))
+         ch_final_bins = DAS_TOOL.out.bins
+     }
+ 
+@@ -101,6 +116,7 @@
+             ch_final_bins,
+             Channel.value([[id: 'checkm2_db'], file(params.checkm2_db, checkIfExists: true)])
+         )
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: CHECKM2.out], '07_host_prediction', 'CHECKM2'))
+     }
+ 
+     ch_taxonomy = Channel.empty()
+@@ -110,10 +126,12 @@
+             Channel.value([[id: 'gtdbtk_db'], file(params.gtdbtk_db, checkIfExists: true)]),
+             false
+         )
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: GTDBTK.out], '07_host_prediction', 'GTDBTK'))
+         ch_taxonomy = GTDBTK.out.summary
+     }
+ 
+     emit:
++    report_events = ch_report_events
+     mag_bins = ch_final_bins  // tuple(meta, bin fasta/list); samples with no bins are absent
+     taxonomy = ch_taxonomy    // tuple(meta, [gtdbtk summary tsv, ...]); may be empty
+ }
+--- a/subworkflows/ont.nf
++++ b/subworkflows/ont.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+ /*
+@@ -37,6 +38,7 @@
+     ch_samples // tuple(meta, pod5, bam, long_reads)
+ 
+     main:
++    ch_report_events = Channel.empty()
+     // ---------------- basecalling / long-read input (00) ----------------
+     ch_br = ch_samples.branch { meta, pod5, bam, lr ->
+         pod5: pod5 != null
+@@ -44,15 +46,19 @@
+         fastq: true
+     }
+     DORADO_BASECALL(ch_br.pod5.map { meta, pod5, bam, lr -> tuple(meta, pod5) })
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: DORADO_BASECALL.out], '00_basecalling', 'DORADO_BASECALL'))
+     // Long-read BAMs carry unpaired records: samtools fastq buckets them into
+     // the -0 "other" output (nf-core module naming: <prefix>_other.fastq.gz).
+     SAMTOOLS_FASTQ(ch_br.bam.map { meta, pod5, bam, lr -> tuple(meta, bam) }, false)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_FASTQ.out], '01_qc', 'SAMTOOLS_FASTQ'))
+     ch_long_raw = ch_br.fastq.map { meta, pod5, bam, lr -> tuple(meta, lr) }
+         .mix(DORADO_BASECALL.out.long_reads, SAMTOOLS_FASTQ.out.other)
+ 
+     // ---------------- QC (01) ----------------
+     NANOPLOT(ch_long_raw)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: NANOPLOT.out], '01_qc', 'NANOPLOT'))
+     FILTLONG(ch_long_raw.map { meta, fq -> tuple(meta, [], fq) })
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: FILTLONG.out], '01_qc', 'FILTLONG'))
+ 
+     // ---------------- host removal (optional) ----------------
+     ch_hr = FILTLONG.out.reads.branch { meta, _fq ->
+@@ -68,6 +74,7 @@
+         false, // cigar_paf_format
+         false  // cigar_bam
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_HOST.out], '01_qc', 'MINIMAP2_ALIGN_HOST'))
+     // Drop the 'preset' helper key (only needed for MINIMAP2_ALIGN_HOST's
+     // ext.args) so downstream metas match the no-host-removal branch exactly.
+     ch_host_bam = MINIMAP2_ALIGN_HOST.out.bam
+@@ -79,51 +86,65 @@
+         [[], []],     // no BED
+         ''            // no index
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_VIEW_HOST.out], '01_qc', 'SAMTOOLS_VIEW_HOST'))
+     SAMTOOLS_FASTQ_HOST(SAMTOOLS_VIEW_HOST.out.bam, true) // interleaved long reads
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_FASTQ_HOST.out], '01_qc', 'SAMTOOLS_FASTQ_HOST'))
+     ch_final_long = ch_hr.nohost.mix(SAMTOOLS_FASTQ_HOST.out.interleaved)
+ 
+     // ---------------- assembly (02) + optional medaka polishing ----------------
+     METAFLYE(ch_final_long, '--nano-raw')
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: METAFLYE.out], '02_assembly', 'METAFLYE'))
+     ch_assembly = METAFLYE.out.fasta
+     if (selectedTools(params.polishing_tools).contains('medaka')) {
+         // nf-core medaka takes (meta, reads, assembly) — note the order.
+         MEDAKA(ch_final_long.join(METAFLYE.out.fasta))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MEDAKA.out], '02_assembly', 'MEDAKA'))
+         ch_assembly = MEDAKA.out.assembly
+     }
+ 
+     QUAST(ch_assembly.map { meta, fasta -> tuple(meta, [fasta]) },
+         Channel.value([[:], []]), Channel.value([[:], []]))
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: QUAST.out], '03_assembly_qc', 'QUAST'))
+ 
+     // ---------------- contig coverage ----------------
+     CONTIG_COVERAGE(ch_assembly, Channel.empty(), ch_final_long, 'map-ont')
++    ch_report_events = ch_report_events.mix(CONTIG_COVERAGE.out.report_events)
+ 
+     // ---------------- plasmid detection (04) ----------------
+     PLASMID_DETECTION(ch_assembly)
++    ch_report_events = ch_report_events.mix(PLASMID_DETECTION.out.report_events)
+     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
+ 
+     PLASMID_DOWNSTREAM(
+         ch_plasmids, METAFLYE.out.gfa, CONTIG_COVERAGE.out.bam,
+         CONTIG_COVERAGE.out.table, Channel.empty(), Channel.empty()
+     )
++    ch_report_events = ch_report_events.mix(PLASMID_DOWNSTREAM.out.report_events)
+ 
+     // ---------------- abundance (10) ----------------
+     PLASMID_ABUNDANCE(ch_plasmids, Channel.empty(), ch_final_long, 'map-ont', false)
++    ch_report_events = ch_report_events.mix(PLASMID_ABUNDANCE.out.report_events)
+ 
+     // ---------------- host prediction / MAG / linking ----------------
+     HOST_PREDICTION(Channel.empty(), ch_final_long, ch_plasmids, false, false)
++    ch_report_events = ch_report_events.mix(HOST_PREDICTION.out.report_events)
+     MAG_HOST(ch_assembly, CONTIG_COVERAGE.out.bam, CONTIG_COVERAGE.out.table)
++    ch_report_events = ch_report_events.mix(MAG_HOST.out.report_events)
+     // All samples remap to one competitive nucleotide reference for statistics.
+     // Include zero-candidate samples; local coverage remains for MAG/linking.
+     SHARED_QUANTIFICATION(ch_assembly, PLASMID_DETECTION.out.plasmid_contigs,
+                           Channel.empty(), ch_final_long, 'map-ont', ch_samples.count())
++    ch_report_events = ch_report_events.mix(SHARED_QUANTIFICATION.out.report_events)
+ 
+     HOST_LINKING(
+         ch_plasmids, ch_assembly, CONTIG_COVERAGE.out.long_bam,
+         SHARED_QUANTIFICATION.out.plasmids, HOST_PREDICTION.out.host_profile,
+         MAG_HOST.out.mag_bins, MAG_HOST.out.taxonomy, true
+     )
++    ch_report_events = ch_report_events.mix(HOST_LINKING.out.report_events)
+ 
+     COMPARATIVE(ch_plasmids, PLASMID_DOWNSTREAM.out.bakta_dir)
++    ch_report_events = ch_report_events.mix(COMPARATIVE.out.report_events)
+ 
+     if (params.run_multiqc) {
+         // NanoPlot writes one report set per sample task; stage every HTML/TXT
+@@ -134,17 +155,13 @@
+             .flatten()
+             .collect()
+         MULTIQC(ch_nanoplot_qc.map { files -> tuple([id: 'multiqc_ont'], files, [], [], [], []) })
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MULTIQC.out], '01_qc', 'MULTIQC'))
+     }
+ 
+     emit:
++    report_events = ch_report_events
+     plasmids       = ch_plasmids
+     contig_tables  = SHARED_QUANTIFICATION.out.contigs
+     plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
+-    done = SHARED_QUANTIFICATION.out.states.mix(SHARED_QUANTIFICATION.out.method, SHARED_QUANTIFICATION.out.catalogue)
+-        .mix(PLASMID_DETECTION.out.consensus.map { meta, f -> f })
+-        .mix(PLASMID_DETECTION.out.structure.map { meta, f -> f })
+-        .mix(CONTIG_COVERAGE.out.table.map { meta, f -> f })
+-        .mix(PLASMID_ABUNDANCE.out.long_abundance.map { meta, f -> f })
+-        .mix(HOST_PREDICTION.out.host_profile.map { meta, f -> f })
+-        .mix(QUAST.out.tsv.map { meta, f -> f })
++    done = ch_report_events
+ }
+--- a/subworkflows/pacbio_hifi.nf
++++ b/subworkflows/pacbio_hifi.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ /*
+  * PacBio HiFi platform subworkflow (platform: pacbio_hifi):
+  * [BAM→FASTQ | provided FASTQ] → HiFiAdapterFilt → [minimap2 host removal] →
+@@ -29,6 +30,7 @@
+     ch_samples // tuple(meta, bam, long_reads)
+ 
+     main:
++    ch_report_events = Channel.empty()
+     // ---------------- long-read input (00) ----------------
+     ch_br = ch_samples.branch { meta, bam, lr ->
+         bam: bam != null
+@@ -37,6 +39,7 @@
+     // Long-read BAMs carry unpaired records: samtools fastq buckets them into
+     // the -0 "other" output (nf-core module naming: <prefix>_other.fastq.gz).
+     SAMTOOLS_FASTQ(ch_br.bam.map { meta, bam, lr -> tuple(meta, bam) }, false)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_FASTQ.out], '01_qc', 'SAMTOOLS_FASTQ'))
+     ch_long_raw = ch_br.fastq.map { meta, bam, lr -> tuple(meta, lr) }
+         .mix(SAMTOOLS_FASTQ.out.other)
+ 
+@@ -44,6 +47,7 @@
+     // db=[]: the vendored module falls back to the adapter database shipped
+     // with the hifiadapterfilt package itself (see the module's local patch).
+     HIFIADAPTERFILT(ch_long_raw.map { meta, fq -> tuple(meta, fq, []) })
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: HIFIADAPTERFILT.out], '01_qc', 'HIFIADAPTERFILT'))
+     ch_hifi_reads = HIFIADAPTERFILT.out.fastq
+ 
+     // ---------------- host removal (optional) ----------------
+@@ -60,6 +64,7 @@
+         false, // cigar_paf_format
+         false  // cigar_bam
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_HOST.out], '01_qc', 'MINIMAP2_ALIGN_HOST'))
+     // Drop the 'preset' helper key (only needed for MINIMAP2_ALIGN_HOST's
+     // ext.args) so downstream metas match the no-host-removal branch exactly.
+     ch_host_bam = MINIMAP2_ALIGN_HOST.out.bam
+@@ -71,55 +76,63 @@
+         [[], []],     // no BED
+         ''            // no index
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_VIEW_HOST.out], '01_qc', 'SAMTOOLS_VIEW_HOST'))
+     SAMTOOLS_FASTQ_HOST(SAMTOOLS_VIEW_HOST.out.bam, true) // interleaved long reads
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_FASTQ_HOST.out], '01_qc', 'SAMTOOLS_FASTQ_HOST'))
+     ch_final_long = ch_hr.nohost.mix(SAMTOOLS_FASTQ_HOST.out.interleaved)
+ 
+     // ---------------- assembly (02) ----------------
+     HIFIASM_META(ch_final_long)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: HIFIASM_META.out], '02_assembly', 'HIFIASM_META'))
+     ch_assembly = HIFIASM_META.out.assembly
+ 
+     QUAST(ch_assembly.map { meta, fasta -> tuple(meta, [fasta]) },
+         Channel.value([[:], []]), Channel.value([[:], []]))
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: QUAST.out], '03_assembly_qc', 'QUAST'))
+ 
+     // ---------------- contig coverage ----------------
+     CONTIG_COVERAGE(ch_assembly, Channel.empty(), ch_final_long, 'map-hifi')
++    ch_report_events = ch_report_events.mix(CONTIG_COVERAGE.out.report_events)
+ 
+     // ---------------- plasmid detection (04) ----------------
+     PLASMID_DETECTION(ch_assembly)
++    ch_report_events = ch_report_events.mix(PLASMID_DETECTION.out.report_events)
+     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
+ 
+     PLASMID_DOWNSTREAM(
+         ch_plasmids, HIFIASM_META.out.graph, CONTIG_COVERAGE.out.bam,
+         CONTIG_COVERAGE.out.table, Channel.empty(), Channel.empty()
+     )
++    ch_report_events = ch_report_events.mix(PLASMID_DOWNSTREAM.out.report_events)
+ 
+     // ---------------- abundance (10) ----------------
+     PLASMID_ABUNDANCE(ch_plasmids, Channel.empty(), ch_final_long, 'map-hifi', false)
++    ch_report_events = ch_report_events.mix(PLASMID_ABUNDANCE.out.report_events)
+ 
+     HOST_PREDICTION(Channel.empty(), ch_final_long, ch_plasmids, false, false)
++    ch_report_events = ch_report_events.mix(HOST_PREDICTION.out.report_events)
+     MAG_HOST(ch_assembly, CONTIG_COVERAGE.out.bam, CONTIG_COVERAGE.out.table)
++    ch_report_events = ch_report_events.mix(MAG_HOST.out.report_events)
+     // All samples remap to one competitive nucleotide reference for statistics.
+     // Include zero-candidate samples; local coverage remains for MAG/linking.
+     SHARED_QUANTIFICATION(ch_assembly, PLASMID_DETECTION.out.plasmid_contigs,
+                           Channel.empty(), ch_final_long, 'map-hifi', ch_samples.count())
++    ch_report_events = ch_report_events.mix(SHARED_QUANTIFICATION.out.report_events)
+ 
+     HOST_LINKING(
+         ch_plasmids, ch_assembly, CONTIG_COVERAGE.out.long_bam,
+         SHARED_QUANTIFICATION.out.plasmids, HOST_PREDICTION.out.host_profile,
+         MAG_HOST.out.mag_bins, MAG_HOST.out.taxonomy, true
+     )
++    ch_report_events = ch_report_events.mix(HOST_LINKING.out.report_events)
+ 
+     COMPARATIVE(ch_plasmids, PLASMID_DOWNSTREAM.out.bakta_dir)
++    ch_report_events = ch_report_events.mix(COMPARATIVE.out.report_events)
+ 
+     emit:
++    report_events = ch_report_events
+     plasmids       = ch_plasmids
+     contig_tables  = SHARED_QUANTIFICATION.out.contigs
+     plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
+-    done = SHARED_QUANTIFICATION.out.states.mix(SHARED_QUANTIFICATION.out.method, SHARED_QUANTIFICATION.out.catalogue)
+-        .mix(PLASMID_DETECTION.out.consensus.map { meta, f -> f })
+-        .mix(PLASMID_DETECTION.out.structure.map { meta, f -> f })
+-        .mix(CONTIG_COVERAGE.out.table.map { meta, f -> f })
+-        .mix(PLASMID_ABUNDANCE.out.long_abundance.map { meta, f -> f })
+-        .mix(HOST_PREDICTION.out.host_profile.map { meta, f -> f })
+-        .mix(QUAST.out.tsv.map { meta, f -> f })
++    done = ch_report_events
+ }
+--- a/subworkflows/plasmid_abundance.nf
++++ b/subworkflows/plasmid_abundance.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ /*
+  * Plasmid abundance subworkflow (stage 10 abundance): map reads to
+  * the consensus plasmid contigs and estimate per-contig abundance with
+@@ -31,12 +32,14 @@
+     hybrid         // val: boolean — emit short/long labelled outputs
+ 
+     main:
++    ch_report_events = Channel.empty()
+     // ---- short-read chain: bowtie2 index build + align (sorted BAM) ----
+     ch_short_in = ch_plasmids.join(ch_short_reads)
+         .map { meta, contigs, r1, r2 ->
+             hybrid ? tuple(meta + [suffix: '.short'], contigs, r1, r2) : tuple(meta, contigs, r1, r2)
+         }
+     BOWTIE2_BUILD_ABUNDANCE(ch_short_in.map { meta, contigs, _r1, _r2 -> tuple(meta, contigs) })
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_BUILD_ABUNDANCE.out], '10_abundance', 'BOWTIE2_BUILD_ABUNDANCE'))
+     // The asynchronous index must join its reads/reference before fan-out.
+     ch_short_matched = ch_short_in.join(BOWTIE2_BUILD_ABUNDANCE.out.index,
+         failOnDuplicate: true, failOnMismatch: true)
+@@ -47,6 +50,7 @@
+         false, // save_unaligned
+         true   // sort_bam
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_ALIGN_ABUNDANCE.out], '10_abundance', 'BOWTIE2_ALIGN_ABUNDANCE'))
+     ch_short_abund = COVERM_ABUNDANCE(
+         BOWTIE2_ALIGN_ABUNDANCE.out.bam,
+         [[], []],
+@@ -54,6 +58,7 @@
+         false, // interleaved
+         false  // enable_bam_output
+     ).coverage.map { meta, tsv -> tuple(stripChainMeta(meta), tsv) }
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: COVERM_ABUNDANCE.out], '10_abundance', 'COVERM_ABUNDANCE'))
+ 
+     // ---- long-read chain: minimap2 (sorted BAM via samtools sort pipe) ----
+     ch_long_in = ch_plasmids.join(ch_long_reads)
+@@ -66,6 +71,7 @@
+         false, // cigar_paf_format
+         false  // cigar_bam
+     )
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_ABUNDANCE.out], '10_abundance', 'MINIMAP2_ALIGN_ABUNDANCE'))
+     ch_long_abund = COVERM_ABUNDANCE_LONG(
+         MINIMAP2_ALIGN_ABUNDANCE.out.bam,
+         [[], []],
+@@ -73,8 +79,10 @@
+         false, // interleaved
+         false  // enable_bam_output
+     ).coverage.map { meta, tsv -> tuple(stripChainMeta(meta), tsv) }
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: COVERM_ABUNDANCE_LONG.out], '10_abundance', 'COVERM_ABUNDANCE_LONG'))
+ 
+     emit:
++    report_events = ch_report_events
+     short_abundance = ch_short_abund  // tuple(meta, tsv); empty on long-only platforms
+     long_abundance  = ch_long_abund   // tuple(meta, tsv); empty on illumina
+ }
+--- a/subworkflows/plasmid_detection.nf
++++ b/subworkflows/plasmid_detection.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+ /*
+@@ -18,13 +19,16 @@
+     ch_assembly    // tuple(meta, fasta)
+ 
+     main:
++    ch_report_events = Channel.empty()
+     // nf-core module expects the database as tuple val(meta2), path(db); the
+     // db carries no sample metadata, so meta2 is an empty map.
+     GENOMAD(ch_assembly, Channel.value([[:], file(params.genomad_db, checkIfExists: true)]))
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: GENOMAD.out], '04_plasmid_detection', 'GENOMAD'))
+ 
+     ch_plasme = Channel.empty()
+     if (selectedTools(params.plasmid_detection_tools).contains('plasme')) {
+         PLASME(ch_assembly, Channel.value(file(params.plasme_db, checkIfExists: true)))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASME.out], '04_plasmid_detection', 'PLASME'))
+         ch_plasme = PLASME.out.predictions
+     }
+     ch_plasx = Channel.empty()
+@@ -32,11 +36,13 @@
+         PLASX(ch_assembly,
+               Channel.value(file(params.plasx_annotations, checkIfExists: true)),
+               Channel.value(file(params.plasx_model, checkIfExists: true)))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASX.out], '04_plasmid_detection', 'PLASX'))
+         ch_plasx = PLASX.out.predictions
+     }
+     ch_platon = Channel.empty()
+     if (selectedTools(params.plasmid_detection_tools).contains('platon')) {
+         PLATON(ch_assembly, Channel.value(file(params.platon_db, checkIfExists: true)))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLATON.out], '04_plasmid_detection', 'PLATON'))
+         ch_platon = PLATON.out.predictions
+     }
+ 
+@@ -53,9 +59,17 @@
+         }
+ 
+     PLASMID_CONSENSUS(ch_consensus_in)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMID_CONSENSUS.out], '04_plasmid_detection', 'PLASMID_CONSENSUS'))
+     PLASMID_STRUCTURE(PLASMID_CONSENSUS.out.contigs)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMID_STRUCTURE.out], '04_plasmid_detection', 'PLASMID_STRUCTURE'))
++
++    ch_report_events = ch_report_events.mix(
++        reportSamples(PLASMID_CONSENSUS.out.contigs, 'plasmid_fasta', 'PLASMID_CONSENSUS'),
++        reportSamples(PLASMID_CONSENSUS.out.consensus, 'consensus', 'PLASMID_CONSENSUS'),
++        reportSamples(PLASMID_STRUCTURE.out.structure, 'structure', 'PLASMID_STRUCTURE'))
+ 
+     emit:
++    report_events = ch_report_events
+     plasmid_contigs = PLASMID_CONSENSUS.out.contigs
+     predictions     = PLASMID_CONSENSUS.out.predictions
+     consensus       = PLASMID_CONSENSUS.out.consensus
+--- a/subworkflows/plasmid_downstream.nf
++++ b/subworkflows/plasmid_downstream.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+ /*
+@@ -43,10 +44,12 @@
+     ch_recycler_graph // tuple(meta, FASTG, graph_provenance.json) from same SPAdes task
+ 
+     main:
++    ch_report_events = Channel.empty()
+     // ---------------- typing (06) ----------------
+     if (selectedTools(params.typing_tools).contains('plasmidfinder')) {
+         // nf-core module: bundled PlasmidFinder db (params.plasmidfinder_db no longer used)
+         PLASMIDFINDER(ch_plasmids)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMIDFINDER.out], '06_plasmid_typing', 'PLASMIDFINDER'))
+     }
+     if (selectedTools(params.typing_tools).contains('mob_typer')) {
+         // optional per-file db inputs (mash/meta/replicons/mask/mob/mpf/orit) left empty
+@@ -54,23 +57,28 @@
+                   Channel.value(file(params.mob_suite_db, checkIfExists: true)),
+                   [], [], [], [], [], [], [],
+                   false, false)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_TYPER.out], '06_plasmid_typing', 'MOB_TYPER'))
+     }
+     if (selectedTools(params.typing_optional_tools).contains('copla')) {
+         COPLA(ch_plasmids,
+               Channel.value(file(params.copla_refgraph, checkIfExists: true)),
+               Channel.value(file(params.copla_reflist, checkIfExists: true)))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: COPLA.out], '06_plasmid_typing', 'COPLA'))
+     }
+     def run_conjscan    = selectedTools(params.typing_optional_tools).contains('conjscan')
+     def run_macsyfinder = selectedTools(params.typing_optional_tools).contains('macsyfinder')
+     if (run_conjscan || run_macsyfinder) {
+         // CONJScan models via macsydata (macsyfinder >= 2.1.2 no longer ships them)
+         MACSYFINDER_DOWNLOAD(Channel.value('CONJ'))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER_DOWNLOAD.out], '06_plasmid_typing', 'MACSYFINDER_DOWNLOAD'))
+     }
+     if (run_conjscan) {
+         CONJSCAN(ch_plasmids, MACSYFINDER_DOWNLOAD.out.models, 'CONJ')
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: CONJSCAN.out], '06_plasmid_typing', 'CONJSCAN'))
+     }
+     if (run_macsyfinder) {
+         MACSYFINDER(ch_plasmids, MACSYFINDER_DOWNLOAD.out.models, 'CONJ')
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER.out], '06_plasmid_typing', 'MACSYFINDER'))
+     }
+ 
+     // ---------------- annotation (08) ----------------
+@@ -80,59 +88,73 @@
+         BAKTA(ch_plasmids,
+               Channel.value(file(params.bakta_db, checkIfExists: true)),
+               [], [], [], [])
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: BAKTA.out], '08_annotation', 'BAKTA'))
+         // clinker consumes the directory holding the *.gbff files (the task dir itself)
+         ch_bakta_dir = BAKTA.out.gbff.map { meta, gbff -> tuple(meta, gbff.parent) }
+     }
+     if (selectedTools(params.annotation_tools).contains('amrfinderplus')) {
+         AMRFINDERPLUS(ch_plasmids, Channel.value(file(params.amrfinderplus_db, checkIfExists: true)))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: AMRFINDERPLUS.out], '08_annotation', 'AMRFINDERPLUS'))
+     }
+     if (selectedTools(params.annotation_tools).contains('abricate') || selectedTools(params.annotation_optional_tools).contains('abricate')) {
+         // optional --datadir left empty; --db selected via ext.args
+         ABRICATE(ch_plasmids, [])
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: ABRICATE.out], '08_annotation', 'ABRICATE'))
+     }
+     if (selectedTools(params.annotation_tools).contains('isescan')) {
+         ISESCAN(ch_plasmids)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: ISESCAN.out], '08_annotation', 'ISESCAN'))
+     }
+     if (selectedTools(params.annotation_tools).contains('integronfinder')) {
+         INTEGRONFINDER(ch_plasmids)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: INTEGRONFINDER.out], '08_annotation', 'INTEGRONFINDER'))
+     }
+     if (selectedTools(params.annotation_tools).contains('prodigal') || selectedTools(params.annotation_optional_tools).contains('prodigal')) {
+         PRODIGAL(ch_plasmids, Channel.value('gff'))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PRODIGAL.out], '08_annotation', 'PRODIGAL'))
+     }
+     if (selectedTools(params.annotation_optional_tools).contains('mob_suite')) {
+         // nf-core module: no db input (uses mob_suite 3.1.9 bundled db)
+         MOB_SUITE_ANNOT(ch_plasmids)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_SUITE_ANNOT.out], '08_annotation', 'MOB_SUITE_ANNOT'))
+     }
+     if (selectedTools(params.annotation_optional_tools).contains('rgi')) {
+         // card = directory with card.json + card_database_v*.fasta; wildcard optional
+         RGI(ch_plasmids,
+             Channel.value(file(params.card_db, checkIfExists: true)),
+             [])
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: RGI.out], '08_annotation', 'RGI'))
+     }
+     if (selectedTools(params.annotation_optional_tools).contains('eggnog_mapper')) {
+         // search_mode=diamond with no explicit dmnd db (falls back to --data_dir)
+         EGGNOG_MAPPER(ch_plasmids,
+                       Channel.value(['diamond', []]),
+                       Channel.value(file(params.eggnog_db, checkIfExists: true)))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: EGGNOG_MAPPER.out], '08_annotation', 'EGGNOG_MAPPER'))
+     }
+ 
+     // ---------------- plasmid binning (05) ----------------
+     if (selectedTools(params.plasmid_binning_tools).contains('plasmaag')) {
+         PLASMAAG(ch_plasmids.join(ch_contig_table))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMAAG.out], '05_plasmid_binning', 'PLASMAAG'))
+     }
+     if (selectedTools(params.plasmid_binning_tools).contains('gplas2')) {
+         GPLAS2(ch_plasmids.join(ch_graph))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: GPLAS2.out], '05_plasmid_binning', 'GPLAS2'))
+     }
+     if (selectedTools(params.plasmid_binning_tools).contains('mob_suite') || selectedTools(params.plasmid_binning_tools).contains('mob_recon')) {
+         // nf-core module: no db input (uses mob_suite 3.1.9 bundled db)
+         MOB_RECON(ch_plasmids)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_RECON.out], '05_plasmid_binning', 'MOB_RECON'))
+     }
+     if (selectedTools(params.plasmid_binning_tools).contains('recycler')) {
+         RECYCLER_INPUTS(ch_recycler_graph.join(ch_short_reads,
+             failOnDuplicate: true, failOnMismatch: true))
+         RECYCLER(RECYCLER_INPUTS.out.bam)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: RECYCLER.out], '05_plasmid_binning', 'RECYCLER'))
+     }
+ 
+     emit:
++    report_events = ch_report_events
+     bakta_dir = ch_bakta_dir  // tuple(meta, dir containing *.gbff) for clinker; may be empty
+ }
+--- a/subworkflows/shared_quantification.nf
++++ b/subworkflows/shared_quantification.nf
+@@ -1,3 +1,4 @@
++include { reportEvidence; reportSamples } from '../lib/report_events'
+ /* Cross-sample measurements: one DNA reference, one read technology per sample.
+  * Local per-sample coverage remains separate for MAG and host linking.
+  */
+@@ -19,6 +20,7 @@
+     n_samples
+ 
+     main:
++    ch_report_events = Channel.empty()
+     if (!(read_mode in ['short', 'map-ont', 'map-hifi'])) {
+         error "Unsupported shared-reference read mode: ${read_mode}"
+     }
+@@ -30,33 +32,41 @@
+             tuple(entries.collect { it[0] }, entries.collect { it[2] }, entries.collect { it[4] })
+         }
+     SHARED_CATALOGUE(ch_sources, n_samples)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SHARED_CATALOGUE.out], '10_abundance', 'SHARED_CATALOGUE'))
+     ch_catalogue = SHARED_CATALOGUE.out.catalogue.first()
+     ch_reference = ch_catalogue.filter { dir -> dir.resolve('reference.fasta').size() > 0 }
+         .map { dir -> tuple([id: 'shared_reference'], dir.resolve('reference.fasta')) }.first()
+     ch_mapped = Channel.empty()
+     if (read_mode == 'short') {
+         BOWTIE2_BUILD_SHARED(ch_reference)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_BUILD_SHARED.out], '10_abundance', 'BOWTIE2_BUILD_SHARED'))
+         BOWTIE2_ALIGN_SHARED(
+             ch_short_reads.map { meta, r1, r2 -> tuple(meta, [r1, r2]) },
+             BOWTIE2_BUILD_SHARED.out.index.first(), ch_reference, false, true
+         )
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_ALIGN_SHARED.out], '10_abundance', 'BOWTIE2_ALIGN_SHARED'))
+         ch_mapped = BOWTIE2_ALIGN_SHARED.out.bam
+     } else {
+         MINIMAP2_ALIGN_SHARED(
+             ch_long_reads.map { meta, reads -> tuple(meta + [preset: read_mode], reads) },
+             ch_reference, true, '', false, false
+         )
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_SHARED.out], '10_abundance', 'MINIMAP2_ALIGN_SHARED'))
+         ch_mapped = MINIMAP2_ALIGN_SHARED.out.bam
+     }
+     SAMTOOLS_VIEW_SHARED(ch_mapped.map { meta, bam -> tuple(meta, bam, []) },
+                          [[], [], []], [[], []], [[], []], '')
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_VIEW_SHARED.out], '10_abundance', 'SAMTOOLS_VIEW_SHARED'))
+     COVERM_SHARED(SAMTOOLS_VIEW_SHARED.out.bam, [[], []], true, false, false)
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: COVERM_SHARED.out], '10_abundance', 'COVERM_SHARED'))
+     ch_tables = COVERM_SHARED.out.coverage.toList().map { entries ->
+         tuple(entries.collect { it[0].id }, entries.collect { it[1] })
+     }
+     SHARED_ABUNDANCE_TABLES(ch_catalogue, ch_tables, read_mode == 'short' ? 'bowtie2' : 'minimap2')
++    ch_report_events = ch_report_events.mix(reportEvidence([channels: SHARED_ABUNDANCE_TABLES.out], '10_abundance', 'SHARED_ABUNDANCE_TABLES'))
+ 
+     emit:
++    report_events = ch_report_events
+     contigs = SHARED_ABUNDANCE_TABLES.out.contigs
+     plasmids = SHARED_ABUNDANCE_TABLES.out.plasmids
+     states = SHARED_ABUNDANCE_TABLES.out.states
+--- /dev/null
++++ b/lib/report_events.nf
+@@ -0,0 +1,40 @@
++/* Reporting records describe outputs from this execution, never publishDir.
++ * Only detection files needed for counts are staged; other outputs are
++ * completion/version evidence, without copying large BAMs or databases.
++ */
++def reportValue(value) {
++    if (value instanceof Map) return value.collectEntries { k, v -> [(k.toString()): reportValue(v)] }
++    if (value instanceof Collection) return value.collect { reportValue(it) }
++    if (value == null || value instanceof Number || value instanceof Boolean) return value
++    return value.toString()
++}
++
++def reportEvidence(recordedOutputs, section, producer) {
++    def outputs = recordedOutputs.channels
++    def streams = outputs.getNames().collect { outputName ->
++        outputs.getProperty(outputName).map { value ->
++            tuple([section: section, producer: producer, kind: 'evidence', output: outputName,
++                   evidence: reportValue(value)], [])
++        }
++    }
++    return streams.inject(Channel.empty()) { merged, stream -> merged.mix(stream) }
++}
++
++def reportSamples(channel, kind, producer) {
++    return channel.map { meta, source ->
++        tuple([section: '04_plasmid_detection', producer: producer, kind: kind,
++               sample_id: meta.id.toString()], [source])
++    }
++}
++
++def reportSettings(params) {
++    def keys = ['platform', 'project_name', 'short_read_assembler', 'hybrid_assembler',
++                'consensus_method', 'consensus_weights', 'plasmid_detection_tools',
++                'plasmid_binning_tools', 'typing_tools', 'typing_optional_tools',
++                'annotation_tools', 'annotation_optional_tools', 'host_prediction_tools',
++                'mag_tools', 'comparative_tools', 'comparative_optional_tools',
++                'host_plasmid_linking', 'host_linking_methods', 'host_linking_optional_methods',
++                'run_fastqc', 'run_multiqc', 'run_diversity', 'run_differential_internal',
++                'run_differential_deseq2', 'run_network']
++    return keys.findAll { params.containsKey(it) }.collectEntries { key -> [(key): reportValue(params[key])] }
++}
+--- /dev/null
++++ b/tests/run_report_inputs.py
+@@ -0,0 +1,152 @@
++#!/usr/bin/env python3
++"""Actual REPORT/R Markdown inputs, late producer, stale output and resume checks.
++
++Controlled detection files and a delayed shell writer are interface fixtures,
++not a classifier or annotation benchmark. No published result is a report input.
++"""
++import argparse
++import csv
++import hashlib
++from html.parser import HTMLParser
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def trace(path):
++    with path.open() as stream:
++        return list(csv.DictReader(stream, delimiter='\t'))
++
++
++class Cells(HTMLParser):
++    def __init__(self):
++        super().__init__()
++        self.rows, self.row, self.cell = [], [], None
++
++    def handle_starttag(self, tag, attrs):
++        if tag == 'tr': self.row = []
++        if tag in ['td', 'th']: self.cell = ''
++
++    def handle_data(self, data):
++        if self.cell is not None: self.cell += data
++
++    def handle_endtag(self, tag):
++        if tag in ['td', 'th']:
++            self.row.append(self.cell.strip()); self.cell = None
++        if tag == 'tr' and self.row: self.rows.append(self.row)
++
++
++def prepare(fixture, count=1):
++    fixture.mkdir(parents=True, exist_ok=True)
++    (fixture / 'samples.tsv').write_text('sample_id\nS.1\n001\n')
++    for sid in ['S.1', '001']:
++        folder = fixture / sid
++        folder.mkdir(exist_ok=True)
++        n = count if sid == 'S.1' else 0
++        (folder / 'plasmids.fasta').write_text(''.join(f'>p{i}\nACGT\n' for i in range(n)))
++        (folder / 'consensus.tsv').write_text('sample_id\tcontig_id\tplasmid_call\tsupporting_tools\n' + ''.join(f'{sid}\tp{i}\tplasmid\tcontrolled_input\n' for i in range(n)))
++        (folder / 'structure.tsv').write_text('sample_id\tplasmid_id\tis_circular\n' + ''.join(f'{sid}\tp{i}\tfalse\n' for i in range(n)))
++
++
++def check_report(out, count, late):
++    products = ['report.md', 'report.html', 'methods.md', 'report_data.json', 'report_inputs.json']
++    assert all((out / 'report' / name).is_file() for name in products)
++    data = json.loads((out / 'report/report_data.json').read_text())
++    assert data['samples'] == [{'sample_id': 'S.1', 'consensus_plasmids': count, 'circular': 0, 'detection_tools': 'controlled_input'},
++                               {'sample_id': '001', 'consensus_plasmids': 0, 'circular': 0, 'detection_tools': ''}]
++    annotation = next(r for r in data['sections'] if r['name'] == '08_annotation')
++    assert annotation['present'] == late
++    assert next(r for r in data['sections'] if r['name'] == '06_plasmid_typing')['status'] == 'not_observed'
++    manifest = json.loads((out / 'report/report_inputs.json').read_text())
++    producers = {r['producer'] for r in manifest['records']}
++    assert ('LATE_OPTIONAL' in producers) == late
++    for field in ['report.md', 'methods.md', 'report.html', 'report_data.json', 'report_inputs.json']:
++        assert 'OLD_SAMPLE' not in (out / 'report' / field).read_text()
++    parser = Cells(); parser.feed((out / 'report/report.html').read_text())
++    for row in data['samples']:
++        assert [row['sample_id'], str(row['consensus_plasmids']), '0', row['detection_tools']] in parser.rows
++        assert f"| {row['sample_id']} | {row['consensus_plasmids']} | 0 | {row['detection_tools']} |" in (out / 'report/report.md').read_text()
++    assert 'Reads were quality-filtered' not in data['methods']
++    assert 'static, not runtime probes' in data['methods']
++    return {name: sha(out / 'report' / name) for name in products}
++
++
++def run(base):
++    fixture = base / 'fixtures'
++    prepare(fixture)
++    config = base / 'native.config'
++    config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nprocess.maxForks=1\n"
++                      "conda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\nparams.publish_dir_mode='copy'\n"
++                      "trace.fields='task_id,hash,name,status,exit,submit,start,complete,workdir'\n")
++    sources = ['bin/generate_report.R', 'modules/cross_sample/report.nf', 'lib/report_events.nf',
++               'assets/plasmid_report.Rmd', 'tests/nextflow/report_inputs.nf', 'tests/run_report_inputs.py']
++    hashes = {n: sha(ROOT / n) for n in sources}
++    env = os.environ.copy(); env['PATH'] = str(ROOT / 'bin') + ':' + env['PATH']
++    runs = []
++    for case, late, fail, resume, expected_count in [('late', True, False, False, 1),
++         ('resume_unchanged', True, False, True, 1), ('resume_changed', True, False, True, 2),
++         ('disabled', False, False, False, 1), ('late_failure', True, True, False, 1)]:
++        if case == 'resume_changed': prepare(fixture, 2)
++        if case == 'disabled': prepare(fixture, 1)
++        directory = base / case
++        directory.mkdir()
++        execution = base / ('late' if resume else case)
++        out = execution / 'out'
++        # Poison both real and empty result directories. These must not become
++        # observations. Optional writer publication is deliberately disabled.
++        stale = out / '04_plasmid_detection/consensus'
++        stale.mkdir(parents=True, exist_ok=True)
++        (stale / 'OLD_SAMPLE.plasmid_contigs.fasta').write_text('>old\nACGT\n')
++        (out / '08_annotation').mkdir(exist_ok=True)
++        (out / '06_plasmid_typing').mkdir(exist_ok=True)
++        params = {'outdir': str(out), 'fixture_dir': str(fixture), 'run_late': late, 'fail_late': fail}
++        (directory / 'params.json').write_text(json.dumps(params))
++        cmd = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(ROOT / 'tests/nextflow/report_inputs.nf'),
++               '-params-file', str(directory / 'params.json'), '-work-dir', str(execution / 'work'),
++               '-with-trace', str(directory / 'trace.tsv'), '-ansi-log', 'false']
++        if resume: cmd.append('-resume')
++        result = subprocess.run(cmd, env=env, text=True, capture_output=True, cwd=base)
++        (directory / 'stdout.log').write_text(result.stdout); (directory / 'stderr.log').write_text(result.stderr)
++        tasks = trace(directory / 'trace.tsv') if (directory / 'trace.tsv').exists() else []
++        if fail:
++            assert result.returncode != 0
++            assert 'deliberate-late-failure' in result.stdout + result.stderr
++            assert not any(t['name'].endswith('REPORT (report)') for t in tasks)
++            assert not (out / 'report/report_data.json').exists()
++            products = {}
++        else:
++            assert result.returncode == 0, result.stdout + result.stderr
++            report = next(t for t in tasks if t['name'].endswith('REPORT (report)'))
++            if case == 'resume_unchanged': assert report['status'] == 'CACHED'
++            else: assert report['status'] == 'COMPLETED'
++            if case == 'resume_changed':
++                assert next(t for t in tasks if t['name'] == 'LATE_OPTIONAL')['status'] == 'CACHED'
++            if case == 'late':
++                optional = next(t for t in tasks if t['name'] == 'LATE_OPTIONAL')
++                assert report['start'] >= optional['complete']
++            products = check_report(out, expected_count, late)
++            assert 'render failed' not in ''.join(q.read_text() for q in (execution / 'work').rglob('.command.err'))
++        runs.append({'case': case, 'command': cmd, 'exit': result.returncode, 'tasks': tasks, 'products_sha256': products,
++                     'checks': 'current input identity/counts; late disabled publication still observed; old directories ignored; JSON/HTML/Markdown agree; resume cache tracks explicit content; optional failure prevents report'})
++        assert hashes == {n: sha(ROOT / n) for n in sources}
++        (base / 'run.json').write_text(json.dumps({'pass': True, 'runs': runs, 'source_sha256': hashes,
++            'limitations': ['controlled detection files and delayed shell process, native R Markdown/report; no biological classifier/annotation inference',
++                            'version evidence can contain static process declarations; complete CLI/database/model provenance TA-016 remains incomplete',
++                            'native local backend/Nextflow26.10; no image/remote executor/nf-test certification']}, indent=2) + '\n')
++        print('PASS', case, [(t['name'], t['status']) for t in tasks], flush=True)
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True)
++    args = parser.parse_args()
++    base = Path(args.work_dir).resolve(); base.mkdir(parents=True, exist_ok=True)
++    run(base)
+--- /dev/null
++++ b/tests/nextflow/report_inputs.nf
+@@ -0,0 +1,33 @@
++nextflow.enable.dsl=2
++include { REPORTING } from '../../modules/cross_sample/report'
++include { reportEvidence; reportSamples } from '../../lib/report_events'
++
++process LATE_OPTIONAL {
++    publishDir "${params.outdir}/08_annotation", enabled: false
++    input:
++    val fail_late
++    output:
++    path 'late.txt', emit: result
++    tuple val('LATE_OPTIONAL'), val('controlled_delay'), val('not_a_biological_tool'), emit: versions_control
++    script:
++    """
++    sleep 2
++    ${fail_late ? 'echo deliberate-late-failure >&2; exit 7' : "printf 'declared current output\\n' > late.txt"}
++    """
++}
++
++workflow {
++    ids = ['S.1', '001']
++    fasta = Channel.fromList(ids).map { sid -> tuple([id: sid], file("${params.fixture_dir}/${sid}/plasmids.fasta", checkIfExists: true)) }
++    consensus = Channel.fromList(ids.reverse()).map { sid -> tuple([id: sid], file("${params.fixture_dir}/${sid}/consensus.tsv", checkIfExists: true)) }
++    structure = Channel.fromList(ids).map { sid -> tuple([id: sid], file("${params.fixture_dir}/${sid}/structure.tsv", checkIfExists: true)) }
++    events = reportSamples(fasta, 'plasmid_fasta', 'controlled_detection')
++        .mix(reportSamples(consensus, 'consensus', 'controlled_detection'),
++             reportSamples(structure, 'structure', 'controlled_structure'))
++    if (params.run_late) {
++        LATE_OPTIONAL(params.fail_late)
++        events = events.mix(reportEvidence([channels: LATE_OPTIONAL.out], '08_annotation', 'LATE_OPTIONAL'))
++    }
++    REPORTING(events, file("${params.fixture_dir}/samples.tsv", checkIfExists: true),
++              [platform: 'assembly', project_name: 'Explicit current inputs'])
++}

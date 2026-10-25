@@ -1,0 +1,992 @@
+--- a/main.nf
++++ b/main.nf
+@@ -36,8 +36,8 @@
+ def toolChoices() {
+     return [
+         polishing_tools: ['medaka'],
+-        plasmid_detection_tools: ['genomad','plasme','plasx','platon','scapp'],
+-        plasmid_binning_tools: ['plasmaag','gplas2','mob_recon','mob_suite','scapp','recycler'],
++        plasmid_detection_tools: ['genomad','plasme','plasx','platon'],
++        plasmid_binning_tools: ['plasmaag','gplas2','mob_recon','mob_suite','recycler'],
+         typing_tools: ['plasmidfinder','mob_typer'],
+         typing_optional_tools: ['copla','conjscan','macsyfinder'],
+         host_prediction_tools: ['metaphlan','kraken2','plasmidhostfinder'],
+@@ -69,6 +69,8 @@
+                 paramError("--${key} has an invalid tool name at entry ${index + 1}: ${value} (expected a string)")
+             }
+             def name = value.toString().trim()
++            if (name == 'scapp' && (key in ['plasmid_detection_tools','plasmid_binning_tools']))
++                paramError("SCAPP nodes have been removed; remove 'scapp' from --${key}")
+             if (!name) paramError("--${key} has an empty tool name at entry ${index + 1}")
+             if (!allowed.contains(name)) {
+                 paramError("--${key} has unknown tool '${name}' (choose from ${allowed})")
+--- a/nextflow.config
++++ b/nextflow.config
+@@ -36,12 +36,12 @@
+     polishing_tools = []                    // e.g. ['medaka']
+ 
+     // ---- plasmid detection (04): plasmid_detection ----
+-    plasmid_detection_tools = ['genomad']   // + plasme, plasx, platon, scapp
++    plasmid_detection_tools = ['genomad']   // + plasme, plasx, platon
+     consensus_method = 'weighted_vote'      // intersection | majority_vote | weighted_vote | single_tool
+     consensus_weights = 'genomad:0.6,platon:0.15,plasme:0.15,plasx:0.1'
+ 
+     // ---- plasmid binning (05): plasmid_binning.tools ----
+-    plasmid_binning_tools = []              // plasmaag, gplas2, mob_recon, scapp, recycler
++    plasmid_binning_tools = []              // plasmaag, gplas2, mob_recon, recycler
+ 
+     // ---- typing (06): typing.tools / typing.optional_tools ----
+     typing_tools          = ['plasmidfinder', 'mob_typer']
+--- a/bin/plasmid_consensus.R
++++ b/bin/plasmid_consensus.R
+@@ -6,12 +6,12 @@
+ #
+ # geNomad is mandatory; additional tool outputs are passed via repeated
+ # ``--extra`` arguments and are identified by filename pattern:
+-# ``*.plasme.tsv``, ``*.plasx.tsv``, ``*.platon.tsv``, ``*.scapp.fasta``.
++# ``*.plasme.tsv``, ``*.plasx.tsv``, ``*.platon.tsv``.
+ #
+ # The consensus table follows the plasmidEC ensemble schema
+ # (github.com/lisavader/plasmidEC, maintained at gitlab.com/mmb-umcu/plasmidEC):
+ # one row per contig, one fixed column per detection tool
+-# (genomad/plasme/plasx/platon/scapp) holding that tool's call
++# (genomad/plasme/plasx/platon) holding that tool's call
+ # (``plasmid``/``chromosome``/``NA`` when the tool is disabled), plus
+ # ``plasmid_count`` (number of tools calling the contig a plasmid) and
+ # ``combined_prediction`` (plain majority vote). The ``plasmid_call`` column
+@@ -33,7 +33,7 @@
+ DEFAULT_WEIGHTS <- "genomad:0.6,platon:0.15,plasme:0.15,plasx:0.1"
+ # Fixed ensemble column order in the consensus table (plasmidEC-style); a
+ # tool that did not run gets "NA" in its column.
+-ENSEMBLE_TOOLS <- c("genomad", "plasme", "plasx", "platon", "scapp")
++ENSEMBLE_TOOLS <- c("genomad", "plasme", "plasx", "platon")
+ 
+ die <- function(msg) {
+   cat(msg, "\n", file = stderr(), sep = "")
+@@ -203,6 +203,10 @@
+     error = function(e) die(paste0("Cannot read FASTA ", path, ": ", conditionMessage(e)))
+   )
+   check_unique_ids(fasta_ids(dss), path, "FASTA")
++  empty <- which(width(dss) == 0L)
++  if (length(empty) > 0L)
++    die(sprintf("Empty FASTA sequence '%s' in %s record %d",
++                fasta_ids(dss)[empty[1L]], path, empty[1L]))
+   dss
+ }
+ 
+@@ -211,13 +215,6 @@
+     h <- trimws(h)
+     sub("[[:space:]].*$", "", h)
+   }, character(1), USE.NAMES = FALSE)
+-}
+-
+-parse_scapp <- function(path) {
+-  dss <- read_fasta_dss(path)
+-  ids <- fasta_ids(dss)
+-  list(score = as.list(stats::setNames(rep(1.0, length(ids)), ids)),
+-       is_plasmid = as.list(stats::setNames(rep(TRUE, length(ids)), ids)))
+ }
+ 
+ identify_extra <- function(path) {
+@@ -227,7 +224,8 @@
+   if (grepl("\\.plasx\\.(tsv|csv)(\\.gz)?$", name)) return("plasx")
+   if (grepl("\\.platon\\.(tsv|csv)(\\.gz)?$", name)) return("platon")
+   if (grepl("\\.scapp\\.(fa|fna|fasta)(\\.gz)?$", name) ||
+-      grepl("(^|[._-])confident_cycs\\.(fa|fna|fasta)(\\.gz)?$", name)) return("scapp")
++      grepl("(^|[._-])confident_cycs\\.(fa|fna|fasta)(\\.gz)?$", name))
++    die(paste0("SCAPP support has been removed; unsupported prediction source: ", path))
+   NULL
+ }
+ 
+@@ -241,6 +239,7 @@
+     if (count_char(item, ":") != 1L || length(parts) != 2L)
+       die(paste0("Invalid consensus weights: expected tool:value in ", py_repr(item)))
+     key <- trimws(parts[1L])
++    if (key == "scapp") die("SCAPP support has been removed; remove scapp from consensus weights")
+     if (!key %in% ENSEMBLE_TOOLS)
+       die(paste0("Invalid consensus weights: unknown tool in ", py_repr(item)))
+     if (key %in% names(weights))
+@@ -319,11 +318,14 @@
+                   tool, extra, sources[[tool]]))
+     }
+     sources[[tool]] <- extra
+-    if (tool == "scapp") {
+-      calls[[tool]] <- parse_scapp(extra)
+-    } else {
+-      calls[[tool]] <- parse_generic_predictions(extra, tool)
+-    }
++    calls[[tool]] <- parse_generic_predictions(extra, tool)
++  }
++
++  for (tool in names(calls)) {
++    unresolved <- setdiff(names(calls[[tool]]$score), ids)
++    if (length(unresolved) > 0L)
++      die(sprintf("Unresolved prediction ID '%s' from %s at %s: not found in assembly sequences",
++                  unresolved[1L], tool, sources[[tool]]))
+   }
+ 
+   weights <- parse_weights(args$weights)
+@@ -384,7 +386,7 @@
+     info <- contig_info[[cid]]
+     # plasmidEC-style ensemble cells: every active tool reports either
+     # "plasmid" or "chromosome" (for positive-only outputs such as
+-    # geNomad/Platon/SCAPP, absence of a call is a chromosome call);
++    # geNomad/Platon, absence of a call is a chromosome call);
+     # disabled tools keep "NA".
+     ensemble <- vapply(ENSEMBLE_TOOLS, function(t) {
+       if (!(t %in% names(calls))) return("NA")
+--- a/modules/detection/scapp.nf
++++ /dev/null
+@@ -1,30 +0,0 @@
+-/*
+- * SCAPP assembly-graph plasmid detection (pipeline step:
+- * plasmid_detect_scapp; optional, illumina + metaSPAdes graph only).
+- */
+-process SCAPP_DETECT {
+-    tag { meta.id }
+-    label 'process_medium'
+-    conda "${projectDir}/envs/scapp.yml"
+-    // bioconda 最新仅 0.1.4（envs pin scapp>=0.1.5 无对应容器镜像）
+-    container 'quay.io/biocontainers/scapp:0.1.4--py_0'
+-
+-    publishDir "${params.outdir}/04_plasmid_detection/scapp", mode: params.publish_dir_mode
+-
+-    input:
+-    tuple val(meta), path(assembly_graph), path(read1), path(read2)
+-
+-    output:
+-    tuple val(meta), path("${meta.id}.scapp.fasta"), emit: predictions
+-    tuple val(meta), path("${meta.id}.scapp_out", type: 'dir'), emit: output_dir
+-
+-    script:
+-    """
+-    scapp -g ${assembly_graph} -o ${meta.id}.scapp_out -k 77 -p ${task.cpus} \\
+-        -r1 ${read1} -r2 ${read2}
+-    touch ${meta.id}.scapp.fasta
+-    for f in ${meta.id}.scapp_out/*.confident_cycs.fasta; do
+-        [ -f "\$f" ] && cat "\$f" >> ${meta.id}.scapp.fasta
+-    done
+-    """
+-}
+--- a/modules/binning/scapp_bin.nf
++++ /dev/null
+@@ -1,24 +0,0 @@
+-/*
+- * SCAPP plasmid reconstruction from the assembly graph (pipeline step:
+- * plasmid_binning_scapp; optional; requires graph + short reads).
+- */
+-process SCAPP_BIN {
+-    tag { meta.id }
+-    label 'process_medium'
+-    conda "${projectDir}/envs/scapp.yml"
+-    container 'quay.io/biocontainers/scapp:0.1.4--py_0'
+-
+-    publishDir "${params.outdir}/05_plasmid_binning/scapp", mode: params.publish_dir_mode
+-
+-    input:
+-    tuple val(meta), path(assembly_graph), path(read1), path(read2)
+-
+-    output:
+-    tuple val(meta), path("${meta.id}.scapp_bin_out", type: 'dir'), emit: output_dir
+-
+-    script:
+-    """
+-    scapp -g ${assembly_graph} -o ${meta.id}.scapp_bin_out -k 77 -p ${task.cpus} \\
+-        -r1 ${read1} -r2 ${read2}
+-    """
+-}
+--- a/envs/scapp.yml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-name: autoplasm-scapp
+-channels:
+-  - conda-forge
+-  - bioconda
+-dependencies:
+-  - scapp>=0.1.5
+--- a/modules/nf-core/spades/main.nf
++++ b/modules/nf-core/spades/main.nf
+@@ -19,7 +19,7 @@
+     tuple val(meta), path('*.gene_clusters.fa.gz'), optional:true, emit: gene_clusters
+     tuple val(meta), path('*.assembly.gfa.gz')    , optional:true, emit: gfa
+     // Local patch (refactor/nf-core-modules): also export SPAdes'
+-    // assembly_graph.fastg. The pipeline's SCAPP/Recycler plasmid binning
++    // assembly_graph.fastg. The pipeline's Recycler plasmid binning
+     // consumes the FASTG graph (upstream only exports the GFA sibling).
+     tuple val(meta), path('*.assembly_graph.fastg'), optional:true, emit: fastg
+     // Local interface: graph and k provenance come from this same successful task.
+@@ -70,7 +70,7 @@
+         gzip -n ${prefix}.assembly.gfa
+     fi
+ 
+-    # Local patch (refactor/nf-core-modules): keep the FASTG graph for SCAPP.
++    # Local patch (refactor/nf-core-modules): keep the FASTG graph for Recycler and graph consumers.
+     if [ -f assembly_graph.fastg ]; then
+         cp assembly_graph.fastg ${prefix}.assembly_graph.fastg
+         cat > .spades_graph_provenance.py <<'SPADES_GRAPH_PROVENANCE_PY'
+--- a/subworkflows/plasmid_detection.nf
++++ b/subworkflows/plasmid_detection.nf
+@@ -2,7 +2,7 @@
+ 
+ /*
+  * Shared plasmid detection subworkflow: geNomad via the nf-core
+- * genomad/endtoend module (mandatory) + optional PLASMe/PlasX/Platon/SCAPP,
++ * genomad/endtoend module (mandatory) + optional PLASMe/PlasX/Platon,
+  * followed by consensus integration (pipeline step plasmid_consensus) and
+  * structure detection (plasmid_structure).
+  */
+@@ -10,14 +10,12 @@
+ include { PLASME } from '../modules/detection/plasme'
+ include { PLASX } from '../modules/detection/plasx'
+ include { PLATON } from '../modules/detection/platon'
+-include { SCAPP_DETECT } from '../modules/detection/scapp'
+ include { PLASMID_CONSENSUS } from '../modules/detection/consensus'
+ include { PLASMID_STRUCTURE } from '../modules/detection/structure'
+ 
+ workflow PLASMID_DETECTION {
+     take:
+     ch_assembly    // tuple(meta, fasta)
+-    ch_scapp_reads // tuple(meta, graph, r1, r2); empty unless SCAPP can run
+ 
+     main:
+     // nf-core module expects the database as tuple val(meta2), path(db); the
+@@ -41,11 +39,6 @@
+         PLATON(ch_assembly, Channel.value(file(params.platon_db, checkIfExists: true)))
+         ch_platon = PLATON.out.predictions
+     }
+-    ch_scapp = Channel.empty()
+-    if (selectedTools(params.plasmid_detection_tools).contains('scapp')) {
+-        SCAPP_DETECT(ch_scapp_reads)
+-        ch_scapp = SCAPP_DETECT.out.predictions
+-    }
+ 
+     // Merge per-sample: missing optional tools become null and are dropped
+     // from the extras list, so disabled tools never block the consensus.
+@@ -54,9 +47,8 @@
+         .join(ch_plasme, remainder: true)
+         .join(ch_plasx, remainder: true)
+         .join(ch_platon, remainder: true)
+-        .join(ch_scapp, remainder: true)
+-        .map { meta, summary, assembly, plasme, plasx, platon, scapp ->
+-            def extras = [plasme, plasx, platon, scapp].findAll { it != null }
++        .map { meta, summary, assembly, plasme, plasx, platon ->
++            def extras = [plasme, plasx, platon].findAll { it != null }
+             tuple(meta, assembly, summary, extras)
+         }
+ 
+--- a/subworkflows/plasmid_downstream.nf
++++ b/subworkflows/plasmid_downstream.nf
+@@ -30,7 +30,6 @@
+ include { PLASMAAG } from '../modules/binning/plasmaag'
+ include { GPLAS2 } from '../modules/binning/gplas2'
+ include { MOBSUITE_RECON as MOB_RECON } from '../modules/nf-core/mobsuite/recon'
+-include { SCAPP_BIN } from '../modules/binning/scapp_bin'
+ include { RECYCLER } from '../modules/binning/recycler'
+ include { RECYCLER_INPUTS } from '../modules/binning/recycler_inputs'
+ 
+@@ -40,7 +39,7 @@
+     ch_graph         // tuple(meta, graph) or empty
+     ch_contig_bam    // tuple(meta, bam) or empty
+     ch_contig_table  // tuple(meta, coverm tsv) or empty
+-    ch_short_reads   // tuple(meta, r1, r2) or empty (SCAPP binning)
++    ch_short_reads   // tuple(meta, r1, r2) or empty (Recycler graph-node alignment)
+     ch_recycler_graph // tuple(meta, FASTG, graph_provenance.json) from same SPAdes task
+ 
+     main:
+@@ -128,9 +127,6 @@
+         // nf-core module: no db input (uses mob_suite 3.1.9 bundled db)
+         MOB_RECON(ch_plasmids)
+     }
+-    if (selectedTools(params.plasmid_binning_tools).contains('scapp')) {
+-        SCAPP_BIN(ch_graph.join(ch_short_reads))
+-    }
+     if (selectedTools(params.plasmid_binning_tools).contains('recycler')) {
+         RECYCLER_INPUTS(ch_recycler_graph.join(ch_short_reads,
+             failOnDuplicate: true, failOnMismatch: true))
+--- a/subworkflows/illumina.nf
++++ b/subworkflows/illumina.nf
+@@ -87,11 +87,7 @@
+     CONTIG_COVERAGE(ch_assembly, ch_final_reads, Channel.empty(), 'map-ont')
+ 
+     // ---------------- plasmid detection (04) ----------------
+-    // SCAPP detection needs the metaSPAdes graph + reads
+-    ch_scapp_reads = params.short_read_assembler == 'metaspades'
+-        ? ch_graph.join(ch_final_reads)
+-        : Channel.empty()
+-    PLASMID_DETECTION(ch_assembly, ch_scapp_reads)
++    PLASMID_DETECTION(ch_assembly)
+     // Skip samples whose consensus is empty so downstream tools never see
+     // an empty FASTA
+     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
+--- a/subworkflows/hybrid.nf
++++ b/subworkflows/hybrid.nf
+@@ -133,7 +133,7 @@
+     CONTIG_COVERAGE(ch_assembly, ch_final_short, ch_final_long, 'map-ont')
+ 
+     // ---------------- plasmid detection (04) ----------------
+-    PLASMID_DETECTION(ch_assembly, Channel.empty())
++    PLASMID_DETECTION(ch_assembly)
+     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
+ 
+     PLASMID_DOWNSTREAM(
+--- a/subworkflows/ont.nf
++++ b/subworkflows/ont.nf
+@@ -97,7 +97,7 @@
+     CONTIG_COVERAGE(ch_assembly, Channel.empty(), ch_final_long, 'map-ont')
+ 
+     // ---------------- plasmid detection (04) ----------------
+-    PLASMID_DETECTION(ch_assembly, Channel.empty())
++    PLASMID_DETECTION(ch_assembly)
+     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
+ 
+     PLASMID_DOWNSTREAM(
+--- a/subworkflows/pacbio_hifi.nf
++++ b/subworkflows/pacbio_hifi.nf
+@@ -84,7 +84,7 @@
+     CONTIG_COVERAGE(ch_assembly, Channel.empty(), ch_final_long, 'map-hifi')
+ 
+     // ---------------- plasmid detection (04) ----------------
+-    PLASMID_DETECTION(ch_assembly, Channel.empty())
++    PLASMID_DETECTION(ch_assembly)
+     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
+ 
+     PLASMID_DOWNSTREAM(
+--- a/subworkflows/assembly.nf
++++ b/subworkflows/assembly.nf
+@@ -20,7 +20,7 @@
+     QUAST(ch_assembly.map { meta, fasta -> tuple(meta, [fasta]) },
+         Channel.value([[:], []]), Channel.value([[:], []]))
+ 
+-    PLASMID_DETECTION(ch_assembly, Channel.empty())
++    PLASMID_DETECTION(ch_assembly)
+     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
+ 
+     PLASMID_DOWNSTREAM(
+--- a/tests/test_consensus_integrity.py
++++ b/tests/test_consensus_integrity.py
+@@ -17,8 +17,6 @@
+             if kind=='assembly':assembly.write_text('>p1 original\nACGT\n>p1 alternate\nACGTTGCA\n')
+             elif kind=='genomad':
+                 source=summary;summary.write_text('seq_name\tplasmid_score\np1\t0.9\np1\t0.2\n')
+-            elif kind=='scapp':
+-                source=base/'S.scapp.fasta';source.write_text('>p1 one\nACGT\n>p1 two\nACGTTGCA\n');extras=[source]
+             elif kind in ['table','identical']:
+                 source=base/'S.platon.tsv';rows=['p1\tplasmid',' p1 \tchromosome']
+                 if kind=='identical':rows=['p1\tplasmid','p1\tplasmid']
+@@ -44,7 +42,6 @@
+ 
+     def test_duplicate_normalized_assembly_ids(self):self.check_duplicate('assembly')
+     def test_duplicate_genomad_records(self):self.check_duplicate('genomad')
+-    def test_duplicate_scapp_fasta_ids(self):self.check_duplicate('scapp')
+     def test_conflicting_rows_rejected_in_either_order(self):
+         for reverse in [False,True]:
+             with self.subTest(reverse=reverse):self.check_duplicate('table',reverse)
+--- a/tests/test_plasmid_consensus.py
++++ b/tests/test_plasmid_consensus.py
+@@ -161,12 +161,11 @@
+     def test_tool_identity_and_calls_survive_tool_tokens_in_sample_id(self):
+         sample = "S.plasme.plasx.platon.scapp.confident_cycs"
+         sequence = "ACGT" * 300
+-        tools = ("plasme", "plasx", "platon", "scapp")
++        tools = ("plasme", "plasx", "platon")
+         for tool in tools:
+             with self.subTest(tool=tool):
+-                suffix = "fasta" if tool == "scapp" else "tsv"
+-                prediction = (f">p1\n{sequence}\n" if tool == "scapp" else
+-                              "contig_id\tclassification\tscore\np1\tplasmid\t0.9\n")
++                suffix = "tsv"
++                prediction = "contig_id\tclassification\tscore\np1\tplasmid\t0.9\n"
+                 weights = "genomad:0.4," + ",".join(
+                     f"{name}:{0.6 if name == tool else 0.1}" for name in tools
+                 )
+@@ -186,7 +185,7 @@
+                 self.assertEqual(fasta[0], ">p1")
+                 self.assertEqual("".join(fasta[1:]), sequence)
+ 
+-    def test_terminal_csv_gzip_and_confident_cycles_remain_supported(self):
++    def test_terminal_csv_gzip_remain_supported(self):
+         sequence = "ACGT" * 300
+         assembly = self.root / "assembly.fasta"
+         assembly.write_text(f">p1\n{sequence}\n")
+@@ -195,7 +194,6 @@
+         cases = [
+             ("S.plasme.X.PLATON.CSV", "contig_id,score\np1,0.9\n", "platon"),
+             ("S.plasme.X.platon.tsv.gz", "contig_id\tscore\np1\t0.9\n", "platon"),
+-            ("S.plasme.X.confident_cycs.fasta", f">p1\n{sequence}\n", "scapp"),
+         ]
+         for name, content, tool in cases:
+             with self.subTest(name=name):
+@@ -207,7 +205,7 @@
+                     extra.write_text(content)
+                 result = self.run_script(
+                     "--assembly", assembly, "--genomad-summary", summary,
+-                    "--extra", extra, "--weights", "genomad:0.4,platon:0.6,scapp:0.6",
++                    "--extra", extra, "--weights", "genomad:0.4,platon:0.6",
+                     "--out-fasta", self.root / "out.fa",
+                     "--out-predictions", self.root / "pred.tsv",
+                     "--out-consensus", self.root / "cons.tsv",
+@@ -255,7 +253,7 @@
+             [],
+         )
+         row = rows[0]
+-        for tool in ("plasme", "plasx", "platon", "scapp"):
++        for tool in ("plasme", "plasx", "platon"):
+             self.assertEqual(row[tool], "NA")
+         self.assertEqual(row["genomad"], "plasmid")
+         self.assertEqual(row["plasmid_count"], "1")
+@@ -267,7 +265,7 @@
+                          ["contig_id", "sample_id", "plasmid_call", "supporting_tools",
+                           "conflicting_tools", "consensus_method", "length", "gc_content",
+                           "plasmid_count", "combined_prediction",
+-                          "genomad", "plasme", "plasx", "platon", "scapp"])
++                          "genomad", "plasme", "plasx", "platon"])
+ 
+ 
+ if __name__ == "__main__":
+--- /dev/null
++++ b/tests/test_consensus_inputs.py
+@@ -0,0 +1,89 @@
++"""Consensus inputs share the assembly ID universe; retired SCAPP inputs fail."""
++from pathlib import Path
++import csv
++import gzip
++import subprocess
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++class ConsensusInputTests(unittest.TestCase):
++    def run_case(self, assembly='>p1\nACGT\n', summary='seq_name\tplasmid_score\np1\t0.99\n',
++                 extra=None, weights=None, error=None):
++        with tempfile.TemporaryDirectory() as directory:
++            base = Path(directory)
++            (base / 'assembly.fa').write_text(assembly)
++            (base / 'genomad.tsv').write_text(summary)
++            outputs = [base / name for name in ['out.fa', 'pred.tsv', 'cons.tsv']]
++            args = ['Rscript', str(ROOT / 'bin/plasmid_consensus.R'),
++                    '--assembly', str(base / 'assembly.fa'),
++                    '--genomad-summary', str(base / 'genomad.tsv')]
++            if extra:
++                name, content = extra
++                path = base / name
++                if name.endswith('.gz'):
++                    with gzip.open(path, 'wt') as stream:
++                        stream.write(content)
++                else:
++                    path.write_text(content)
++                args += ['--extra', str(path)]
++            if weights is not None:
++                args += ['--weights', weights]
++            for flag, path in zip(['--out-fasta', '--out-predictions', '--out-consensus'], outputs):
++                args += [flag, str(path)]
++            result = subprocess.run(args, capture_output=True, text=True)
++            if error:
++                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
++                self.assertIn(error, result.stderr)
++                self.assertTrue(all(not path.exists() for path in outputs))
++                return
++            self.assertEqual(result.returncode, 0, result.stderr)
++            with outputs[2].open() as stream:
++                reader = csv.DictReader(stream, delimiter='\t')
++                rows = list(reader)
++                self.assertEqual(reader.fieldnames[-4:], ['genomad', 'plasme', 'plasx', 'platon'])
++                self.assertNotIn('scapp', reader.fieldnames)
++            return outputs[0].read_text(), rows
++
++    def test_retired_fasta_sources_rejected_before_output(self):
++        for name in ['S.scapp.fasta', 'S.scapp.fa.gz', 'confident_cycs.fasta',
++                     'S.confident_cycs.fna.gz']:
++            with self.subTest(name=name):
++                self.run_case(extra=(name, '>RNODE_1\nACGT\n'),
++                              error='SCAPP support has been removed; unsupported prediction source:')
++
++    def test_retired_weight_rejected_before_output(self):
++        self.run_case(weights='genomad:0.6,scapp:0.4',
++                      error='SCAPP support has been removed; remove scapp from consensus weights')
++
++    def test_unknown_prediction_ids_rejected_even_for_negative_calls(self):
++        for label in ['plasmid', 'chromosome']:
++            with self.subTest(label=label):
++                self.run_case(extra=('S.platon.tsv', 'contig_id\tclassification\nmissing\t' + label + '\n'),
++                              error="Unresolved prediction ID 'missing' from platon")
++        self.run_case(summary='seq_name\tplasmid_score\nmissing\t0.99\n',
++                      error="Unresolved prediction ID 'missing' from genomad")
++
++    def test_empty_record_rejected_before_output(self):
++        self.run_case(assembly='>p1\n\n>p2\nACGT\n', error="Empty FASTA sequence 'p1'")
++
++    def test_empty_assembly_and_empty_predictions_remain_valid(self):
++        fasta, rows = self.run_case(assembly='', summary='seq_name\tplasmid_score\n')
++        self.assertEqual(fasta, '')
++        self.assertEqual(rows, [])
++
++    def test_remaining_tool_with_scapp_in_sample_name_is_valid(self):
++        fasta, rows = self.run_case(extra=('sample.scapp.confident_cycs.platon.tsv',
++                                          'contig_id\tclassification\np1\tplasmid\n'))
++        self.assertEqual(fasta, '>p1\nACGT\n')
++        self.assertEqual(len(rows), 1)
++        self.assertEqual(rows[0]['plasmid_call'], 'plasmid')
++        self.assertEqual(rows[0]['platon'], 'plasmid')
++        self.assertEqual(rows[0]['length'], '4')
++        self.assertEqual(rows[0]['gc_content'], '0.5000')
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- /dev/null
++++ b/tests/run_consensus_inputs.py
+@@ -0,0 +1,110 @@
++#!/usr/bin/env python3
++"""Native consensus/structure contract checks with controlled inputs, no classifier inference."""
++from pathlib import Path
++import argparse
++import csv
++import hashlib
++import json
++import os
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def read_fasta(path):
++    records = {}
++    key = None
++    for line in path.read_text().splitlines():
++        if line.startswith('>'):
++            key = line[1:].split()[0]
++            assert key not in records
++            records[key] = ''
++        else:
++            records[key] += line
++    return records
++
++
++def run_checks(base):
++    fixture = base / 'fixtures'
++    fixture.mkdir()
++    dna = 'ACGT' * 300
++    expected = {'genomad': {'p1': dna}, 'platon': {'p1': dna}, 'negative': {}, 'empty': {}}
++    for sid in [*expected, 'legacy', 'foreign', 'empty-record']:
++        assembly = '>p1 original header\n' + dna + '\n'
++        summary = 'seq_name\tplasmid_score\n'
++        if sid in ['genomad', 'platon']:
++            summary += 'p1\t0.99\n'
++        if sid == 'empty':
++            assembly = ''
++        if sid == 'empty-record':
++            assembly = '>p1\n'
++        if sid == 'foreign':
++            summary += 'foreign\t0.99\n'
++        (fixture / (sid + '.assembly.fa')).write_text(assembly)
++        (fixture / (sid + '.genomad.tsv')).write_text(summary)
++        if sid == 'platon':
++            (fixture / (sid + '.platon.tsv')).write_text('contig_id\tclassification\np1\tplasmid\n')
++        if sid == 'legacy':
++            (fixture / (sid + '.scapp.fasta')).write_text('>RNODE_1\n' + dna + '\n')
++    config = base / 'native.config'
++    config.write_text("params.consensus_method='weighted_vote'\n"
++                      "params.consensus_weights='genomad:0.6,platon:0.4'\n"
++                      "params.publish_dir_mode='copy'\nprocess.executor='local'\n"
++                      "process.cpus=1\nprocess.memory='1 GB'\n"
++                      "conda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n")
++    runs = []
++    cases = [('positive', ','.join(expected), None),
++             ('legacy', 'legacy', 'SCAPP support has been removed'),
++             ('foreign', 'foreign', 'Unresolved prediction ID'),
++             ('empty-record', 'empty-record', 'Empty FASTA sequence')]
++    for case, ids, error in cases:
++        p = base / case
++        p.mkdir()
++        (p / 'params.json').write_text(json.dumps({'fixture_dir': str(fixture), 'ids': ids,
++                                                 'outdir': str(p / 'out')}))
++        command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run',
++                   str(ROOT / 'tests/nextflow/consensus_inputs.nf'), '-params-file',
++                   str(p / 'params.json'), '-work-dir', str(p / 'work'),
++                   '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
++        env = os.environ.copy()
++        env['PATH'] = str(ROOT / 'bin') + ':' + env['PATH']
++        result = subprocess.run(command, env=env, capture_output=True, text=True)
++        (p / 'stdout.log').write_text(result.stdout)
++        (p / 'stderr.log').write_text(result.stderr)
++        tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []
++        if error:
++            checks = {'nonzero': result.returncode != 0, 'diagnostic': error in result.stdout + result.stderr,
++                      'one_failed_consumer': len(tasks) == 1 and tasks[0]['status'] == 'FAILED' and tasks[0]['exit'] == '2',
++                      'no_published_files': not [f for f in (p / 'out').rglob('*') if f.is_file()]}
++        else:
++            checks = {'success': result.returncode == 0,
++                      'eight_completed_tasks': len(tasks) == 8 and all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks)}
++            if checks['success']:
++                for sid, sequences in expected.items():
++                    out = p / 'out/04_plasmid_detection'
++                    consensus = out / 'consensus' / (sid + '.plasmid_consensus.tsv')
++                    rows = list(csv.DictReader(consensus.open(), delimiter='\t'))
++                    structure = list(csv.DictReader((out / 'structure' / (sid + '.plasmid_structure.tsv')).open(), delimiter='\t'))
++                    checks[sid + '_DNA'] = read_fasta(out / 'consensus' / (sid + '.plasmid_contigs.fasta')) == sequences
++                    checks[sid + '_identity'] = {r['contig_id'] for r in rows if r['plasmid_call'] == 'plasmid'} == set(sequences)
++                    checks[sid + '_structure'] = {r['plasmid_id'] for r in structure} == set(sequences) and all(int(r['length_bp']) == len(sequences[r['plasmid_id']]) for r in structure)
++                    checks[sid + '_metrics'] = all(r['sample_id'] == sid and int(r['length']) == 1200 and float(r['gc_content']) == 0.5 and 'scapp' not in r for r in rows)
++        runs.append({'case': case, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
++        print(case, checks, flush=True)
++        sources = ['bin/plasmid_consensus.R', 'bin/plasmid_structure.R', 'modules/detection/consensus.nf',
++                   'modules/detection/structure.nf', 'tests/nextflow/consensus_inputs.nf', 'tests/run_consensus_inputs.py']
++        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs),
++                   'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in sources},
++                   'limitations': ['controlled fixtures; native original R modules', 'no classifier inference, database/model, image, nf-test or full platform certification']}
++        (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    return receipt['pass']
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True)
++    args = parser.parse_args()
++    base = Path(args.work_dir).resolve()
++    base.mkdir(parents=True, exist_ok=True)
++    raise SystemExit(0 if run_checks(base) else 1)
+--- /dev/null
++++ b/tests/nextflow/consensus_inputs.nf
+@@ -0,0 +1,17 @@
++nextflow.enable.dsl=2
++
++include { PLASMID_CONSENSUS } from '../../modules/detection/consensus'
++include { PLASMID_STRUCTURE } from '../../modules/detection/structure'
++
++workflow {
++    inputs = Channel.fromList(params.ids.split(',').toList()).map { sid ->
++        def base = "${params.fixture_dir}/${sid}"
++        def extra = file("${base}.platon.tsv")
++        def legacy = file("${base}.scapp.fasta")
++        def extras = extra.exists() ? [extra] : (legacy.exists() ? [legacy] : [])
++        tuple([id: sid], file("${base}.assembly.fa", checkIfExists: true),
++              file("${base}.genomad.tsv", checkIfExists: true), extras)
++    }
++    PLASMID_CONSENSUS(inputs)
++    PLASMID_STRUCTURE(PLASMID_CONSENSUS.out.contigs)
++}
+--- /dev/null
++++ b/tests/run_detection_selection.py
+@@ -0,0 +1,117 @@
++#!/usr/bin/env python3
++"""Original detection workflow with explicit classifier CLI observers and native R consumers."""
++from pathlib import Path
++import argparse
++import csv
++import hashlib
++import json
++import os
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++OBSERVER = '''#!/usr/bin/env python3
++# Controlled interface output only; no classification/model/database inference.
++from pathlib import Path
++import sys,time
++tool=Path(sys.argv[0]).name;args=sys.argv[1:]
++if '--version' in args:
++ print('geNomad, version INTERFACE_OBSERVER');raise SystemExit()
++if tool=='prodigal':
++ for flag in ['-o','-a','-d']:Path(args[args.index(flag)+1]).write_text('')
++ raise SystemExit()
++if tool=='genomad':
++ source=Path(args[1]);out=Path(args[2]);prefix=source.stem
++ if prefix=='S1':time.sleep(1)
++ for kind in ['annotate','find_proviruses','summary']:(out/(prefix+'_'+kind)).mkdir(parents=True)
++ (out/(prefix+'_annotate')/(prefix+'_taxonomy.tsv')).write_text('')
++ (out/(prefix+'_find_proviruses')/(prefix+'_provirus.tsv')).write_text('')
++ summary=out/(prefix+'_summary');cid=source.read_text().splitlines()[0][1:]
++ for entity in ['plasmid','virus']:
++  for suffix in ['.fna','_proteins.faa','_genes.tsv','_summary.tsv']:
++   text=('seq_name\\tplasmid_score\\n'+(cid+'\\t0.99\\n' if prefix=='S1' else '')) if suffix=='_summary.tsv' else ''
++   (summary/(prefix+'_'+entity+suffix)).write_text(text)
++elif tool=='PLASMe.py':
++ source=Path(args[0]);out=Path(args[1]+'.csv');cid=source.read_text().splitlines()[0][1:]
++ out.write_text('contig_id,classification\\n'+cid+',plasmid\\n')
++elif tool=='platon':
++ source=Path(args[-1]);out=Path(args[args.index('--prefix')+1]+'.tsv');cid=source.read_text().splitlines()[0][1:]
++ out.write_text('contig_id\\tclassification\\n'+cid+'\\tplasmid\\n')
++elif tool=='plasx':
++ out=Path(args[args.index('-o')+1]);sid=out.name.removesuffix('.plasx.tsv')
++ out.write_text('contig_id\\tclassification\\n'+sid+'_contig\\tplasmid\\n')
++else:raise SystemExit('Unexpected observer CLI '+tool)
++'''
++
++
++def run_checks(base):
++    fixture = base / 'fixtures'
++    fixture.mkdir()
++    sequences = {'S1': 'ACGT' * 300, 'S.2': 'GCGC' * 350}
++    for sid, dna in sequences.items():
++        (fixture / (sid + '.fasta')).write_text('>' + sid + '_contig\n' + dna + '\n')
++    (fixture / 'db').mkdir()
++    for name in ['annotations', 'model']:
++        (fixture / name).write_text('INTERFACE_OBSERVER_ONLY\n')
++    observer_bin = base / 'observer-bin'
++    observer_bin.mkdir()
++    for tool in ['genomad', 'PLASMe.py', 'plasx', 'platon', 'prodigal']:
++        script = observer_bin / tool
++        script.write_text(OBSERVER)
++        script.chmod(0o755)
++    config = base / 'config'
++    config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\n"
++                      "params.publish_dir_mode='copy'\nparams.consensus_method='weighted_vote'\n"
++                      "params.consensus_weights='genomad:0.6,platon:0.15,plasme:0.15,plasx:0.1'\n"
++                      "conda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n")
++    runs = []
++    for case, tools in [('disabled', []), ('platon', [' platon ']), ('all', ['plasme', 'plasx', 'platon'])]:
++        p = base / case
++        p.mkdir()
++        params = {'fixture_dir': str(fixture), 'outdir': str(p / 'out'), 'plasmid_detection_tools': tools,
++                  'genomad_db': str(fixture / 'db'), 'platon_db': str(fixture / 'db'),
++                  'plasme_db': str(fixture / 'db'), 'plasx_annotations': str(fixture / 'annotations'),
++                  'plasx_model': str(fixture / 'model')}
++        (p / 'params.json').write_text(json.dumps(params))
++        command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run',
++                   str(ROOT / 'tests/nextflow/detection_selection.nf'), '-params-file', str(p / 'params.json'),
++                   '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
++        env = os.environ.copy()
++        env['PATH'] = str(observer_bin) + ':' + str(ROOT / 'bin') + ':' + env['PATH']
++        result = subprocess.run(command, env=env, capture_output=True, text=True)
++        (p / 'stdout.log').write_text(result.stdout)
++        (p / 'stderr.log').write_text(result.stderr)
++        tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []
++        selected = {tool.strip() for tool in tools}
++        checks = {'success': result.returncode == 0, 'task_count': len(tasks) == 2 * (3 + len(selected)),
++                  'completed': bool(tasks) and all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks),
++                  'no_retired_tasks': all('SCAPP' not in t['name'] for t in tasks)}
++        if checks['success']:
++            out = p / 'out/04_plasmid_detection'
++            for sid, dna in sequences.items():
++                contigs = (out / 'consensus' / (sid + '.plasmid_contigs.fasta')).read_text()
++                rows = list(csv.DictReader((out / 'consensus' / (sid + '.plasmid_consensus.tsv')).open(), delimiter='\t'))
++                checks[sid + '_DNA'] = contigs.replace('\n', '') == ('>' + sid + '_contig' + dna if sid == 'S1' else '')
++                checks[sid + '_rows'] = len(rows) == (1 if sid == 'S1' or selected else 0)
++                checks[sid + '_identity_metrics'] = all(r['contig_id'] == sid + '_contig' and r['sample_id'] == sid and int(r['length']) == len(dna) and float(r['gc_content']) == (0.5 if sid == 'S1' else 1) for r in rows)
++                checks[sid + '_classification'] = all(r['plasmid_call'] == ('plasmid' if sid == 'S1' else 'chromosome') and 'scapp' not in r for r in rows)
++                checks[sid + '_optional_columns'] = all(all(r[t] == ('plasmid' if t in selected else 'NA') for t in ['plasme', 'plasx', 'platon']) for r in rows)
++                structure = list(csv.DictReader((out / 'structure' / (sid + '.plasmid_structure.tsv')).open(), delimiter='\t'))
++                checks[sid + '_structure'] = {r['plasmid_id'] for r in structure} == ({sid + '_contig'} if sid == 'S1' else set())
++        runs.append({'case': case, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
++        print(case, checks, flush=True)
++        sources = ['subworkflows/plasmid_detection.nf', 'bin/plasmid_consensus.R', 'tests/nextflow/detection_selection.nf', 'tests/run_detection_selection.py']
++        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs),
++                   'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in sources},
++                   'limitations': ['classifier CLI observers, including intentionally controlled PLASMe/PlasX output; not tool format certification', 'native original full detection subworkflow and R consumers; no classifier inference, real DB/models, image or scientific accuracy']}
++        (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    return receipt['pass']
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True)
++    args = parser.parse_args()
++    base = Path(args.work_dir).resolve()
++    base.mkdir(parents=True, exist_ok=True)
++    raise SystemExit(0 if run_checks(base) else 1)
+--- /dev/null
++++ b/tests/nextflow/detection_selection.nf
+@@ -0,0 +1,10 @@
++nextflow.enable.dsl=2
++
++include { PLASMID_DETECTION } from '../../subworkflows/plasmid_detection'
++
++workflow {
++    assemblies = Channel.fromList(['S1', 'S.2']).map { sid ->
++        tuple([id: sid], file("${params.fixture_dir}/${sid}.fasta", checkIfExists: true))
++    }
++    PLASMID_DETECTION(assemblies)
++}
+--- a/tests/nf-test/validation.nf.test
++++ b/tests/nf-test/validation.nf.test
+@@ -124,6 +124,24 @@
+         }
+     }
+ 
++    ['plasmid_detection_tools', 'plasmid_binning_tools'].each { key ->
++        test("removed SCAPP is rejected in ${key}") {
++            when {
++                params {
++                    samplesheet = new File('tests/nf-test/fixtures/duplicate.tsv').absolutePath
++                    outdir = "$outputDir"
++                    delegate.setProperty(key, ['scapp'])
++                }
++            }
++            then {
++                assert workflow.failed
++                assert workflow.stderr.join('\n').contains("SCAPP nodes have been removed; remove 'scapp' from --${key}")
++                assert workflow.trace.succeeded().isEmpty()
++                assert workflow.trace.failed().isEmpty()
++            }
++        }
++    }
++
+     // Selection errors must win over later samplesheet/database guards.
+     [
+         ['unknown polishing_tools', [polishing_tools: ['__unknown_tool__']], "--polishing_tools has unknown tool '__unknown_tool__'"],
+--- a/tests/nf-test/nodes-binning-scapp.nf.test
++++ /dev/null
+@@ -1,31 +0,0 @@
+-// P3 real-data node test: SCAPP_BIN (binning domain).
+-// Same real scaffolding as SCAPP_DETECT: genuine metaSPAdes fastg graph of
+-// the minigut illumina pair (SPADES --meta via w2spades profile), mined by
+-// SCAPP with the same real reads.
+-// Backend: podman (spades + scapp images).
+-nextflow_pipeline {
+-    name 'P3 real node: SCAPP_BIN on a real metaSPAdes assembly graph'
+-    script 'tests/nf-test/workflows/scapp_bin_real.nf'
+-    tag 'P3'
+-    tag 'binning'
+-    tag 'backend-podman'
+-
+-    test('metaSPAdes graph of real minigut illumina reads processed by scapp binning') {
+-        when {
+-            params {
+-                test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+-                outdir = "$outputDir"
+-            }
+-        }
+-        then {
+-            assert workflow.success
+-            assert workflow.trace.failed().isEmpty()
+-            def tasks = workflow.trace.succeeded().collect { it.name }
+-            assert tasks.any { it.startsWith('MINIGUT_FASTG:SPADES') }
+-            assert tasks.any { it.startsWith('SCAPP_BIN') }
+-            def scappFiles = getAllFilesFromDir(params.outdir,
+-                include: ['05_plasmid_binning/scapp/minigut.scapp_bin_out/**'])
+-            assert scappFiles.size() >= 1
+-        }
+-    }
+-}
+--- a/tests/nf-test/nodes-detection-scapp.nf.test
++++ /dev/null
+@@ -1,39 +0,0 @@
+-// P3 real-data node test: SCAPP_DETECT (detection domain).
+-// Real minigut illumina pair is assembled by vendored SPADES (--meta,
+-// w2spades profile) into a genuine metaSPAdes assembly_graph.fastg
+-// (scaffolding workflow, the production graph contract from
+-// subworkflows/illumina.nf), then SCAPP mines that graph with the same reads.
+-// Backend: podman (spades + scapp images).
+-// Assertions use upstream-pinned facts (minigut assembly), not snapshots.
+-nextflow_pipeline {
+-    name 'P3 real node: SCAPP_DETECT on a real metaSPAdes assembly graph'
+-    script 'tests/nf-test/workflows/scapp_detect_real.nf'
+-    tag 'P3'
+-    tag 'detection'
+-    tag 'backend-podman'
+-
+-    test('metaSPAdes graph of real minigut illumina reads mined by scapp with the same reads') {
+-        when {
+-            params {
+-                test_data = "${System.getenv('AUTOPLASM_TEST_DATA')}"
+-                outdir = "$outputDir"
+-            }
+-        }
+-        then {
+-            assert workflow.success
+-            assert workflow.trace.failed().isEmpty()
+-            // Real execution evidence: assembly + graph mining both ran.
+-            def tasks = workflow.trace.succeeded().collect { it.name }
+-            assert tasks.any { it.startsWith('MINIGUT_FASTG:SPADES') }
+-            assert tasks.any { it.startsWith('SCAPP_DETECT') }
+-            // The fasta output always exists (module concatenates confident
+-            // cycles, possibly empty); the scapp output dir must be populated.
+-            def fastas = getAllFilesFromDir(params.outdir,
+-                include: ['04_plasmid_detection/scapp/*.scapp.fasta'])
+-            assert fastas.size() == 1
+-            def scappFiles = getAllFilesFromDir(params.outdir,
+-                include: ['04_plasmid_detection/scapp/minigut.scapp_out/**'])
+-            assert scappFiles.size() >= 1
+-        }
+-    }
+-}
+--- a/tests/nf-test/workflows/scapp_detect_real.nf
++++ /dev/null
+@@ -1,19 +0,0 @@
+-// Real metaSPAdes assembly graph feeding SCAPP_DETECT.
+-// Data: pinned nf-core/test-datasets minigut illumina pair
+-// (AUTOPLASM_TEST_DATA). SPADES (--meta, w2spades profile) assembles the
+-// pair into a genuine assembly_graph.fastg, then SCAPP mines that graph
+-// with the same real reads — the same graph contract as production
+-// (subworkflows/illumina.nf feeds METASPADES.out.fastg to SCAPP).
+-nextflow.enable.dsl = 2
+-
+-include { MINIGUT_FASTG } from './spades_minigut_fastg'
+-include { SCAPP_DETECT } from '../../../modules/detection/scapp'
+-
+-workflow {
+-    def root = params.test_data
+-    def r1 = file("${root}/test_data/test_minigut_R1.fastq.gz", checkIfExists: true)
+-    def r2 = file("${root}/test_data/test_minigut_R2.fastq.gz", checkIfExists: true)
+-
+-    MINIGUT_FASTG(Channel.of([[id: 'minigut'], r1, r2]))
+-    SCAPP_DETECT(MINIGUT_FASTG.out.fastg.combine(Channel.of([r1, r2])))
+-}
+--- a/tests/nf-test/workflows/scapp_bin_real.nf
++++ /dev/null
+@@ -1,17 +0,0 @@
+-// Real metaSPAdes assembly graph feeding SCAPP_BIN.
+-// Same scaffolding as scapp_detect_real.nf: genuine minigut fastg graph
+-// (SPADES --meta via w2spades profile) mined by SCAPP with the same real
+-// illumina pair — the production graph contract (illumina.nf).
+-nextflow.enable.dsl = 2
+-
+-include { MINIGUT_FASTG } from './spades_minigut_fastg'
+-include { SCAPP_BIN } from '../../../modules/binning/scapp_bin'
+-
+-workflow {
+-    def root = params.test_data
+-    def r1 = file("${root}/test_data/test_minigut_R1.fastq.gz", checkIfExists: true)
+-    def r2 = file("${root}/test_data/test_minigut_R2.fastq.gz", checkIfExists: true)
+-
+-    MINIGUT_FASTG(Channel.of([[id: 'minigut'], r1, r2]))
+-    SCAPP_BIN(MINIGUT_FASTG.out.fastg.combine(Channel.of([r1, r2])))
+-}
+--- a/tests/nf-test/workflows/spades_minigut_fastg.nf
++++ b/tests/nf-test/workflows/spades_minigut_fastg.nf
+@@ -1,7 +1,7 @@
+ // Test scaffolding (not a pipeline node): assemble the real minigut illumina
+ // pair with the vendored SPADES module (as METASPADES, production-style
+ // --meta via the w2spades test profile) to obtain a genuine
+-// assembly_graph.fastg for the SPAdes-graph plasmid tools (scapp/recycler).
++// assembly_graph.fastg and k provenance for Recycler.
+ // The fastg emit is a plain (non-gzipped) copy made by the vendored module.
+ nextflow.enable.dsl = 2
+ 
+--- a/tests/nf-test/nextflow.config
++++ b/tests/nf-test/nextflow.config
+@@ -31,7 +31,7 @@
+     // W2 P3 suite-only overlay: the SPADES scaffolding in
+     // tests/nf-test/workflows/spades_minigut_fastg.nf must reproduce the
+     // production metaSPAdes run (subworkflows/illumina.nf + qc_assembly
+-    // config), so the scapp/recycler suites run with --profile podman,w2spades.
++    // config), so the Recycler suite runs with --profile podman,w2spades.
+     w2spades {
+         process {
+             withName: 'SPADES' {
+--- a/tests/r_mock/run_r_mock_tests.sh
++++ b/tests/r_mock/run_r_mock_tests.sh
+@@ -173,7 +173,7 @@
+   --out-fasta plasmids.fasta --out-predictions predictions.tsv --out-consensus consensus.tsv 2>consensus.err
+ check "plasmid_consensus exits 0" test $? -eq 0
+ check_grep "consensus call" consensus.tsv $'plasmid_1	S1	plasmid'
+-check_grep "ensemble column genomad" consensus.tsv $'genomad	plasme	plasx	platon	scapp'
++check "exact four-tool consensus header" test "$(head -n 1 consensus.tsv)" = $'contig_id\tsample_id\tplasmid_call\tsupporting_tools\tconflicting_tools\tconsensus_method\tlength\tgc_content\tplasmid_count\tcombined_prediction\tgenomad\tplasme\tplasx\tplaton'
+ check_grep "plasmid fasta written" plasmids.fasta ">plasmid_1"
+ 
+ # ---------- 10. plasmid_structure.R ----------
+--- a/tests/mock_e2e/mock_tool.py
++++ b/tests/mock_e2e/mock_tool.py
+@@ -460,7 +460,7 @@
+         else:
+             assert '--meta' in args
+         # nf-core spades writes into -o ./ and the module renames/gzips the
+-        # products; the FASTG copy is a local patch for SCAPP.
++        # products; the FASTG/provenance interface supports Recycler.
+         output = Path(arg('--out-dir') if tool == 'OPERA-MS.pl' else arg('-o'))
+         write(output / 'contigs.fasta', (fixture / 'reference.fasta').read_text())
+         write(output / 'scaffolds.fasta', (fixture / 'reference.fasta').read_text())

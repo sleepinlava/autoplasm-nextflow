@@ -1,0 +1,3 @@
+artifact	suite	test	result	timestamp	code_sha	interpretation
+results/nf-test/w2-recycler.xml	P3 real node: RECYCLER on a real metaSPAdes fastg graph and real illumina BAM	metaSPAdes fastg graph and real illumina BAM fed to recycle.py	PASSED	2026 10 17 23:24:10	missing	historical execution only; current code/input semantics unverified
+results/nf-test/w3-platon.xml	P3 real node: PLATON	platon classifies the real pUTI89 plasmid with its real database	PASSED	2026 10 17 23:12:30	missing	historical execution only; current code/input semantics unverified

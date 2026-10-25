@@ -1,0 +1,549 @@
+--- a/modules/nf-core/rgi/main/main.nf
++++ b/modules/nf-core/rgi/main/main.nf
+@@ -32,6 +32,8 @@
+     // This customizes the command: rgi main
+     prefix = task.ext.prefix ?: "${meta.id}"
+     def load_wildcard = ""
++    // Local patch: load/main use one task-local CARD; version comes from JSON.
++    def card_validator = file("${moduleDir}/../../../../bin/validate_rgi_card.py").text
+ 
+     if (wildcard) {
+         load_wildcard = """ \\
+@@ -46,7 +48,10 @@
+ 
+     """
+     export MPLCONFIGDIR=\$PWD
+-    DB_VERSION=\$(ls ${card}/card_database_*_all.fasta | sed "s/${card}\\/card_database_v\\([0-9].*[0-9]\\).*/\\1/")
++    DB_VERSION=\$(python3 - --card ${card} <<'RGI_CARD_VERSION_PY'
++${card_validator}
++RGI_CARD_VERSION_PY
++    )
+ 
+     rgi \\
+         load \\
+@@ -57,9 +62,14 @@
+         --card_annotation_all_models ${card}/card_database_v\$DB_VERSION\\_all.fasta \\
+         ${load_wildcard}
+ 
++    python3 - --card ${card} --loaded localDB <<'RGI_CARD_LOADED_PY'
++${card_validator}
++RGI_CARD_LOADED_PY
++
+     rgi \\
+         main \\
+         ${args2} \\
++        --local \\
+         --threads ${task.cpus} \\
+         --output_file ${prefix} \\
+         --input_sequence ${fasta}
+--- /dev/null
++++ b/bin/validate_rgi_card.py
+@@ -0,0 +1,56 @@
++#!/usr/bin/env python3
++"""Identify a prepared CARD by its JSON version and verify RGI's task-local copy."""
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import re
++import sys
++
++
++def read_json(path):
++    with path.open() as stream:
++        data = json.load(stream)
++    if not isinstance(data, dict):
++        raise ValueError('Expected JSON object: {}'.format(path))
++    return data
++
++
++def validate(card, loaded=None):
++    source = card / 'card.json'
++    data = read_json(source)
++    version = data.get('_version')
++    if not isinstance(version, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', version):
++        raise ValueError('Invalid CARD JSON version in {}'.format(source))
++    if not any(k.isdigit() and isinstance(v, dict) for k, v in data.items()):
++        raise ValueError('CARD JSON has no model records: {}'.format(source))
++    for suffix in ['', '_all']:
++        path = card / ('card_database_v' + version + suffix + '.fasta')
++        if not path.is_file():
++            raise ValueError('Missing CARD annotation file for JSON version {}: {}'.format(version, path))
++    if loaded is not None:
++        copied = loaded / 'card.json'
++        if hashlib.sha256(copied.read_bytes()).digest() != hashlib.sha256(source.read_bytes()).digest():
++            raise ValueError('Loaded CARD JSON differs from declared input: {}'.format(copied))
++        metadata = read_json(loaded / 'loaded_databases.json')
++        record = metadata.get('card_json')
++        if not isinstance(record, dict) or record.get('data_version') != version:
++            raise ValueError('Loaded CARD version metadata differs from declared input: {}'.format(loaded))
++    return version
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--card', type=Path, required=True)
++    parser.add_argument('--loaded', type=Path)
++    args = parser.parse_args()
++    try:
++        print(validate(args.card, args.loaded))
++    except (ValueError, OSError) as error:
++        print(str(error), file=sys.stderr)
++        return 2
++    return 0
++
++
++if __name__ == '__main__':
++    raise SystemExit(main())
+--- /dev/null
++++ b/tests/test_rgi_card_validation.py
+@@ -0,0 +1,64 @@
++"""CARD identity is derived from JSON, not an arbitrary FASTA filename match."""
++import importlib.util
++import json
++from pathlib import Path
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++spec = importlib.util.spec_from_file_location('card_validation', ROOT / 'bin/validate_rgi_card.py')
++validator = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(validator)
++
++
++class RgiCardValidationTests(unittest.TestCase):
++    def setUp(self):
++        self.directory = tempfile.TemporaryDirectory()
++        self.addCleanup(self.directory.cleanup)
++        self.card = Path(self.directory.name) / 'declared'
++        self.card.mkdir()
++        (self.card / 'card.json').write_text(json.dumps({'_version': '3.3.0', '6038': {'ARO_name': 'VIM-77'}}))
++        for suffix in ['', '_all']:
++            (self.card / ('card_database_v3.3.0' + suffix + '.fasta')).write_text('>reference\nMELPNIM\n')
++
++    def loaded(self):
++        p = Path(self.directory.name) / 'localDB'
++        p.mkdir()
++        (p / 'card.json').write_bytes((self.card / 'card.json').read_bytes())
++        (p / 'loaded_databases.json').write_text(json.dumps({'card_json': {'data_version': '3.3.0'}}))
++        return p
++
++    def test_json_version_wins_over_additional_annotation_versions(self):
++        (self.card / 'card_database_v9.9.9_all.fasta').write_text('>old\nMEL\n')
++        self.assertEqual(validator.validate(self.card), '3.3.0')
++
++    def test_missing_expected_annotations_rejected(self):
++        (self.card / 'card_database_v3.3.0_all.fasta').unlink()
++        with self.assertRaisesRegex(ValueError, 'Missing CARD annotation file'):
++            validator.validate(self.card)
++
++    def test_invalid_json_root_version_and_missing_models_rejected(self):
++        for data in [[], {}, {'_version': 3.3}, {'_version': '../escape'}, {'_version': '3.3.0\n'}, {'_version': '3.3.0'}]:
++            with self.subTest(data=data):
++                (self.card / 'card.json').write_text(json.dumps(data))
++                with self.assertRaises(ValueError):
++                    validator.validate(self.card)
++
++    def test_exact_loaded_copy_and_metadata_pass(self):
++        self.assertEqual(validator.validate(self.card, self.loaded()), '3.3.0')
++
++    def test_loaded_different_content_is_rejected_even_with_same_version(self):
++        p = self.loaded()
++        (p / 'card.json').write_text(json.dumps({'_version': '3.3.0', '391': {'ARO_name': 'VIM-2'}}))
++        with self.assertRaisesRegex(ValueError, 'Loaded CARD JSON differs'):
++            validator.validate(self.card, p)
++
++    def test_stale_loaded_version_metadata_is_rejected(self):
++        p = self.loaded()
++        (p / 'loaded_databases.json').write_text(json.dumps({'card_json': {'data_version': '3.2.8'}}))
++        with self.assertRaisesRegex(ValueError, 'Loaded CARD version metadata differs'):
++            validator.validate(self.card, p)
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- /dev/null
++++ b/tests/nextflow/rgi_database_scope.nf
+@@ -0,0 +1,9 @@
++nextflow.enable.dsl=2
++
++include { RGI_MAIN as RGI } from '../../modules/nf-core/rgi/main/main'
++
++workflow {
++    reads = Channel.fromList(params.records).map { row -> tuple([id: row.id], file(row.fasta, checkIfExists: true)) }
++    RGI(reads, Channel.value(file(params.card, checkIfExists: true)), [])
++    RGI.out.db_version.view { "DB_VERSION_CAPTURE=${it}" }
++}
+--- /dev/null
++++ b/tests/run_rgi_database_scope.py
+@@ -0,0 +1,122 @@
++#!/usr/bin/env python3
++"""Actual RGI queries against two full, fixed CARD releases, using native dependencies."""
++from pathlib import Path
++import argparse
++import csv
++import hashlib
++import json
++import os
++import random
++import re
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def gene_hits(path):
++    result = []
++    for value in json.loads(path.read_text()).values():
++        if isinstance(value, dict):
++            result += [hit for hit in value.values() if isinstance(hit, dict) and 'ARO_name' in hit]
++    return result
++
++
++def run_checks(base, fixture, prefix, module, cases):
++    assert json.loads((fixture / 'card-3.3.0/card.json').read_text())['_version'] == '3.3.0'
++    assert json.loads((fixture / 'global-3.2.8/card.json').read_text())['_version'] == '3.2.8'
++    global_sha = hashlib.sha256((fixture / 'global-3.2.8/card.json').read_bytes()).hexdigest()
++    local_sha = hashlib.sha256((fixture / 'card-3.3.0/card.json').read_bytes()).hexdigest()
++    rng = random.Random(729)
++    (base / 'negative.fasta').write_text('>controlled_random_DNA\n' + ''.join(rng.choices('ACGT', k=1600)) + '\n')
++    (base / 'empty-global').mkdir()
++    bad = base / 'fixture-mislabelled-card'
++    bad.mkdir()
++    shutil.copyfile(fixture / 'card-3.3.0/card.json', bad / 'card.json')
++    for tail in ['', '_all']:
++        shutil.copyfile(fixture / ('card-3.3.0/card_database_v3.3.0' + tail + '.fasta'), bad / ('card_database_v9.9.9' + tail + '.fasta'))
++    probe = base / 'probe.nf'
++    text = (ROOT / 'tests/nextflow/rgi_database_scope.nf').read_text()
++    probe.write_text(text.replace("'../../modules/nf-core/rgi/main/main'", repr(str(module))))
++    runs = []
++    expected = {'VIM77': ('VIM-77', '6038'), 'GENOME': ('mphE', '2614')}
++    for case, ids, card, global_db, error in [
++        ('with-global', ['VIM77', 'GENOME', 'NEGATIVE'], fixture / 'card-3.3.0', fixture / 'global-3.2.8', None),
++        ('upstream-oracle', ['GENOME'], fixture / 'card-3.3.0', fixture / 'global-3.2.8', None),
++        ('without-global', ['VIM77'], fixture / 'card-3.3.0', base / 'empty-global', None),
++        ('mislabelled-card', ['VIM77'], bad, fixture / 'global-3.2.8', 'Missing CARD annotation file')
++    ]:
++        if cases and case not in cases:
++            continue
++        p = base / case
++        p.mkdir()
++        config = p / 'config'
++        config.write_text("includeConfig '" + str(ROOT / 'conf/nfcore_downstream.config') + "'\n"
++                          "params.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=1\n"
++                          "process.memory='2 GB'\nprocess.maxForks=1\nconda.enabled=false\n"
++                          "docker.enabled=false\nsingularity.enabled=false\n"
++                          "env.DB_PATH='" + str(global_db) + "'\nenv.DATA_PATH='" + str(global_db) + "'\n")
++        if case == 'upstream-oracle':
++            with config.open('a') as stream:
++                stream.write("process { withName: 'RGI' { ext.args2='--clean --include_loose --include_nudge --low_quality --debug' } }\n")
++        records = [{'id': sid, 'fasta': str(base / 'negative.fasta' if sid == 'NEGATIVE' else fixture / ('NC_020818.1.fasta' if sid == 'GENOME' else 'VIM77.fasta'))} for sid in ids]
++        (p / 'params.json').write_text(json.dumps({'records': records, 'card': str(card), 'outdir': str(p / 'out')}))
++        command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(probe),
++                   '-params-file', str(p / 'params.json'), '-work-dir', str(p / 'work'),
++                   '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
++        env = os.environ.copy()
++        env['PATH'] = str(prefix / 'bin') + ':' + env['PATH']
++        result = subprocess.run(command, env=env, capture_output=True, text=True)
++        (p / 'stdout.log').write_text(result.stdout)
++        (p / 'stderr.log').write_text(result.stderr)
++        tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []
++        if error:
++            checks = {'nonzero': result.returncode != 0, 'diagnostic': error in result.stdout + result.stderr,
++                      'one_failed_task': len(tasks) == 1 and tasks[0]['status'] == 'FAILED',
++                      'no_published_files': not [f for f in (p / 'out').rglob('*') if f.is_file()],
++                      'query_not_started': not list((p / 'work').rglob('localDB'))}
++        else:
++            versions = re.findall(r'^DB_VERSION_CAPTURE=(.*)$', result.stdout, re.M)
++            checks = {'success': result.returncode == 0, 'completed_tasks': len(tasks) == len(ids) and all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks),
++                      'actual_version_emitted': versions == ['3.3.0'] * len(ids)}
++            if checks['success']:
++                for sid in ids:
++                    out = p / 'out/08_annotation/rgi'
++                    hits = gene_hits(out / (sid + '.rgi.json'))
++                    rows = list(csv.DictReader((out / (sid + '.rgi.txt')).open(), delimiter='\t'))
++                    if sid == 'NEGATIVE':
++                        checks[sid + '_no_hits'] = not hits and not rows
++                    else:
++                        name, model = ('NDM-1', '783') if case == 'upstream-oracle' else expected[sid]
++                        checks[sid + '_perfect_exact_model'] = any(h['ARO_name'] == name and str(h['model_id']) == model and h['type_match'] == 'Perfect' and float(h['perc_identity']) == 100 for h in hits)
++                        checks[sid + '_table_identity'] = any(r['Best_Hit_ARO'] == name and r['Model_ID'] == model and r['Cut_Off'] == 'Perfect' and float(r['Best_Identities']) == 100 for r in rows)
++                    if sid == 'GENOME':
++                        checks[sid + '_msrE_perfect'] = any(h['ARO_name']=='msrE' and str(h['model_id'])=='33' and h['type_match']=='Perfect' and float(h['perc_identity'])==100 for h in hits)
++                    # The copy actually loaded into each task must be the declared CARD.
++                loaded = list((p / 'work').rglob('localDB/card.json'))
++                checks['loaded_JSON_is_declared'] = len(loaded) == len(ids) and all(hashlib.sha256(q.read_bytes()).hexdigest() == local_sha for q in loaded)
++        checks['global_CARD_unchanged'] = hashlib.sha256((fixture / 'global-3.2.8/card.json').read_bytes()).hexdigest() == global_sha
++        runs.append({'case': case, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
++        print(case, checks, flush=True)
++        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs),
++                   'source_sha256': {str(Path(str(module) + '.nf')): hashlib.sha256(Path(str(module) + '.nf').read_bytes()).hexdigest(),
++                                     'tests/run_rgi_database_scope.py': hashlib.sha256((ROOT / 'tests/run_rgi_database_scope.py').read_bytes()).hexdigest()},
++                   'card_sha256': {'local_3.3.0': local_sha, 'global_3.2.8': global_sha},
++                   'limitations': ['real native RGI6.0.8 + declared KMA1.6.11, full genuine CARD3.3.0 vs3.2.8',
++                                   'VIM-77 is exact reference sanity control, random DNA is controlled negative; not an AMR sensitivity/clinical phenotype benchmark',
++                                   'fixed upstream real plasmid, original module/config; no nf-test/image or full platform certification']}
++        (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    return receipt['pass']
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True, type=Path)
++    parser.add_argument('--fixture-dir', required=True, type=Path)
++    parser.add_argument('--prefix', required=True, type=Path)
++    parser.add_argument('--module', type=Path, default=ROOT / 'modules/nf-core/rgi/main/main')
++    parser.add_argument('--cases', default='')
++    args = parser.parse_args()
++    base = args.work_dir.resolve()
++    base.mkdir(parents=True, exist_ok=True)
++    raise SystemExit(0 if run_checks(base, args.fixture_dir.resolve(), args.prefix.resolve(), args.module.resolve(), args.cases.split(',') if args.cases else []) else 1)
+--- /dev/null
++++ b/tests/nextflow/rgi_downstream.nf
+@@ -0,0 +1,8 @@
++nextflow.enable.dsl=2
++
++include { PLASMID_DOWNSTREAM } from '../../subworkflows/plasmid_downstream'
++
++workflow {
++    candidates = Channel.fromList(params.records).map { row -> tuple([id: row.id], file(row.fasta, checkIfExists: true)) }
++    PLASMID_DOWNSTREAM(candidates, Channel.empty(), Channel.empty(), Channel.empty(), Channel.empty(), Channel.empty())
++}
+--- /dev/null
++++ b/tests/run_rgi_downstream.py
+@@ -0,0 +1,68 @@
++#!/usr/bin/env python3
++"""Real native RGI through the original annotation subworkflow, with optional selection controls."""
++from pathlib import Path
++import argparse
++import csv
++import hashlib
++import json
++import os
++import shutil
++import subprocess
++from run_rgi_database_scope import ROOT, gene_hits
++
++
++def run_checks(base, fixture, prefix):
++    runs = []
++    for case, tools in [('enabled', [' rgi ']), ('disabled', [])]:
++        p = base / case
++        p.mkdir()
++        config = p / 'config'
++        config.write_text("includeConfig '" + str(ROOT / 'conf/nfcore_downstream.config') + "'\n"
++                          "params.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=1\n"
++                          "process.memory='2 GB'\nprocess.maxForks=1\nconda.enabled=false\n"
++                          "docker.enabled=false\nsingularity.enabled=false\n"
++                          "env.DB_PATH='" + str(fixture / 'global-3.2.8') + "'\n"
++                          "env.DATA_PATH='" + str(fixture / 'global-3.2.8') + "'\n")
++        records = [{'id': 'VIM77', 'fasta': str(fixture / 'VIM77.fasta')},
++                   {'id': 'GENOME', 'fasta': str(fixture / 'NC_020818.1.fasta')}]
++        params = {'records': records, 'card_db': str(fixture / 'card-3.3.0'), 'outdir': str(p / 'out'),
++                  'annotation_optional_tools': tools, 'annotation_tools': [], 'typing_tools': [],
++                  'typing_optional_tools': [], 'plasmid_binning_tools': []}
++        (p / 'params.json').write_text(json.dumps(params))
++        command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(ROOT / 'tests/nextflow/rgi_downstream.nf'),
++                   '-params-file', str(p / 'params.json'), '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
++        env = os.environ.copy()
++        env['PATH'] = str(prefix / 'bin') + ':' + env['PATH']
++        result = subprocess.run(command, env=env, capture_output=True, text=True)
++        (p / 'stdout.log').write_text(result.stdout)
++        (p / 'stderr.log').write_text(result.stderr)
++        tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []
++        out = p / 'out/08_annotation/rgi'
++        checks = {'success': result.returncode == 0, 'task_count': len(tasks) == (2 if tools else 0),
++                  'only_RGI_completed': all(t['name'].startswith('PLASMID_DOWNSTREAM:RGI') and t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks),
++                  'published_result_names': {f.name for f in out.glob('*')} == ({sid + '.rgi.' + ext for sid in ['VIM77', 'GENOME'] for ext in ['json', 'txt']} if tools else set())}
++        if result.returncode == 0 and tools:
++            for sid, name, model in [('VIM77', 'VIM-77', '6038'), ('GENOME', 'mphE', '2614')]:
++                hits = gene_hits(out / (sid + '.rgi.json'))
++                checks[sid + '_exact_model'] = any(h['ARO_name'] == name and str(h['model_id']) == model and h['type_match'] == 'Perfect' and float(h['perc_identity']) == 100 for h in hits)
++            source_sha = hashlib.sha256((fixture / 'card-3.3.0/card.json').read_bytes()).hexdigest()
++            copies = list((p / 'work').rglob('localDB/card.json'))
++            checks['each_sample_loaded_declared_CARD'] = len(copies) == 2 and all(hashlib.sha256(f.read_bytes()).hexdigest() == source_sha for f in copies)
++        runs.append({'case': case, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
++        print(case, checks, flush=True)
++        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs),
++                   'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in ['modules/nf-core/rgi/main/main.nf', 'bin/validate_rgi_card.py', 'subworkflows/plasmid_downstream.nf', 'conf/nfcore_downstream.config', 'tests/run_rgi_downstream.py', 'tests/nextflow/rgi_downstream.nf']},
++                   'limitations': ['original subworkflow/native real RGI and two fixed genuine CARD releases, not observers', 'exact reference sanity and locked real plasmid only; no image/nf-test/full-platform or AMR performance certification']}
++        (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    return receipt['pass']
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', type=Path, required=True)
++    parser.add_argument('--fixture-dir', type=Path, required=True)
++    parser.add_argument('--prefix', type=Path, required=True)
++    args = parser.parse_args()
++    base = args.work_dir.resolve()
++    base.mkdir(parents=True, exist_ok=True)
++    raise SystemExit(0 if run_checks(base, args.fixture_dir.resolve(), args.prefix.resolve()) else 1)
+--- a/README.md
++++ b/README.md
+@@ -160,6 +160,13 @@
+ FastQC 报告以样本、阶段和 read 端命名，例如 `S1.raw.R1_fastqc.zip` 与 `S1.clean.R2_fastqc.html`。FASTQ 输入本身不重写；FastQC 内部记录的输入名也带有相同身份，例如 `S1.raw.R1.fastq.gz`。MultiQC 汇总 raw/clean FastQC ZIP 与 fastp JSON，不重复暂存 HTML。
+ 
+ ## 数据库准备
++
++RGI 的 `--card_db` 需包含 `card.json` 及与其 `_version` 对应的
++`card_database_v<version>.fasta`、`card_database_v<version>_all.fasta`。
++流程会在每个任务中以 `--local` 加载并查询该库，核对加载副本的内容和版本，
++不再回退到环境中的全局 CARD。旧 RGI 结果若无法证明实际查询库与配置一致，
++应在新输出目录重跑该步骤。
++
+ 
+ 本流程不自动下载数据库，需要预先准备并通过参数传入路径：
+ 
+--- /dev/null
++++ b/tests/prepare_rgi_scope.py
+@@ -0,0 +1,93 @@
++#!/usr/bin/env python3
++"""Prepare locked full CARD fixtures for native RGI scope tests, without downloading data."""
++from pathlib import Path
++import argparse
++import hashlib
++import json
++import os
++import shutil
++import subprocess
++import tarfile
++
++LOCK = Path(__file__).with_name('rgi-database-scope.lock.json')
++
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def prepare(output, prefix, archives, plasmid):
++    lock = json.loads(LOCK.read_text())
++    for version, archive in archives.items():
++        if sha(archive) != lock['archives'][version]['sha256']:
++            raise ValueError('CARD archive checksum mismatch: ' + str(archive))
++    if sha(plasmid) != lock['plasmid']['sha256']:
++        raise ValueError('Plasmid fixture checksum mismatch: ' + str(plasmid))
++    output.mkdir(parents=True)  # Never overwrite an earlier test preparation.
++    env = os.environ.copy()
++    env['PATH'] = str(prefix / 'bin') + ':' + env['PATH']
++    env['MPLCONFIGDIR'] = str(output / 'mpl')
++    commands = []
++
++    def run(name, command, cwd, environment=env):
++        result = subprocess.run(command, cwd=cwd, env=environment, capture_output=True, text=True)
++        (output / (name + '.stdout.log')).write_text(result.stdout)
++        (output / (name + '.stderr.log')).write_text(result.stderr)
++        commands.append({'name': name, 'command': command, 'cwd': str(cwd), 'exit': result.returncode})
++        if result.returncode:
++            raise RuntimeError(name + ' failed; see retained logs at ' + str(output))
++        return result.stdout.strip()
++
++    if run('version', ['rgi', 'main', '--version'], output) != lock['tool_version']:
++        raise ValueError('Native RGI version does not match the test lock')
++    data = {}
++    for version, archive in archives.items():
++        path = output / ('card-' + version)
++        path.mkdir()
++        with tarfile.open(archive) as bundle:
++            # Read only card.json; never extract arbitrary archive paths.
++            member = next(m for m in bundle.getmembers() if m.name.lstrip('./') == 'card.json')
++            raw = bundle.extractfile(member).read()
++        data[version] = json.loads(raw)
++        if data[version]['_version'] != version:
++            raise ValueError('Unexpected internal CARD version')
++        (path / 'card.json').write_bytes(raw)
++        run('annotation-' + version, ['rgi', 'card_annotation', '-i', 'card.json'], path)
++    model = lock['new_model_id']
++    if model in data['3.2.8']:
++        raise ValueError('Counterfactual model unexpectedly exists in old CARD')
++    record = data['3.3.0'][model]
++    if record['ARO_name'] != lock['new_model_name']:
++        raise ValueError('Model name no longer matches the lock')
++    sequences = record['model_sequences']['sequence'][lock['new_sequence_id']]
++    (output / 'VIM77.fasta').write_text('>VIM77_reference\n' + sequences['dna_sequence']['sequence'] + '\n')
++    (output / 'VIM77.protein.fasta').write_text('>VIM77_reference\n' + sequences['protein_sequence']['sequence'] + '\n')
++    shutil.copyfile(plasmid, output / 'NC_020818.1.fasta')
++    global_dir = output / 'global-3.2.8'
++    global_dir.mkdir()
++    global_env = env.copy()
++    global_env.update(DB_PATH=str(global_dir), DATA_PATH=str(global_dir))
++    old = output / 'card-3.2.8'
++    run('global-load', ['rgi', 'load', '--card_json', str(old / 'card.json'),
++                        '--card_annotation', str(old / 'card_database_v3.2.8.fasta'),
++                        '--card_annotation_all_models', str(old / 'card_database_v3.2.8_all.fasta')], global_dir, global_env)
++    # Build a real, usable global index rather than an invalid dummy database.
++    run('global-query', ['rgi', 'main', '--input_type', 'protein', '--input_sequence', str(output / 'VIM77.protein.fasta'),
++                         '--output_file', str(output / 'global-control'), '--threads', '1'], output, global_env)
++    receipt = {'commands': commands, 'lock_sha256': sha(LOCK),
++               'fixture_sha256': {str(p.relative_to(output)): sha(p) for p in output.rglob('*') if p.is_file() and p.suffix in ['.json', '.fasta']},
++               'limitations': ['exact reference/database identity controls, not AMR performance or clinical truth']}
++    (output / 'preparation.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    return receipt
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output-dir', type=Path, required=True)
++    parser.add_argument('--prefix', type=Path, required=True)
++    parser.add_argument('--card-330-archive', type=Path, required=True)
++    parser.add_argument('--card-328-archive', type=Path, required=True)
++    parser.add_argument('--plasmid-fasta', type=Path, required=True)
++    args = parser.parse_args()
++    prepare(args.output_dir.resolve(), args.prefix.resolve(),
++            {'3.3.0': args.card_330_archive.resolve(), '3.2.8': args.card_328_archive.resolve()}, args.plasmid_fasta.resolve())
+--- /dev/null
++++ b/tests/rgi-database-scope.lock.json
+@@ -0,0 +1,22 @@
++{
++  "tool_version": "6.0.8",
++  "archives": {
++    "3.3.0": {
++      "url": "https://card.mcmaster.ca/download/0/broadstreet-v3.3.0.tar.bz2",
++      "sha256": "a5e7c73795b5a89b8707ef8de098b4e31414a042d3c004cf62ec6712705c4be5"
++    },
++    "3.2.8": {
++      "url": "https://card.mcmaster.ca/download/0/broadstreet-v3.2.8.tar.bz2",
++      "sha256": "1d6eb5557a9fb11be0d126d514b7cfb97d5e8d4bf2ca9bbec80d37b2a012987c"
++    }
++  },
++  "plasmid": {
++    "url": "https://raw.githubusercontent.com/arpcard/rgi/6.0.8/tests/inputs/NC_020818.1.fasta",
++    "git_blob": "0414119053449a58750e1ffaa93fbfc0690f3fc4",
++    "sha256": "7a0ef882cec26cc6e61b05ead3806b17fb5735937a04a8442bf6e0dd0a1ba211"
++  },
++  "new_model_id": "6038",
++  "new_sequence_id": "8858",
++  "new_model_name": "VIM-77",
++  "upstream_oracle": "https://github.com/arpcard/rgi/blob/6.0.8/tests/test_1.py#L122"
++}
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -261,3 +261,26 @@
+ 
+ Native runs are not nf-test loader/JUnit or container certification, full
+ platform E2E, or scientific performance benchmarks.
++
++
++### RGI 本地CARD选择的原生回归
++
++`tests/rgi-database-scope.lock.json` 锁定完整 CARD3.3.0/3.2.8 官方归档、RGI6.0.8上游真实质粒和VIM-77参考。先按锁文件URL取得数据和RGI6.0.8/KMA1.6.11原生环境；准备脚本只读本地输入、校验SHA256，不下载或覆盖既有准备目录。设置 `RGI_PREFIX`、`CARD_330_ARCHIVE`、`CARD_328_ARCHIVE`、`RGI_PLASMID_FASTA` 为相应绝对路径后：
++
++```bash
++python3 tests/prepare_rgi_scope.py \
++  --output-dir /tmp/rgi-scope-fixtures \
++  --prefix "$RGI_PREFIX" \
++  --card-330-archive "$CARD_330_ARCHIVE" \
++  --card-328-archive "$CARD_328_ARCHIVE" \
++  --plasmid-fasta "$RGI_PLASMID_FASTA"
++python3 tests/run_rgi_database_scope.py \
++  --work-dir /tmp/rgi-scope-run \
++  --fixture-dir /tmp/rgi-scope-fixtures --prefix "$RGI_PREFIX"
++python3 tests/run_rgi_downstream.py \
++  --work-dir /tmp/rgi-downstream-run \
++  --fixture-dir /tmp/rgi-scope-fixtures --prefix "$RGI_PREFIX"
++python3 -m unittest discover -s tests -p test_rgi_card_validation.py -v
++```
++
++原生runner要求PATH中有可用Nextflow；以上是独立原生模块/子工作流回归，不表示nf-test框架/JUnit或镜像已运行。数据库scope测试分开生产默认参数和固定上游的low_quality/include_loose/include_nudge/clean/debug参数，后者保留NDM-1 Perfect100断言；不要把两种方法的输出差异当作数据库回归失败。VIM-77属于精确参考sanity，随机DNA是人工阴性，不能推导临床AMR性能。当前真实执行证据与限制见 `docs/tool-audit/contracts/rgi-database.md`。

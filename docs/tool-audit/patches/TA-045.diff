@@ -1,0 +1,109 @@
+diff --git i/bin/generate_report.R w/bin/generate_report.R
+index ea08803..0dc0946 100755
+--- i/bin/generate_report.R
++++ w/bin/generate_report.R
+@@ -133,7 +133,7 @@ structure_dir <- file.path(det_dir, "structure")
+ if (dir.exists(consensus_dir)) {
+   fastas <- sort(list.files(consensus_dir, pattern = "\\.plasmid_contigs\\.fasta$"))
+   for (fasta in fastas) {
+-    sid <- sub("\\.plasmid_contigs\\.fasta.*$", "", fasta)
++    sid <- sub("\\.plasmid_contigs\\.fasta$", "", fasta)
+     entry <- list(contigs = count_fasta_records(file.path(consensus_dir, fasta)),
+                   total = 0, plasmids = 0, tools = character(0), circular = 0)
+     cons <- file.path(consensus_dir, paste0(sid, ".plasmid_consensus.tsv"))
+diff --git 1/tests/test_generate_report.py 2/tests/test_generate_report.py
+new file mode 100644
+index 0000000..044a705
+--- /dev/null
++++ 2/tests/test_generate_report.py
+@@ -0,0 +1,90 @@
++import json
++import subprocess
++import tempfile
++import unittest
++from pathlib import Path
++
++
++ROOT = Path(__file__).resolve().parents[1]
++SCRIPT = ROOT / "bin" / "generate_report.R"
++
++
++class GenerateReportTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.root = Path(self.temp.name)
++        self.published = self.root / "published"
++        self.output = self.root / "report"
++        self.output.mkdir()
++
++    def tearDown(self):
++        self.temp.cleanup()
++
++    def sample(self, sample_id, contigs, circular, tool):
++        consensus = self.published / "04_plasmid_detection" / "consensus"
++        structure = self.published / "04_plasmid_detection" / "structure"
++        consensus.mkdir(parents=True, exist_ok=True)
++        structure.mkdir(parents=True, exist_ok=True)
++        (consensus / f"{sample_id}.plasmid_contigs.fasta").write_text(
++            "".join(f">p{i}\nACGT\n" for i in range(contigs))
++        )
++        (consensus / f"{sample_id}.plasmid_consensus.tsv").write_text(
++            "contig_id\tsample_id\tplasmid_call\tsupporting_tools\n" +
++            "".join(f"p{i}\t{sample_id}\tplasmid\t{tool}\n" for i in range(contigs))
++        )
++        (structure / f"{sample_id}.plasmid_structure.tsv").write_text(
++            "sample_id\tplasmid_id\tis_circular\n" +
++            "".join(f"{sample_id}\tp{i}\t{'true' if i < circular else 'false'}\n"
++                    for i in range(contigs))
++        )
++
++    def run_report(self):
++        result = subprocess.run(
++            ["Rscript", str(SCRIPT), "--outdir", str(self.published),
++             "--platform", "assembly", "--project-name", "identity_test",
++             "--out-prefix", str(self.output)],
++            text=True, capture_output=True, check=False,
++        )
++        self.assertEqual(result.returncode, 0, result.stderr)
++        return json.loads((self.output / "report_data.json").read_text())
++
++    def test_suffix_tokens_in_sample_names_keep_independent_summaries(self):
++        expected = {
++            "S": (1, 1, "genomad"),
++            "S.plasmid_contigs.fasta": (2, 0, "platon"),
++            "S.plasmid_contigs.fasta.extra": (3, 2, "plasme"),
++        }
++        for sample, values in expected.items():
++            self.sample(sample, *values)
++        data = self.run_report()
++        self.assertEqual(len(data["samples"]), len(expected))
++        observed = {row["sample_id"]: (row["consensus_plasmids"], row["circular"],
++                                        row["detection_tools"])
++                    for row in data["samples"]}
++        self.assertEqual(observed, expected)
++        markdown = (self.output / "report.md").read_text()
++        html = (self.output / "report.html").read_text()
++        self.assertIn("- Samples: 3", markdown)
++        for sample, (contigs, circular, tool) in expected.items():
++            line = f"| {sample} | {contigs} | {circular} | {tool} |"
++            self.assertIn(line, markdown)
++            self.assertIn(line, html)
++
++    def test_zero_calls_still_preserve_the_complete_sample_id(self):
++        sample = "S.plasmid_contigs.fasta"
++        self.sample(sample, 0, 0, "genomad")
++        data = self.run_report()
++        self.assertEqual(data["samples"], [{"sample_id": sample, "consensus_plasmids": 0,
++                                            "circular": 0, "detection_tools": ""}])
++        self.assertIn(f"| {sample} | 0 | 0 |  |", (self.output / "report.md").read_text())
++
++    def test_ordinary_sample_report_remains_compatible(self):
++        self.sample("S1", 2, 1, "genomad")
++        data = self.run_report()
++        self.assertEqual(data["samples"], [{"sample_id": "S1", "consensus_plasmids": 2,
++                                            "circular": 1, "detection_tools": "genomad"}])
++        self.assertIn("| S1 | 2 | 1 | genomad |", (self.output / "report.md").read_text())
++
++
++if __name__ == "__main__":
++    unittest.main()

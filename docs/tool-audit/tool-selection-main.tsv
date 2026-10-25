@@ -1,0 +1,26 @@
+case	selected	exit	stop_stage	tool_selection_diagnostic	tasks	command_files
+polishing_tools-unknown	"{""polishing_tools"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+plasmid_detection_tools-unknown	"{""plasmid_detection_tools"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+plasmid_binning_tools-unknown	"{""plasmid_binning_tools"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+typing_tools-unknown	"{""typing_tools"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+typing_optional_tools-unknown	"{""typing_optional_tools"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+host_prediction_tools-unknown	"{""host_prediction_tools"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+mag_tools-unknown	"{""mag_tools"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+host_linking_methods-unknown	"{""host_linking_methods"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+host_linking_optional_methods-unknown	"{""host_linking_optional_methods"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+annotation_tools-unknown	"{""annotation_tools"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+annotation_optional_tools-unknown	"{""annotation_optional_tools"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+comparative_tools-unknown	"{""comparative_tools"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+comparative_optional_tools-unknown	"{""comparative_optional_tools"": [""__unknown_tool__""]}"	1	missing sample_id header	False	0	0
+comma-empty	"{""plasmid_detection_tools"": ""genomad,,platon""}"	1	Platon database required	False	0	0
+comma-trailing	"{""plasmid_detection_tools"": ""genomad,""}"	1	missing sample_id header	False	0	0
+list-empty	"{""plasmid_detection_tools"": [""""]}"	1	missing sample_id header	False	0	0
+list-null	"{""plasmid_detection_tools"": [null]}"	1	missing sample_id header	False	0	0
+list-whitespace	"{""plasmid_detection_tools"": ["" platon ""]}"	1	missing sample_id header	False	0	0
+empty-list-control	{}	1	missing sample_id header	False	0	0
+alias-mob-suite	"{""plasmid_binning_tools"": [""mob_suite""]}"	1	missing sample_id header	False	0	0
+alias-mob-recon	"{""plasmid_binning_tools"": [""mob_recon""]}"	1	missing sample_id header	False	0	0
+declared-optional-abricate	"{""annotation_optional_tools"": [""abricate""]}"	1	missing sample_id header	False	0	0
+comma-trim-control	"{""plasmid_detection_tools"": "" platon ""}"	1	Platon database required	False	0	0
+map-value	"{""plasmid_detection_tools"": {""platon"": true}}"	1	ConfigMap contains runtime error	False	0	0
+nested-list	"{""plasmid_detection_tools"": [[""platon""]]}"	1	missing sample_id header	False	0	0

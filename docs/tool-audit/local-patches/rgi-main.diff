@@ -1,0 +1,38 @@
+--- upstream/rgi/main@0a93f68a28f5e07bb7ae82aeb005720faf8a3b35
++++ modules/nf-core/rgi/main/main.nf
+@@ -32,6 +32,8 @@
+     // This customizes the command: rgi main
+     prefix = task.ext.prefix ?: "${meta.id}"
+     def load_wildcard = ""
++    // Local patch: load/main use one task-local CARD; version comes from JSON.
++    def card_validator = file("${moduleDir}/../../../../bin/validate_rgi_card.py").text
+ 
+     if (wildcard) {
+         load_wildcard = """ \\
+@@ -46,7 +48,10 @@
+ 
+     """
+     export MPLCONFIGDIR=\$PWD
+-    DB_VERSION=\$(ls ${card}/card_database_*_all.fasta | sed "s/${card}\\/card_database_v\\([0-9].*[0-9]\\).*/\\1/")
++    DB_VERSION=\$(python3 - --card ${card} <<'RGI_CARD_VERSION_PY'
++${card_validator}
++RGI_CARD_VERSION_PY
++    )
+ 
+     rgi \\
+         load \\
+@@ -57,9 +62,14 @@
+         --card_annotation_all_models ${card}/card_database_v\$DB_VERSION\\_all.fasta \\
+         ${load_wildcard}
+ 
++    python3 - --card ${card} --loaded localDB <<'RGI_CARD_LOADED_PY'
++${card_validator}
++RGI_CARD_LOADED_PY
++
+     rgi \\
+         main \\
+         ${args2} \\
++        --local \\
+         --threads ${task.cpus} \\
+         --output_file ${prefix} \\
+         --input_sequence ${fasta}

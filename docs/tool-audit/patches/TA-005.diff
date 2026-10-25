@@ -1,0 +1,148 @@
+diff --git i/modules/detection/platon.nf w/modules/detection/platon.nf
+index 985f06c..f67c0fa 100644
+--- i/modules/detection/platon.nf
++++ w/modules/detection/platon.nf
+@@ -20,9 +20,13 @@ process PLATON {
+     tuple val(meta), path("${meta.id}.plasmid.fasta"), emit: plasmid_fasta, optional: true
+ 
+     script:
++    def compressed = assembly.name.toLowerCase().endsWith('.gz')
++    def input_fasta = compressed ? "${meta.id}.platon.input.fasta" : assembly
++    def decompress = compressed ? "gzip -cd ${assembly} > ${input_fasta}" : ''
+     """
++    ${decompress}
+     platon --threads ${task.cpus} --output . --prefix ${meta.id} --meta \\
+-        --db ${platon_db} ${assembly}
++        --db ${platon_db} ${input_fasta}
+     mv ${meta.id}.tsv ${meta.id}.platon.tsv
+     """
+ }
+diff --git i/tests/nf-test/nodes-detection-platon.nf.test w/tests/nf-test/nodes-detection-platon.nf.test
+index 95ea619..646b0a3 100644
+--- i/tests/nf-test/nodes-detection-platon.nf.test
++++ w/tests/nf-test/nodes-detection-platon.nf.test
+@@ -36,4 +36,30 @@ nextflow_process {
+             assert rows[0].split('\t', -1).length > 5
+         }
+     }
++
++    test('platon classifies gzip pUTI89 from the locked upstream artifact') {
++        when {
++            process {
++                """
++                input[0] = [
++                    [id: 'pUTI89_gzip'],
++                    file("${System.getenv('AUTOPLASM_TEST_DATA')}/data/genomics/prokaryotes/plasmids/pUTI89/pUTI89.fna.gz", checkIfExists: true)
++                ]
++                input[1] = file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true)
++                """
++            }
++        }
++        then {
++            assert process.success
++            assert process.out.predictions.size() == 1
++            def lines = path(process.out.predictions[0][1]).text.readLines()
++            assert lines.size() >= 2
++            assert lines[0].contains('ID')
++            def rows = lines.drop(1).findAll { it.startsWith('NC_007941.1\t') }
++            assert rows.size() == 1
++            assert rows[0].split('\t', -1).length > 5
++            assert process.out.plasmid_fasta.size() == 1
++            assert path(process.out.plasmid_fasta[0][1]).text.contains('>NC_007941.1')
++        }
++    }
+ }
+diff --git 1/tests/test_platon_input_interface.py 2/tests/test_platon_input_interface.py
+new file mode 100644
+index 0000000..4bb6fd5
+--- /dev/null
++++ 2/tests/test_platon_input_interface.py
+@@ -0,0 +1,88 @@
++"""Platon FASTA transport contract; observer performs no plasmid classification."""
++import gzip
++import hashlib
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import tempfile
++import unittest
++
++ROOT=Path(__file__).resolve().parents[1]
++OBSERVER='''#!/usr/bin/env python3
++# Input observer only, not Platon or a biological classifier.
++import argparse,hashlib
++from pathlib import Path
++p=argparse.ArgumentParser()
++p.add_argument('--threads');p.add_argument('--output');p.add_argument('--prefix')
++p.add_argument('--meta',action='store_true');p.add_argument('--db');p.add_argument('fasta')
++a=p.parse_args();Path('observer.invoked').write_text('interface observer')
++data=Path(a.fasta).read_bytes();text=data.decode('ascii')
++assert text.startswith('>'), 'observer requires plain FASTA'
++Path(a.prefix+'.tsv').write_text('input_sha256\\n'+hashlib.sha256(data).hexdigest()+'\\n')
++Path(a.prefix+'.plasmid.fasta').write_bytes(data)
++'''
++
++
++class PlatonInputInterfaceTests(unittest.TestCase):
++    def run_case(self, corrupt=False):
++        executable=shutil.which('nextflow')
++        if not executable:
++            self.skipTest('Nextflow required for original module input checks')
++        base=Path(tempfile.mkdtemp(prefix='platon-input-interface-'))
++        self.addCleanup(lambda: shutil.rmtree(base) if not os.environ.get('AUTOPLASM_KEEP_INTERFACE') else None)
++        scripts=base/'observer-bin';scripts.mkdir();observer=scripts/'platon'
++        observer.write_text(OBSERVER);observer.chmod(0o755)
++        reference=os.environ.get('AUTOPLASM_PLATON_INTERFACE_FASTA')
++        data=Path(reference).read_bytes() if reference else b'>reference\nACGTTGCATGCAGT\n'
++        db=base/'db';db.mkdir()
++        modes=['corrupt'] if corrupt else ['plain','gzip','uppercase']
++        tuples=[]
++        for mode in modes:
++            name=mode+('.fa' if mode=='plain' else '.fa.GZ' if mode=='uppercase' else '.fa.gz')
++            path=base/name
++            path.write_bytes(b'not a gzip file' if corrupt else data if mode=='plain' else gzip.compress(data,mtime=0))
++            tuples.append(f"tuple([id:'{mode}'],file('{path}'))")
++        module=os.environ.get('AUTOPLASM_PLATON_MODULE',str(ROOT/'modules/detection/platon'))
++        (base/'probe.nf').write_text(f'''nextflow.enable.dsl = 2
++include {{ PLATON }} from '{module}'
++workflow {{ PLATON(Channel.of({','.join(tuples)}),Channel.value(file('{db}'))) }}
++''')
++        (base/'config').write_text(f'''params.outdir = '{base}/out'
++params.publish_dir_mode = 'copy'
++process.executor = 'local'
++process.cpus = 1
++process.memory = '1 GB'
++conda.enabled = false
++docker.enabled = false
++singularity.enabled = false
++''')
++        command=[executable,'-C',str(base/'config'),'run',str(base/'probe.nf'),'-work-dir',str(base/'work'),'-with-trace',str(base/'trace.tsv'),'-ansi-log','false']
++        env=os.environ.copy();env['PATH']=str(scripts)+':'+env['PATH']
++        r=subprocess.run(command,env=env,text=True,capture_output=True)
++        (base/'stdout.log').write_text(r.stdout);(base/'stderr.log').write_text(r.stderr)
++        (base/'command.txt').write_text(repr(command)+'\n')
++        (base/'reference.sha256').write_text(hashlib.sha256(data).hexdigest()+'\n')
++        print(f'PLATON_INTERFACE_ARTIFACT {"corrupt" if corrupt else "parity"} {base} exit={r.returncode}',flush=True)
++        if corrupt:
++            self.assertNotEqual(r.returncode,0)
++            self.assertFalse(list((base/'work').rglob('observer.invoked')))
++            errors='\n'.join(f.read_text() for f in (base/'work').rglob('.command.err'))
++            self.assertIn('gzip',errors.lower())
++        else:
++            self.assertEqual(r.returncode,0,r.stdout+r.stderr)
++            for mode in modes:
++                directory=base/'out/04_plasmid_detection/platon'
++                self.assertEqual((directory/f'{mode}.plasmid.fasta').read_bytes(),data)
++                self.assertEqual((directory/f'{mode}.platon.tsv').read_text(),
++                                 'input_sha256\n'+hashlib.sha256(data).hexdigest()+'\n')
++
++    def test_plain_and_gzip_fasta_transport_parity(self):
++        self.run_case()
++
++    def test_corrupt_gzip_stops_before_tool(self):
++        self.run_case(corrupt=True)
++
++
++if __name__=='__main__':
++    unittest.main()

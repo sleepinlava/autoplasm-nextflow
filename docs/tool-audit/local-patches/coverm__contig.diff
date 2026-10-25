@@ -1,0 +1,44 @@
+--- upstream/coverm/contig@6d46786420b4d7bc88eba026eb389c0c5535d120
++++ modules/nf-core/coverm/contig/main.nf
+@@ -15,8 +15,12 @@
+     val enable_bam_output
+ 
+     output:
+-    tuple val(meta), path('*.depth.tsv'), emit: coverage
+-    tuple val(meta), path('*.bam')      , emit: bam, optional: true
++    // Local patch (refactor/nf-core-modules): the output filename suffix is
++    // configurable via ext.suffix (upstream hard-codes .depth.tsv) so the
++    // pipeline can keep its legacy '*.coverm.tsv' / '*.contig_coverm.tsv'
++    // product names. Default preserves upstream behaviour.
++    tuple val(meta), path('*.tsv')   , emit: coverage
++    tuple val(meta), path('*.bam')   , emit: bam, optional: true
+     tuple val("${task.process}"), val('coverm'), eval('coverm --version | sed "s/coverm //"'), emit: versions_coverm, topic: versions
+ 
+     when:
+@@ -25,6 +29,7 @@
+     script:
+     def args           = task.ext.args ?: ""
+     def prefix         = task.ext.prefix ?: "${meta.id}"
++    def suffix         = task.ext.suffix ?: ".depth.tsv"
+     def fastq_input    = meta.single_end ? "--single" : interleaved ? "--interleaved" : "--coupled"
+     def input_type     = bam_input ? "--bam-files" : "${fastq_input}"
+ 
+@@ -39,15 +44,16 @@
+         ${reference_str} \\
+         ${bam_output_str} \\
+         ${args} \\
+-        --output-file ${prefix}.depth.tsv
++        --output-file ${prefix}${suffix}
+ 
+     mv _bam_cache/*.bam . || true
+     """
+ 
+     stub:
+     def prefix = task.ext.prefix ?: "${meta.id}"
++    def suffix = task.ext.suffix ?: ".depth.tsv"
+     """
+-    touch ${prefix}.depth.tsv
++    touch ${prefix}${suffix}
+     touch ${prefix}.bam
+     """
+ }

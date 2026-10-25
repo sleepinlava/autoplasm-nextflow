@@ -1,0 +1,16 @@
+--- upstream/integronfinder@f3cdfac60a5c7e23f72c5b211c50218277073c8b
++++ modules/nf-core/integronfinder/main.nf
+@@ -43,7 +43,7 @@
+     stub:
+     def args = task.ext.args ?: ''
+     def prefix = task.ext.prefix ?: "${meta.id}"
+-    def gbk_create = args.contains("--gbk") ? "Results_Integron_Finder_${prefix}/${prefix}.gbk" : ""
++    def gbk_create = args.contains("--gbk") ? "touch Results_Integron_Finder_${prefix}/${prefix}.gbk" : ""
+ 
+     """
+     mkdir -p Results_Integron_Finder_${prefix}
+@@ -53,4 +53,3 @@
+     touch "Results_Integron_Finder_${prefix}/integron_finder.out"
+     """
+ }
+-

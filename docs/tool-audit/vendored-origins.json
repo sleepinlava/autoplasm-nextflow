@@ -1,0 +1,318 @@
+{
+  "baseline": "f57d0f91454ee0c99cf462ac9093bdf68349991a",
+  "source_repo": "https://github.com/nf-core/modules",
+  "modules": [
+    {
+      "module": "abricate/run",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/abricate/run/main.nf",
+      "local_sha256": "78ce8438cb992134b1b628a985f75af0cd91e880fbe07844a2650e5a3ea7dfa8"
+    },
+    {
+      "module": "amrfinderplus/run",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/amrfinderplus/run/main.nf",
+      "local_sha256": "a4fe6ee200a34710a540b58e20f08d77426c537943baecd4b6ccc5e27b77810c"
+    },
+    {
+      "module": "amrfinderplus/update",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/amrfinderplus/update/main.nf",
+      "local_sha256": "c672981406e2d93a0ce7a01e1537f96095e96ec0043f243ed1d0b6fa6ffe3bf9"
+    },
+    {
+      "module": "bakta/bakta",
+      "revision": "2080397432fcb0d079121dbacf22ce42ef175cec",
+      "local_path": "modules/nf-core/bakta/bakta/main.nf",
+      "local_sha256": "b3b3c18d026011049a32075ed84c2d39cb448cbfdec0008aa76e09952d8464a6"
+    },
+    {
+      "module": "bakta/baktadbdownload",
+      "revision": "81fe5e6f07fa92ecfd1721373620e2538a1466eb",
+      "local_path": "modules/nf-core/bakta/baktadbdownload/main.nf",
+      "local_sha256": "43ca65e6d9338ee03a7fcd9eb84dcb09266dcba70e476913fac629321d7dd04b"
+    },
+    {
+      "module": "blast/blastn",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/blast/blastn/main.nf",
+      "local_sha256": "89c9ed5eb511369ac83dd15e93575ef4e6db61ce6c9c959c3dd0f64037f42f6d"
+    },
+    {
+      "module": "bowtie2/align",
+      "revision": "2080397432fcb0d079121dbacf22ce42ef175cec",
+      "local_path": "modules/nf-core/bowtie2/align/main.nf",
+      "local_sha256": "780c7cf832e810c2d3241d62a43fb820c42dfcb8bb35344579fbb0f30626a266"
+    },
+    {
+      "module": "bowtie2/build",
+      "revision": "a0961c41021561ac7cf139f86bd7812a2f99e994",
+      "local_path": "modules/nf-core/bowtie2/build/main.nf",
+      "local_sha256": "c63651163285233fff53c919d85461ea2dd0ddfac15a7c0c11d5405c6cba9171"
+    },
+    {
+      "module": "checkm2/databasedownload",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/checkm2/databasedownload/main.nf",
+      "local_sha256": "9d60d805e096f0078cac4005d32662d7d5669d5c0fd2b33fa02e7a31c0b19ff9"
+    },
+    {
+      "module": "checkm2/predict",
+      "revision": "deb8254027c27a9e505befc68ab449db1f3dadef",
+      "local_path": "modules/nf-core/checkm2/predict/main.nf",
+      "local_sha256": "f3fe9e19ffc459180a7bf693d185fe95ac8aa690ff47211faaeb9f84306e2864"
+    },
+    {
+      "module": "concoct/concoct",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/concoct/concoct/main.nf",
+      "local_sha256": "9f121b1f2d459eca630fde5240654a44e36a33829514cf3e52088f081de1e54c"
+    },
+    {
+      "module": "concoct/concoctcoveragetable",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/concoct/concoctcoveragetable/main.nf",
+      "local_sha256": "728c657e14c4544fb5223fff3d4005eb99c7ee5c5c96a7a552a24ab9f1ccee40"
+    },
+    {
+      "module": "concoct/cutupfasta",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/concoct/cutupfasta/main.nf",
+      "local_sha256": "c1f0332c96bbf9595e7c148d033e76d0125c4a1927cfab57bd5c72ad97412218"
+    },
+    {
+      "module": "concoct/extractfastabins",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/concoct/extractfastabins/main.nf",
+      "local_sha256": "20e4fa5ae9a4a2b4c62fcd5b45dce323bc9a11aaf671f2a757cd8921e91a1f1e"
+    },
+    {
+      "module": "concoct/mergecutupclustering",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/concoct/mergecutupclustering/main.nf",
+      "local_sha256": "9027deac547e989987d127ebb21e8408fd11e3d7419be5146eb1fbf975a95ae9"
+    },
+    {
+      "module": "coverm/contig",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/coverm/contig/main.nf",
+      "local_sha256": "e43049ab9cc2885b5a14c77f3336e564fd6f4bbd6d320c97fe45bfdd17d70a0d"
+    },
+    {
+      "module": "dastool/dastool",
+      "revision": "5be91832f7c6a2d229f900a239d9532c9ae133c7",
+      "local_path": "modules/nf-core/dastool/dastool/main.nf",
+      "local_sha256": "6be7543e9667d529bba549eabeeb9ade47ad7f0ffae2afca3c1f5c7eb6550193"
+    },
+    {
+      "module": "dastool/fastatocontig2bin",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/dastool/fastatocontig2bin/main.nf",
+      "local_sha256": "1962e7238b3cd04d5fa26d792152d0a7c90df3afb504b376957834dec88a137c"
+    },
+    {
+      "module": "eggnogmapper",
+      "revision": "cbe6025183336010a9b716e463f897b0c0f70f8a",
+      "local_path": "modules/nf-core/eggnogmapper/main.nf",
+      "local_sha256": "8297b631a8fe7e568b21a2f5dc1e4c64b65004bbf6e07c8768862418f98a6fcc"
+    },
+    {
+      "module": "fastp",
+      "revision": "cec0863a77103556b7466a7d38f7236bd441f588",
+      "local_path": "modules/nf-core/fastp/main.nf",
+      "local_sha256": "287f094f39db1af0581f8770f59b5043d0a265e88da960eb06f81b93e613bc21"
+    },
+    {
+      "module": "fastqc",
+      "revision": "18eb358065b06f2d3419e37383b002fe7db3da02",
+      "local_path": "modules/nf-core/fastqc/main.nf",
+      "local_sha256": "c4658b359aa4b1142f51814586e380d564d7055a700bc44e04ee0658d4f87011"
+    },
+    {
+      "module": "filtlong",
+      "revision": "83819fff250f4fe6747fd8855fb3039eea22e5b7",
+      "local_path": "modules/nf-core/filtlong/main.nf",
+      "local_sha256": "b23c8b0023e53b6c39d32cd38fd0688c85b97b50a0ea04b3325841e3ad92834d"
+    },
+    {
+      "module": "flye",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/flye/main.nf",
+      "local_sha256": "6cadf5dd3e8b3580d6dbae044a5086837b4ef5f67a9ba9b72f24740c8e58a2b4"
+    },
+    {
+      "module": "genomad/download",
+      "revision": "781f2625386fe0bf2f337c7b99f56e618c59fc99",
+      "local_path": "modules/nf-core/genomad/download/main.nf",
+      "local_sha256": "3eb2fa9e47f39d55343823736af7942a091d1b733e07eea6b7f8babdcf3ec897"
+    },
+    {
+      "module": "genomad/endtoend",
+      "revision": "781f2625386fe0bf2f337c7b99f56e618c59fc99",
+      "local_path": "modules/nf-core/genomad/endtoend/main.nf",
+      "local_sha256": "77de976f19279802fa9c20852c5ff37b9f95be9c7a778b43c9007dca653f1593"
+    },
+    {
+      "module": "gtdbtk/classifywf",
+      "revision": "b581ebb37c529fa07e22c38d128a7c5c273ed286",
+      "local_path": "modules/nf-core/gtdbtk/classifywf/main.nf",
+      "local_sha256": "3bab0dd7ad48e59517f7a1032765a8360d35de90bfbfdf287823c819a9265b27"
+    },
+    {
+      "module": "hifiadapterfilt/hifiadapterfilt",
+      "revision": "9cc9ac3431911839826f062a5f0348835ebcc7ae",
+      "local_path": "modules/nf-core/hifiadapterfilt/hifiadapterfilt/main.nf",
+      "local_sha256": "8333383871130181bd05b0c00d7561120534fcbdbe518b7013c9f010a893e972"
+    },
+    {
+      "module": "integronfinder",
+      "revision": "f3cdfac60a5c7e23f72c5b211c50218277073c8b",
+      "local_path": "modules/nf-core/integronfinder/main.nf",
+      "local_sha256": "b5804f2986dfcdaf86666374692d8706d148ec9b4e33573aaad3cdc76bcaad0b"
+    },
+    {
+      "module": "kraken2/kraken2",
+      "revision": "d67d33d5925fcec4691b499670fa2bd926fd2be5",
+      "local_path": "modules/nf-core/kraken2/kraken2/main.nf",
+      "local_sha256": "c6366ce2efa5046207adc703d29a0a66f3bb3e4f94542f547b2499ca328c3763"
+    },
+    {
+      "module": "macsyfinder/download",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/macsyfinder/download/main.nf",
+      "local_sha256": "11e83fbd19de8396e60c9b75fc35d24c50d9a4aa5f25927407f45aa095482f86"
+    },
+    {
+      "module": "macsyfinder/search",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/macsyfinder/search/main.nf",
+      "local_sha256": "e9fcda4cc24808d76ae0bc5bfc1c0f6da5a9925a482dcd06ebf49c43ad1c6bfe"
+    },
+    {
+      "module": "medaka",
+      "revision": "c565f1b27c06a1e8b726e2a646d4c822ae3b514a",
+      "local_path": "modules/nf-core/medaka/main.nf",
+      "local_sha256": "d0cf79377fabe4512317081200a0a6c16100fdc160da7a62b16871e28947567f"
+    },
+    {
+      "module": "megahit",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/megahit/main.nf",
+      "local_sha256": "cb7f1e8ef982fbfbe79b7f054296ba00c96a2affcd709a78bc3bf290006e2dbc"
+    },
+    {
+      "module": "metabat2/jgisummarizebamcontigdepths",
+      "revision": "5be91832f7c6a2d229f900a239d9532c9ae133c7",
+      "local_path": "modules/nf-core/metabat2/jgisummarizebamcontigdepths/main.nf",
+      "local_sha256": "608db797e05456872144617a31737fecfea9678a8a5e942b841289c7ee2bb9c8"
+    },
+    {
+      "module": "metabat2/metabat2",
+      "revision": "5be91832f7c6a2d229f900a239d9532c9ae133c7",
+      "local_path": "modules/nf-core/metabat2/metabat2/main.nf",
+      "local_sha256": "8cf56ff12426c5a8ad093ab72e38896002198a8cbc1feb946a32d36e007a623c"
+    },
+    {
+      "module": "metaphlan/metaphlan",
+      "revision": "98ad2ea364508c5eefa3eee721f5659b3d7585a9",
+      "local_path": "modules/nf-core/metaphlan/metaphlan/main.nf",
+      "local_sha256": "0af28cd83304ae44e8a23e3f41b1a95eb62879e3086ffe92ce1736f17f804130"
+    },
+    {
+      "module": "minimap2/align",
+      "revision": "135d883a43b1a2324b4112cd270cf22e20835533",
+      "local_path": "modules/nf-core/minimap2/align/main.nf",
+      "local_sha256": "f6775b5dcbe8ee565c0bc83e9ece0eed851ac85ab3f0f219b0fac7f17b65af97"
+    },
+    {
+      "module": "mmseqs/easycluster",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/mmseqs/easycluster/main.nf",
+      "local_sha256": "57a88b3d45b4599cf7719375c45c5e5c58dab3ab63cdd001aec04cbdc7cc168e"
+    },
+    {
+      "module": "mobsuite/recon",
+      "revision": "95868cc6a5a108bda21f045e95f5fb1aa2258ede",
+      "local_path": "modules/nf-core/mobsuite/recon/main.nf",
+      "local_sha256": "7f8e78d799f668d8f7b344309c711e30f3541273d9ce9201fcaebaa354f61ae0"
+    },
+    {
+      "module": "mobsuite/typer",
+      "revision": "2080397432fcb0d079121dbacf22ce42ef175cec",
+      "local_path": "modules/nf-core/mobsuite/typer/main.nf",
+      "local_sha256": "819aef50a05d8d2d013691a97ae85fc294b528613e68d1205615807e0fe95bea"
+    },
+    {
+      "module": "multiqc",
+      "revision": "98403d15b0e50edae1f3fec5eae5e24982f1fade",
+      "local_path": "modules/nf-core/multiqc/main.nf",
+      "local_sha256": "b548ccc70c039d90f82641f42ff69c21474974aa6a0d8e34b88d3bcbf7cbd90f"
+    },
+    {
+      "module": "nanoplot",
+      "revision": "cc4d441624bd2a0db697502bdde9005a5a5f0b36",
+      "local_path": "modules/nf-core/nanoplot/main.nf",
+      "local_sha256": "47e4fcda8bf29fb2bbdfed86c7dd320562174b594bd2de1d681e152584cc3af3"
+    },
+    {
+      "module": "plasmidfinder",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/plasmidfinder/main.nf",
+      "local_sha256": "76a5a7a9544af819ef69fa85f412ab05875c85bdc2187435ac593d80f1b0edec"
+    },
+    {
+      "module": "prodigal",
+      "revision": "04adc8db7363044250f2acb95a785df40b27ea40",
+      "local_path": "modules/nf-core/prodigal/main.nf",
+      "local_sha256": "5a946423f4b456c7c3ea0293a25f57a41c5275e9355e6085437390b38c913f77"
+    },
+    {
+      "module": "quast",
+      "revision": "9a034dd2c5df2c9b283e09ddf2667d9118b4ccd7",
+      "local_path": "modules/nf-core/quast/main.nf",
+      "local_sha256": "a848036530cec4d890913610de85876b7b0a7a3b09ed32726f995bbf428b8cb3"
+    },
+    {
+      "module": "rgi/main",
+      "revision": "0a93f68a28f5e07bb7ae82aeb005720faf8a3b35",
+      "local_path": "modules/nf-core/rgi/main/main.nf",
+      "local_sha256": "d1206a863813766490751c0db407331a54b679e86fdf5cd13ea96780f1ed1778"
+    },
+    {
+      "module": "samtools/fastq",
+      "revision": "9339809fcb90af8a8b7051e6cd914894d5c52002",
+      "local_path": "modules/nf-core/samtools/fastq/main.nf",
+      "local_sha256": "07cc6a0f83d6b8926a4ca91ead8d1cf283790f4169dca5bb275de42246ae86e9"
+    },
+    {
+      "module": "samtools/merge",
+      "revision": "972faf6f783fe9685267220965a91690741465f9",
+      "local_path": "modules/nf-core/samtools/merge/main.nf",
+      "local_sha256": "78702d50580eeafaeefd14f773dc00ec647641f7428d705ff91c263a97d815a5"
+    },
+    {
+      "module": "samtools/sort",
+      "revision": "9339809fcb90af8a8b7051e6cd914894d5c52002",
+      "local_path": "modules/nf-core/samtools/sort/main.nf",
+      "local_sha256": "da2601afd35e13b1c8e996f8d1393bb73235da6d935365c626e8ca1f5b8adc9a"
+    },
+    {
+      "module": "samtools/view",
+      "revision": "4dd270e412e2a7e78761be38aafa5cfa1dcdf891",
+      "local_path": "modules/nf-core/samtools/view/main.nf",
+      "local_sha256": "3acb9c0188cd686f1ab73602ec5b57df061c88886fe5574ed8e2d9bc0550cf77"
+    },
+    {
+      "module": "semibin/singleeasybin",
+      "revision": "9f8642c41bf67d2787820e4c4aa34c0356a0d464",
+      "local_path": "modules/nf-core/semibin/singleeasybin/main.nf",
+      "local_sha256": "b08a9ec4a60204b09f8405c5cd84b7232afad42957e11263dc7dd35030af52ff"
+    },
+    {
+      "module": "spades",
+      "revision": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+      "local_path": "modules/nf-core/spades/main.nf",
+      "local_sha256": "ed5ef0e15d7e38c0fd60e01b9f0ec6fa49d4809f26d9d96742a163cc5b97ac93"
+    }
+  ]
+}

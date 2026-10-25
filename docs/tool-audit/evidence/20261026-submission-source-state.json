@@ -1,0 +1,151 @@
+{
+  "baseline": "f57d0f91454ee0c99cf462ac9093bdf68349991a",
+  "accepted_manifest": "docs/tool-audit/evidence/post-fix-source-state.json",
+  "accepted_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d",
+  "accepted_source_count": 718,
+  "index_only_preimages": [
+    "bin/generate_report.R",
+    "envs/r_analysis.yml",
+    "lib/report_events.nf",
+    "modules/cross_sample/report.nf",
+    "modules/detection/consensus.nf",
+    "modules/detection/plasme.nf",
+    "modules/detection/structure.nf",
+    "modules/nf-core/genomad/endtoend/main.nf",
+    "modules/nf-core/genomad/endtoend/meta.yml",
+    "modules/nf-core/genomad/endtoend/tests/main.nf.test",
+    "modules/typing/copla.nf",
+    "subworkflows/plasmid_detection.nf",
+    "subworkflows/plasmid_downstream.nf",
+    "tests/nextflow/copla_native.nf",
+    "tests/nextflow/plasme_native.nf",
+    "tests/nf-test/nodes-detection-plasme.nf.test",
+    "tests/nf-test/nodes-typing-copla.nf.test",
+    "tests/test_generate_report.py"
+  ],
+  "pending_not_submitted": [
+    {
+      "path": "bin/generate_report.R",
+      "current_sha256": "1c92836d8e7c2a3277dda24bd41a97255f21c871167b236b93c264c007f298b5",
+      "accepted_sha256": "a2d9910f5895dff70616f6f846786c3f4580583f41d9b060f558ab00fa27d9d5"
+    },
+    {
+      "path": "envs/r_analysis.yml",
+      "current_sha256": "fe381c812418c803b3aec2704821313ea6828c26aba44afd922d57e5fa120c5d",
+      "accepted_sha256": "5702872d19ab254dc560257a5b01415ca82f117e7fbcddf87d4215145141d12e"
+    },
+    {
+      "path": "lib/report_events.nf",
+      "current_sha256": "e912e0af8936aab39495a87cff79be863bd041b1f09afce07fa8b9ec6680e9b0",
+      "accepted_sha256": "cc893fd8b795821a76f33ec557dad7be50cae045255296c938d60cdb36ebc244"
+    },
+    {
+      "path": "modules/cross_sample/report.nf",
+      "current_sha256": "453b0ca15a0e20f944a454075633aa223fdc2dc0879c08943494354e59eca6f3",
+      "accepted_sha256": "e75ede40824815bc44cd62ec7547aa1011a70045fb5b00c0850476ca761368b0"
+    },
+    {
+      "path": "modules/detection/consensus.nf",
+      "current_sha256": "1087f45d9bfd7c5f49cd5ea8f7f9d191f0293ac415dc3132c9063e1d85bf76d9",
+      "accepted_sha256": "b7151eaa6b6ecd09ea189b8358f0ffc2baa930a074d1fb25b2648ee1c5045c1d"
+    },
+    {
+      "path": "modules/detection/plasme.nf",
+      "current_sha256": "5a1fda006ad4f31de113300b1b15bbc7e85bf3eed1ce541b6a42b3736ccae365",
+      "accepted_sha256": "fca8f77f366d04494566c41469f6400e78fbf998cc90704b5b521a763056a8ac"
+    },
+    {
+      "path": "modules/detection/structure.nf",
+      "current_sha256": "251a534a01a46ef2bfcae07e04732bf1c74be5ba478f713351f08cf8d06391c0",
+      "accepted_sha256": "665b31e0820464e1e16a38e65dc9ecfb9171b185c27ed115b49361d6ee0e3d11"
+    },
+    {
+      "path": "modules/nf-core/genomad/endtoend/main.nf",
+      "current_sha256": "7931deef22b31fbd0a49e8dea0a39ab2a486e14be8fd294e439d63c94ea026ce",
+      "accepted_sha256": "77de976f19279802fa9c20852c5ff37b9f95be9c7a778b43c9007dca653f1593"
+    },
+    {
+      "path": "modules/nf-core/genomad/endtoend/meta.yml",
+      "current_sha256": "03c2242a8cde10074ac0406ab5695f5549105af139a4567749f6cf71a591b05b",
+      "accepted_sha256": "5c8e2d1dc60f645dc63ea4bec60fcf2f17820d7701c4e77a30fb0c120c2edcd3"
+    },
+    {
+      "path": "modules/nf-core/genomad/endtoend/tests/main.nf.test",
+      "current_sha256": "023463d0dec26815aaa10d04296608c061d7551922e23135238544ed523655b8",
+      "accepted_sha256": "924152b6ce4c2d506d0967c6902f55407412bcbee974470870b5c6b75de4376f"
+    },
+    {
+      "path": "modules/typing/copla.nf",
+      "current_sha256": "a6045bdf8fc6d22b318cc93fa4c6065f80898435167c5e9020ee0e54c16f5632",
+      "accepted_sha256": "b882758869d1ebfcb845c14622fe9bb2d6294c22380a27097d830780a68560d6"
+    },
+    {
+      "path": "subworkflows/plasmid_detection.nf",
+      "current_sha256": "f6454d594ceaa92c40967a21c39dcf26ed7e0fa384301ff350d07a4ec89a3b03",
+      "accepted_sha256": "0249f2b9cc3dc9d11945d56a8ce4a8fa7e85c2597c1b23278d066a901aa6bbd7"
+    },
+    {
+      "path": "subworkflows/plasmid_downstream.nf",
+      "current_sha256": "72dd4d311eefd4aa9dd3fe121a6c93851f873669e3b8c6b91d38e27706431b5b",
+      "accepted_sha256": "80aafeebf07c810c31952b5fe994ae5d2696af5c283dd05d06cadfc5da91472f"
+    },
+    {
+      "path": "tests/nextflow/copla_native.nf",
+      "current_sha256": "4e5e2e78941fdfc2ef8d89d03b5ba328ff6ef602f7e0e913c0c5ab4ddf8c94c9",
+      "accepted_sha256": "0cf48b4d4f21f2e113c2e27d8b118b34a0fda5b700f12afb357fe7542843f733"
+    },
+    {
+      "path": "tests/nextflow/plasme_native.nf",
+      "current_sha256": "3ec81fa91a0fd7df9231019485a638bee7d49d2a6d0f51bd37e8655486ef27e4",
+      "accepted_sha256": "4f3b6362206177208579d05808271207379f8eeaa3460833eacfb878626414b6"
+    },
+    {
+      "path": "tests/nf-test/nodes-detection-plasme.nf.test",
+      "current_sha256": "c0f853454d66b47f2275833f800bb1b79261aabd247f9af1b25a97893a2c0122",
+      "accepted_sha256": "2fab4e3030447bc85663a247debf07d3607246834fb9d4e7a741d815102318a5"
+    },
+    {
+      "path": "tests/nf-test/nodes-typing-copla.nf.test",
+      "current_sha256": "0fd2f24867d27871480943fbb50e74e5f36958ade8ff70a504933dfa5241ce2d",
+      "accepted_sha256": "95408b4f41e1db4f4ba67ac259c89c25be0c30b5f27b6f4640c563d8ea526bf4"
+    },
+    {
+      "path": "tests/test_generate_report.py",
+      "current_sha256": "320fd36d3632dd87ba18afaccd2d150338b627208cbfb94dba0a4b6a6ef32225",
+      "accepted_sha256": "7ad595950e30d928188ad7e5f72463f9430ed20b923b50cd070afe7d99b4455b"
+    },
+    {
+      "path": "lib/ResourceIdentity.groovy",
+      "current_sha256": "50a8592aad4dd719d5a6b36caf46dd0036a56f1a51ea5a77ec08d94e09f2b81f",
+      "accepted_sha256": null
+    },
+    {
+      "path": "tests/nextflow/report_runtime.nf",
+      "current_sha256": "9d1c3b562bbf74223a0a4a1feadb71d95431c1de91fdfba91e06c9e319ea0a71",
+      "accepted_sha256": null
+    },
+    {
+      "path": "tests/run_report_runtime.py",
+      "current_sha256": "cb70777899e267f03b2e6aa6fa822922502aa9bc9d836d5d8c00671fc97272a9",
+      "accepted_sha256": null
+    },
+    {
+      "path": "tests/nextflow/resource_identity.nf",
+      "current_sha256": "b3006e2aeea732fad47bba477649ad387271fff504ee09e9078fed51fd5afcb2",
+      "accepted_sha256": null
+    },
+    {
+      "path": "tests/run_resource_identity.py",
+      "current_sha256": "162d8a176374425ec064ee4143764853319ebc9a7f3116f0d2f01138d742af95",
+      "accepted_sha256": null
+    }
+  ],
+  "scope": "Local checkpoint of previously accepted source boundary; commits form an ordered series. Per-finding bounded acceptance only, not all-tools/platform/scientific/AWS certification. Current report/cache increments are deliberately left in the worktree.",
+  "created_local_date": "2026-10-26",
+  "pending_status": {
+    "TA-091": "S0 in_progress; property oracle fail; COPLA cold driver timeout1800s, zero finalized trace tasks; no acceptance",
+    "TA-016": "S2 in_progress; 17 report unit methods and bounded native controls passed; full provenance not complete",
+    "TA-031": "S2 ready; full r232 taxonomy missing",
+    "TT-003": "S2 ready; real shotgun nonempty P4 missing"
+  }
+}

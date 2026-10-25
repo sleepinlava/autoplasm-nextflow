@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-23",
+  "scope": "bounded protein producer/consumer interface, error propagation and fixed model selection",
+  "verified_findings": [
+    "TA-026",
+    "TA-027",
+    "TA-077",
+    "TA-078"
+  ],
+  "source_commits": {
+    "macsyfinder": "9caf84252b9cc89b9ef93173df250e764172b330",
+    "macsylib": "561f521027954ed73fd91fa2126f4e43b0a86439",
+    "eggnogmapper": "a82fac7f5534ee97fa0385718b0012c266fcf3e7"
+  },
+  "CONJScan": {
+    "version": "2.1.0",
+    "commit": "898f8a1a3d9076855eb8f32be9f32d4e1b375c1f",
+    "files": 162,
+    "archive_sha256": "cd428945a8bd1ed11d3c356fce78ed4b59b9ff9c8c2b9414ee84a0af4ff4da26"
+  },
+  "eggNOG_official_fixture": {
+    "commit": "a82fac7f5534ee97fa0385718b0012c266fcf3e7",
+    "source_blobs": 228,
+    "safe_internal_symlinks": 3,
+    "full_production_database": false
+  },
+  "environment_package_entries": {
+    "macsyfinder-2.1.6": 79,
+    "eggnog-mapper-2.1.13": 70
+  },
+  "installed_Python_blobs": {
+    "macsyfinder": 9,
+    "macsylib": 27,
+    "eggnogmapper": 56
+  },
+  "topology_decision": "User: unknown linear; explicitly circular only. Exact positive header token and default-linear gembase; no inferred closure.",
+  "unique_unit_methods": 9,
+  "route_input_selection_scenarios": 6,
+  "named_resume_checks": 1,
+  "selected_native_trace_entries": 34,
+  "status_counts": {
+    "COMPLETED": 20,
+    "CACHED": 13,
+    "FAILED": 1
+  },
+  "receipt": "results/tool-audit/20261023-protein-inputs/receipt.json",
+  "artifacts": {
+    "results/tool-audit/20261023-protein-inputs/source-proof.json": "828e55bc214fd6e6db3ce05a16fdf8d6f94d2b3f4787c014a688337c86a84b14",
+    "results/tool-audit/20261023-protein-inputs/runtime-proof.json": "c0d5e240abed1e674b8ec6519f9e60260ae019b2e8c76b3f43f33bea90ca71ab",
+    "results/tool-audit/20261023-protein-inputs/primary-downloads.json": "838f79de491c32b9aa5ef9680877f04b3e367d53806298d22546280a122ab5b7",
+    "results/tool-audit/20261023-protein-inputs/native-downstream-accepted/run.json": "9a3d8dd900b080747c0fd9eda366392041e019460df7bb262e1af2c4da63ef92",
+    "results/tool-audit/20261023-protein-inputs/native-controls-isolated/run.json": "b2543fe02eedf79f1e4d73477a5d6024847e3aed0640834a53ef188c50e06a3f",
+    "results/tool-audit/20261023-protein-inputs/selected-artifacts.json": "565c4f7ec5a00eb53fe7ba913bfde832c14b0e0596be9b2e729fc0c610d9a447",
+    "results/tool-audit/20261023-protein-inputs/official-annotation-parity.json": "ae7d72a3213da256336fb25716fbfdee976878327b31f90e295ffd7a9abd67c9",
+    "results/tool-audit/20261023-protein-inputs/eggnog-original-dna/run.json": "d8b6a04427c037fc298b57772ebb6ce2cce56b6db6a341a090d845b5ec40ac22"
+  },
+  "limitations": [
+    "Official small eggNOG fixture database, not full production database or scientific annotation benchmark.",
+    "Model acquisition uses native local-archive installer through an explicitly logged transport adapter; production remote acquisition is not certified.",
+    "Topology header perturbations and cropped zero-gene boundary are interface controls, not independent biological replicates.",
+    "Current Nextflow native backend only; image/nf-test/full platform certification remains open.",
+    "Original swallowed-error task is a counterexample, not successful biology. Full M0-M4/TETRA/GTDB/AWS remain open."
+  ]
+}

@@ -1,0 +1,2517 @@
+diff --git a/modules/detection/plasx.nf b/modules/detection/plasx.nf
+--- a/modules/detection/plasx.nf
++++ b/modules/detection/plasx.nf
+@@ -1,35 +1,95 @@
+-/*
+- * PlasX plasmid classification (pipeline step: plasmid_detect_plasx;
+- * optional). Requires the PlasX annotation and model files.
+- */
++/* Full per-sample anvi'o COG14/Pfam32 and native PlasX de novo/model method. */
++process PLASX_ANNOTATE {
++    tag { meta.id }
++    label 'process_medium'
++    cache 'deep'
++    conda "${moduleDir}/../../envs/plasx-anvio-linux-64.lock"
++    publishDir "${params.outdir}/04_plasmid_detection/plasx", mode: params.publish_dir_mode
++
++    input:
++    tuple val(meta), path(assembly, stageAs: 'assembly_input/*')
++    tuple path(anvio_source, stageAs: 'anvio_source'), path(anvio_source_files, stageAs: 'anvio_dependencies/dir??/*')
++    tuple path(cog_db, stageAs: 'cog_database'), path(cog_files, stageAs: 'cog_dependencies/dir??/*')
++    tuple path(pfam_db, stageAs: 'pfam_database'), path(pfam_files, stageAs: 'pfam_dependencies/dir??/*')
++
++    output:
++    tuple val(meta), path("${meta.id}.contigs.fasta"), path("${meta.id}.id_map.tsv"), path("${meta.id}.gene_calls.tsv"), path("${meta.id}.cogs_pfams.tsv"), emit: annotations
++    tuple val(meta), path("${meta.id}.contigs.db"), emit: contigs_db
++    tuple val(meta), path("${meta.id}.anvio_*.json"), emit: runtime
++
++    script:
++    def inputs = file("${moduleDir}/../../bin/plasx_inputs.py").text
++    def checked = file("${moduleDir}/../../bin/anvio_checked.py").text
++    def q = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
++    def p = meta.id.toString()
++    """
++    cat > plasx_inputs.py <<'PLASX_INPUTS_PY'
++${inputs}
++PLASX_INPUTS_PY
++    cat > anvio_checked.py <<'ANVIO_CHECKED_PY'
++${checked}
++ANVIO_CHECKED_PY
++    export PYTHONDONTWRITEBYTECODE=1
++    export MPLCONFIGDIR="\$PWD/matplotlib"
++    python3 plasx_inputs.py resources --cog-db cog_database --pfam-db pfam_database --record ${q.call(p + '.anvio_resources.json')}
++    python3 plasx_inputs.py prepare --assembly ${q.call(assembly)} --sample ${q.call(p)} --prefix ${q.call(p)} --record ${q.call(p + '.anvio_input.json')}
++    python3 anvio_checked.py --source anvio_source --record ${q.call(p + '.anvio_genes.json')} -- \\
++        anvi-gen-contigs-database -L 0 -T ${task.cpus} --project-name ${q.call(p)} -f ${q.call(p + '.contigs.fasta')} -o ${q.call(p + '.contigs.db')}
++    python3 anvio_checked.py --source anvio_source --record ${q.call(p + '.anvio_export_genes.json')} -- \\
++        anvi-export-gene-calls --gene-caller prodigal -c ${q.call(p + '.contigs.db')} -o ${q.call(p + '.gene_calls.tsv')}
++    python3 anvio_checked.py --source anvio_source --record ${q.call(p + '.anvio_cogs.json')} -- \\
++        anvi-run-ncbi-cogs -T ${task.cpus} --cog-version COG14 --cog-data-dir cog_database -c ${q.call(p + '.contigs.db')}
++    python3 anvio_checked.py --source anvio_source --record ${q.call(p + '.anvio_pfams.json')} -- \\
++        anvi-run-pfams -T ${task.cpus} --pfam-data-dir pfam_database -c ${q.call(p + '.contigs.db')}
++    python3 anvio_checked.py --source anvio_source --record ${q.call(p + '.anvio_export_functions.json')} -- \\
++        anvi-export-functions --annotation-sources COG14_FUNCTION,Pfam -c ${q.call(p + '.contigs.db')} -o ${q.call(p + '.cogs_pfams.tsv')}
++    python3 plasx_inputs.py check-anvio --sample ${q.call(p)} --fasta ${q.call(p + '.contigs.fasta')} --mapping ${q.call(p + '.id_map.tsv')} \\
++        --genes ${q.call(p + '.gene_calls.tsv')} --annotations ${q.call(p + '.cogs_pfams.tsv')} --database ${q.call(p + '.contigs.db')} --record ${q.call(p + '.anvio_identity.json')}
++    """
++}
++
+ process PLASX {
+     tag { meta.id }
+     label 'process_medium'
+-    conda "${projectDir}/envs/plasx.yml"
+-    // PlasX 无 bioconda 包（envs pin 亦无法解析），container 用 python 运行时兜底
+-    // （脚本另需 prodigal，container 兜底不包含，conda 仍是唯一完整路径）
+-    container 'quay.io/biocontainers/python:3.11'
+-
++    cache 'deep'
++    conda "${moduleDir}/../../envs/plasx-linux-64.lock"
+     publishDir "${params.outdir}/04_plasmid_detection/plasx", mode: params.publish_dir_mode
+ 
+     input:
+-    tuple val(meta), path(assembly)
+-    path plasx_annotations
+-    path plasx_model
++    tuple val(meta), path(assembly), path(mapping), path(gene_calls), path(annotations)
++    tuple path(plasx_source, stageAs: 'plasx_source'), path(plasx_source_files, stageAs: 'plasx_dependencies/dir??/*')
++    tuple path(profiles, stageAs: 'plasx_profiles'), path(profile_files, stageAs: 'profile_dependencies/dir??/*')
++    path plasx_model, stageAs: 'plasx_coefficients.tsv'
+ 
+     output:
+     tuple val(meta), path("${meta.id}.plasx.tsv"), emit: predictions
++    tuple val(meta), path("${meta.id}.de_novo.tsv"), emit: de_novo
++    tuple val(meta), path("${meta.id}.plasx_state.tsv"), emit: state
++    tuple val(meta), path("${meta.id}.plasx_*.json"), emit: runtime
+ 
+     script:
++    def inputs = file("${moduleDir}/../../bin/plasx_inputs.py").text
++    def checked = file("${moduleDir}/../../bin/plasx_checked.py").text
++    def q = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
++    def p = meta.id.toString()
++    def splits = params.plasx_splits == null ? 32 : params.plasx_splits
++    if (!(splits.toString() ==~ /[0-9]+/)) error '--plasx_splits must be a nonnegative integer'
+     """
+-    # PlasX needs de-novo gene calls; prodigal meta mode provides them
+-    # (anvi'o is not required; the prodigal output is used directly).
+-    prodigal -i ${assembly} -o ${meta.id}.gff -a ${meta.id}.faa -d ${meta.id}.ffn -p meta
+-    plasx predict \\
+-        -a ${plasx_annotations} \\
+-        -g ${meta.id}.gff \\
+-        -m ${plasx_model} \\
+-        -o ${meta.id}.plasx.tsv \\
+-        --overwrite
++    cat > plasx_inputs.py <<'PLASX_INPUTS_PY'
++${inputs}
++PLASX_INPUTS_PY
++    cat > plasx_checked.py <<'PLASX_CHECKED_PY'
++${checked}
++PLASX_CHECKED_PY
++    export PYTHONDONTWRITEBYTECODE=1
++    export PYTHONPATH="\$PWD/plasx_source"
++    python3 plasx_inputs.py resources --profiles plasx_profiles --model plasx_coefficients.tsv --record ${q.call(p + '.plasx_resources.json')}
++    python3 plasx_checked.py --record ${q.call(p + '.plasx_search.json')} -- search_de_novo_families \\
++        -g ${q.call(gene_calls)} -db plasx_profiles -o ${q.call(p + '.de_novo.tsv')} --threads ${task.cpus} --splits ${splits} --tmp plasx_tmp --overwrite
++    python3 plasx_checked.py --record ${q.call(p + '.plasx_predict.json')} -- predict \\
++        -a ${q.call(annotations)} ${q.call(p + '.de_novo.tsv')} -g ${q.call(gene_calls)} -m plasx_coefficients.tsv -o native_scores.tsv --overwrite
++    python3 plasx_inputs.py finalize --sample ${q.call(p)} --fasta ${q.call(assembly)} --mapping ${q.call(mapping)} --genes ${q.call(gene_calls)} \\
++        --annotations ${q.call(annotations)} --de-novo ${q.call(p + '.de_novo.tsv')} --scores native_scores.tsv \\
++        --output ${q.call(p + '.plasx.tsv')} --state ${q.call(p + '.plasx_state.tsv')} --record ${q.call(p + '.plasx_identity.json')}
+     """
+ }
+diff --git a/envs/plasx.yml b/envs/plasx.yml
+--- a/envs/plasx.yml
++++ b/envs/plasx.yml
+@@ -3,4 +3,13 @@
+   - conda-forge
+   - bioconda
+ dependencies:
+-  - plasx>=0.2
++  # PlasX source is a separate, verified workflow input. There is no plasx0.2
++  # Bioconda release. Production uses the exact plasx-linux-64.lock archives.
++  - python=3.8.19
++  - numpy=1.19.5
++  - pandas=1.2.5
++  - scipy=1.7.3
++  - scikit-learn=0.24.2
++  - numba=0.53.1
++  - python-blosc=1.10.6
++  - mmseqs2=10.6d92c
+diff --git a/subworkflows/plasmid_detection.nf b/subworkflows/plasmid_detection.nf
+--- a/subworkflows/plasmid_detection.nf
++++ b/subworkflows/plasmid_detection.nf
+@@ -9,7 +9,7 @@
+  */
+ include { GENOMAD_ENDTOEND as GENOMAD } from '../modules/nf-core/genomad/endtoend/main'
+ include { PLASME } from '../modules/detection/plasme'
+-include { PLASX } from '../modules/detection/plasx'
++include { PLASX_ANNOTATE; PLASX } from '../modules/detection/plasx'
+ include { PLATON } from '../modules/detection/platon'
+ include { PLASMID_CONSENSUS } from '../modules/detection/consensus'
+ include { PLASMID_STRUCTURE } from '../modules/detection/structure'
+@@ -34,9 +34,15 @@
+     }
+     ch_plasx = Channel.empty()
+     if (selectedTools(params.plasmid_detection_tools).contains('plasx')) {
+-        PLASX(ch_assembly,
+-              Channel.value(file(params.plasx_annotations, checkIfExists: true)),
++        // Numbered dependency staging avoids basename collisions in full source
++        // trees. Recursive regular files make reference/source bytes cache inputs.
++        def resource = { location -> Channel.value(tuple(file(location, checkIfExists: true),
++            files("${location}/**", type: 'file', hidden: true))) }
++        PLASX_ANNOTATE(ch_assembly, resource.call(params.plasx_anvio_source),
++                      resource.call(params.plasx_cog_db), resource.call(params.plasx_pfam_db))
++        PLASX(PLASX_ANNOTATE.out.annotations, resource.call(params.plasx_source), resource.call(params.plasx_profiles),
+               Channel.value(file(params.plasx_model, checkIfExists: true)))
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASX_ANNOTATE.out], '04_plasmid_detection', 'PLASX_ANNOTATE'))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASX.out], '04_plasmid_detection', 'PLASX'))
+         ch_plasx = PLASX.out.predictions
+     }
+diff --git a/main.nf b/main.nf
+--- a/main.nf
++++ b/main.nf
+@@ -134,8 +134,14 @@
+     }
+     if (selectedTools(params.plasmid_detection_tools).contains('platon')) required << ['platon_db', params.platon_db]
+     if (selectedTools(params.plasmid_detection_tools).contains('plasx')) {
+-        required << ['plasx_annotations', params.plasx_annotations]
++        if (params.plasx_annotations) paramError('--plasx_annotations is retired: PlasX now generates complete annotations for each sample')
++        required << ['plasx_anvio_source', params.plasx_anvio_source]
++        required << ['plasx_source', params.plasx_source]
++        required << ['plasx_cog_db', params.plasx_cog_db]
++        required << ['plasx_pfam_db', params.plasx_pfam_db]
++        required << ['plasx_profiles', params.plasx_profiles]
+         required << ['plasx_model', params.plasx_model]
++        if (!(params.plasx_splits.toString() ==~ /[0-9]+/)) paramError('--plasx_splits must be a nonnegative integer')
+     }
+     // nf-core plasmidfinder / mobsuite-recon use their packaged databases
+     if (selectedTools(params.typing_tools).contains('mob_typer')) required << ['mob_suite_db', params.mob_suite_db]
+@@ -166,6 +172,19 @@
+     required.each { entry ->
+         if (!entry[1]) {
+             paramError("an enabled tool requires --${entry[0]}")
++        }
++    }
++    if (selectedTools(params.plasmid_detection_tools).contains('plasx')) {
++        ['plasx_anvio_source', 'plasx_source', 'plasx_cog_db', 'plasx_pfam_db', 'plasx_profiles'].each { name ->
++            if (!new File(params[name].toString()).isDirectory()) paramError("--${name} must be a directory")
++        }
++        if (!new File(params.plasx_model.toString()).isFile()) paramError('--plasx_model must be a coefficient table file')
++        ['anvio/__init__.py', 'bin/anvi-gen-contigs-database', 'bin/anvi-export-gene-calls',
++         'bin/anvi-run-ncbi-cogs', 'bin/anvi-run-pfams', 'bin/anvi-export-functions'].each { name ->
++            if (!new File(params.plasx_anvio_source.toString(), name).isFile()) paramError("--plasx_anvio_source missing source file ${name}")
++        }
++        ['plasx/model.py', 'plasx/mmseqs.py', 'plasx/plasx_script.py'].each { name ->
++            if (!new File(params.plasx_source.toString(), name).isFile()) paramError("--plasx_source missing source file ${name}")
+         }
+     }
+     if (selectedTools(params.plasmid_detection_tools).contains('plasme')) {
+diff --git a/nextflow.config b/nextflow.config
+--- a/nextflow.config
++++ b/nextflow.config
+@@ -101,7 +101,13 @@
+     plasme_db           = null
+     plasme_dir          = null    // fixed source checkout with PLASMe.py and its helper modules
+     plasme_container    = null    // optional OCI/SIF override; default local image built from containers/plasme
+-    plasx_annotations   = null
++    plasx_annotations   = null  // retired shared annotation input; rejected when PlasX is selected
++    plasx_anvio_source  = null  // fixed anvi'o 7.1 source tree
++    plasx_source        = null  // fixed PlasX source tree
++    plasx_cog_db        = null  // anvi'o COG base directory containing COG14/
++    plasx_pfam_db       = null  // prepared Pfam32.0 directory
++    plasx_profiles      = null  // complete official de novo MMseqs2 profiles
++    plasx_splits        = 32    // resource partition only; all ten identity levels remain enabled
+     plasx_model         = null
+     platon_db           = null
+     copla_refgraph      = null
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -192,7 +192,9 @@
+ | `--checkm2_db` | CheckM2 | `checkm2 database --download --path <dir>`（启用 checkm2 时必填） |
+ | `--plasme_db / --plasme_dir` | PLASMe | 完整官方库（含已建索引和模型）/ 官方源码目录 |
+ | `--platon_db` | Platon | 官方数据库 |
+-| `--plasx_annotations / --plasx_model` | PlasX | PlasX 官方注释与模型文件 |
++| `--plasx_anvio_source / --plasx_source` | PlasX | 固定 anvi’o7.1 与 PlasX 官方源码目录 |
++| `--plasx_cog_db / --plasx_pfam_db` | PlasX | 完整 COG2014（含 COG14/ 的基目录）及 Pfam32.0 原生索引 |
++| `--plasx_profiles / --plasx_model` | PlasX | 完整官方 de novo 家族库和模型；流程逐样本自动生成三类注释，旧共享 `--plasx_annotations` 已停用 |
+ | `--copla_refgraph / --copla_reflist` | COPLA | COPLA 参考图与列表 |
+ | `--copla_dir` | COPLA | 已准备的官方源码、辅助程序及数据库目录；列表中的参考 FASTA 必须位于该目录内 |
+ | `--copla_macsyfinder_dir` | COPLA | 独立 Python2/MacSyFinder 1.0.5 环境目录，含 `bin/macsyfinder` |
+diff --git a/tests/run_detection_selection.py b/tests/run_detection_selection.py
+--- a/tests/run_detection_selection.py
++++ b/tests/run_detection_selection.py
+@@ -10,6 +10,37 @@
+ import subprocess
+ 
+ ROOT = Path(__file__).resolve().parents[1]
++PLASX_PYTHON_OBSERVER = r'''
++import sys,json,shutil,csv
++from pathlib import Path
++if len(sys.argv)>1 and Path(sys.argv[1]).name in ['plasx_inputs.py','anvio_checked.py','plasx_checked.py']:
++ # Routing only: deliberately bypass every PlasX producer/validator/model.
++ a=sys.argv[2:];name=Path(sys.argv[1]).name
++ def value(flag):return a[a.index(flag)+1]
++ if name=='plasx_inputs.py':
++  if a[0]=='prepare':
++   prefix=value('--prefix');source=Path(value('--assembly'));cid=source.read_text().splitlines()[0][1:]
++   Path(prefix+'.contigs.fasta').write_bytes(source.read_bytes())
++   Path(prefix+'.id_map.tsv').write_text('contig\toriginal_contig\n'+cid+'\t'+cid+'\n')
++  elif a[0]=='finalize':
++   shutil.copyfile(value('--scores'),value('--output'))
++   Path(value('--state')).write_text('sample_id\tcontig\tstatus\n'+value('--sample')+'\tOBSERVER\tstub_not_validated\n')
++ elif name=='anvio_checked.py':
++  command=a[a.index('--')+1]
++  if command=='anvi-gen-contigs-database':Path(value('-o')).write_text('EXPLICIT_OBSERVER_NOT_A_REAL_DATABASE\n')
++  elif command=='anvi-export-gene-calls':
++   source=next(Path('.').glob('*.contigs.fasta'));cid=source.read_text().splitlines()[0][1:]
++   Path(value('-o')).write_text('gene_callers_id\tcontig\n0\t'+cid+'\n')
++  elif command=='anvi-export-functions':Path(value('-o')).write_text('gene_callers_id\tsource\taccession\te_value\n')
++ elif name=='plasx_checked.py':
++  command=a[a.index('--')+1]
++  if command=='search_de_novo_families':Path(value('-o')).write_text('gene_callers_id\tcontig\taccession\te_value\n')
++  elif command=='predict':
++   with Path(value('-g')).open() as stream:cid=next(csv.DictReader(stream,delimiter='\t'))['contig']
++   Path(value('-o')).write_text('contig\tscore\n'+cid+'\t0.9\n')
++ if '--record' in a:Path(value('--record')).write_text(json.dumps({'scope':'EXPLICIT_PLASX_ANNOTATION_AND_CLASSIFIER_TRANSPORT_OBSERVER','state':'stub_not_validated'}))
++ raise SystemExit(0)
++'''
+ OBSERVER = '''#!/usr/bin/env python3
+ # Controlled interface output only; no classification/model/database inference.
+ from pathlib import Path
+@@ -68,7 +99,7 @@
+     # This explicit test-only Python transport replaces that classifier boundary;
+     # it never claims to validate the auditor, model, DB, or output format.
+     shim=observer_bin/'python3'
+-    shim.write_text('#!'+str(python)+'\n'+"import os,sys,json\nfrom pathlib import Path\nif len(sys.argv)>1 and Path(sys.argv[1]).name=='platon_checked.py':\n a=sys.argv[2:];source=Path(a[a.index('--assembly')+1]);prefix=a[a.index('--prefix')+1];cid=source.read_text().splitlines()[0][1:]\n Path(prefix+'.tsv').write_text('contig_id\\tclassification\\n'+cid+'\\tplasmid\\n')\n Path(prefix+'.plasmid.fasta').write_bytes(source.read_bytes())\n for suffix in ['.json','.platon_state.json']:\n  Path(prefix+suffix).write_text(json.dumps({'sample_id':prefix,'state':'stub_not_validated','scope':'EXPLICIT_CLASSIFIER_OBSERVER'}))\n Path(a[a.index('--record')+1]).write_text(json.dumps({'sample_id':prefix,'scope':'EXPLICIT_CLASSIFIER_OBSERVER_NO_NATIVE_PLATON'}));raise SystemExit(0)\nos.execv('PYTHON_EXECUTABLE',[sys.argv[0],*sys.argv[1:]])\n".replace('PYTHON_EXECUTABLE',str(python)))
++    shim.write_text('#!'+str(python)+'\n'+PLASX_PYTHON_OBSERVER+"import os,sys,json\nfrom pathlib import Path\nif len(sys.argv)>1 and Path(sys.argv[1]).name=='platon_checked.py':\n a=sys.argv[2:];source=Path(a[a.index('--assembly')+1]);prefix=a[a.index('--prefix')+1];cid=source.read_text().splitlines()[0][1:]\n Path(prefix+'.tsv').write_text('contig_id\\tclassification\\n'+cid+'\\tplasmid\\n')\n Path(prefix+'.plasmid.fasta').write_bytes(source.read_bytes())\n for suffix in ['.json','.platon_state.json']:\n  Path(prefix+suffix).write_text(json.dumps({'sample_id':prefix,'state':'stub_not_validated','scope':'EXPLICIT_CLASSIFIER_OBSERVER'}))\n Path(a[a.index('--record')+1]).write_text(json.dumps({'sample_id':prefix,'scope':'EXPLICIT_CLASSIFIER_OBSERVER_NO_NATIVE_PLATON'}));raise SystemExit(0)\nos.execv('PYTHON_EXECUTABLE',[sys.argv[0],*sys.argv[1:]])\n".replace('PYTHON_EXECUTABLE',str(python)))
+     shim.chmod(0o755)
+     for name in ['bio_script.py','trans_data.py','trans_model.py']:
+         (observer_bin/name).write_text('# Explicit classifier CLI observer\n')
+@@ -83,8 +114,10 @@
+         p.mkdir()
+         params = {'fixture_dir': str(fixture), 'outdir': str(p / 'out'), 'plasmid_detection_tools': tools,
+                   'genomad_db': str(fixture / 'db'), 'platon_db': str(fixture / 'db'),
+-                  'plasme_db': str(fixture / 'db'), 'plasme_dir':str(observer_bin), 'plasx_annotations': str(fixture / 'annotations'),
+-                  'plasx_model': str(fixture / 'model')}
++                  'plasme_db': str(fixture / 'db'), 'plasme_dir':str(observer_bin),
++                  'plasx_anvio_source':str(observer_bin),'plasx_source':str(observer_bin),
++                  'plasx_cog_db':str(fixture/'db'),'plasx_pfam_db':str(fixture/'db'),
++                  'plasx_profiles':str(fixture/'db'),'plasx_splits':32,'plasx_model': str(fixture / 'model')}
+         (p / 'params.json').write_text(json.dumps(params))
+         command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run',
+                    str(ROOT / 'tests/nextflow/detection_selection.nf'), '-params-file', str(p / 'params.json'),
+@@ -96,7 +129,7 @@
+         (p / 'stderr.log').write_text(result.stderr)
+         tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []
+         selected = {tool.strip() for tool in tools}
+-        checks = {'success': result.returncode == 0, 'task_count': len(tasks) == 2 * (3 + len(selected)),
++        checks = {'success': result.returncode == 0, 'task_count': len(tasks) == 2 * (3 + len(selected) + int('plasx' in selected)),
+                   'completed': bool(tasks) and all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks),
+                   'no_retired_tasks': all('SCAPP' not in t['name'] for t in tasks)}
+         if checks['success']:
+@@ -116,7 +149,7 @@
+         sources = ['subworkflows/plasmid_detection.nf', 'bin/plasmid_consensus.R', 'tests/nextflow/detection_selection.nf', 'tests/run_detection_selection.py','modules/detection/platon.nf','bin/platon_checked.py']
+         receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs),
+                    'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in sources},
+-                   'limitations': ['classifier CLI observers including explicit Platon checked-runtime Python transport and controlled PLASMe/PlasX outputs; production auditor/classification/format is NOT evaluated by this routing test', 'native original full detection subworkflow and R consumers; no classifier inference, real DB/models, image or scientific accuracy']}
++                   'limitations': ['classifier CLI observers including explicit Platon and both PlasX stages checked-runtime/validator Python transport; production annotation, auditor, classifier, and format validation are NOT evaluated by this routing test', 'native original full detection subworkflow and R consumers; no classifier inference, real DB/models, image or scientific accuracy']}
+         (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
+     return receipt['pass']
+ 
+diff --git a/tests/nf-test/README.md b/tests/nf-test/README.md
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -489,3 +489,11 @@
+ ### Platon当前原生验收（2026-10-24）
+ 
+ 原P3文件保留plain与锁定上游gzip阳性，并检查14列、明确状态及子工具/worker无错误。生产参数仍为1.7 accuracy+meta；完整资源锁在 `tests/platon-native.lock.json`，Linux64环境锁在 `envs/platon-linux-64.lock`。本批native overlay实际执行两个用例，非Podman证明。独立输入传输测试现在必须显式提供 `AUTOPLASM_PLATON_PREFIX`、`AUTOPLASM_PLATON_NATIVE_DB`、`AUTOPLASM_PLATON_INTERFACE_FASTA`；缺少时明确skip，不再以观察替身或任意短序列宣称真实Platon通过。设置 `AUTOPLASM_PLATON_INTERFACE_ROOT` 可在指定目录保留任务记录。命令、JUnit及全部范围限制见 `results/tool-audit/20261024-platon-native/receipt.json`。
++
++### PlasX完整自动注释验证（2026-10-24）
++
++`nodes-detection-plasx.nf.test`实际运行生产两阶段：逐样本anvi’o7.1 COG2014/Pfam32及完整十组de novo家族，再用原模型评分。设置`AUTOPLASM_PLASX_ROOT`指向完整资源目录，包含primary/、anvio-primary-complete/、COG_2014/、Pfam_v32/、profiles/及原始系数文件；原始数据和模型锁在`tests/plasx-native.lock.json`，两阶段分别使用351包和63包Linux64显式锁。可用`tests/prepare_plasx_resources.py --outdir <新资源目录> --anvio-prefix <351包环境> --cache <已有下载缓存>`重建全部公共资源；准备会运行原生索引程序，需要足够磁盘及进程通信权限。重建器返回的生产参数使用`sources/anvio`、`sources/plasx`及`model/`；本P3资源根目录采用上述审计布局，重建后需为同一完整资源设置对应目录/文件别名，不能省略资源。
++
++必须使用提供生产配置的原生或Conda overlay，不再使用无依赖的Python容器冒充PlasX。P3断言同时检查两任务、三类注释、原生运行记录、样本状态域及标准库独立计数/logistic算术；不把本次自动输出更新成“独立生物真值”快照。`tests/run_plasx_native.py --workflow <有execution.json的冷运行目录> --source <官方源码> --model <原模型> --output <新核验目录>`可单独核对既有执行，`--prefix <原生环境>`另执行未修改官方predict对照；`--products`只验证产物，不能代替执行证据。整个组装0基因目前原生明确失败，排除支持；无COG/Pfam命中及未评分contig另行核验。
++
++本批仍按receipt和JUnit决定验收，不能仅凭新增P3文件或资源准备成功宣称通过。更多范围、官方预计算表与当前自动注释的差异及失败尝试见`docs/tool-audit/contracts/plasx-native.md`。
+diff --git a/bin/anvio_checked.py b/bin/anvio_checked.py
+--- /dev/null
++++ b/bin/anvio_checked.py
+@@ -0,0 +1,143 @@
++#!/usr/bin/env python3
++"""Execute the fixed anvi'o 7.1 source used by PlasX's complete annotation method."""
++import argparse
++import hashlib
++import difflib
++import inspect
++import json
++import os
++from pathlib import Path
++import runpy
++import subprocess
++import sys
++import textwrap
++
++SOURCE_DIGEST = '7956da22fe2d89cf113ab0416b9a98e96a6b85db32c36be543158d60ce033004'
++SOURCE_FILES = 1185
++PROGRAMS = {'anvi-gen-contigs-database', 'anvi-export-gene-calls', 'anvi-run-ncbi-cogs',
++            'anvi-run-pfams', 'anvi-export-functions'}
++
++
++def checked_command(native, record_path):
++    """Check inside each forked worker; parent Popen lists cannot see its children."""
++    record_path = Path(record_path).resolve()
++
++    def run(*positional, **keywords):
++        row = {'pid': os.getpid(), 'command': positional[0] if positional else keywords.get('cmdline')}
++        try:
++            status = native(*positional, **keywords)
++            row['exit_code'] = status
++            if status != 0:
++                raise RuntimeError('anvi\'o external command failed with exit ' + str(status) + ': ' + repr(row['command']))
++            return status
++        except BaseException as error:
++            row['error'] = type(error).__name__ + ': ' + str(error)
++            raise
++        finally:
++            descriptor = os.open(str(record_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
++            try:
++                os.write(descriptor, (json.dumps(row) + '\n').encode())
++            finally:
++                os.close(descriptor)
++
++    return run
++
++
++def verify_source(source):
++    rows = []
++    for folder in ['anvio', 'bin']:
++        for path in sorted((source / folder).rglob('*')):
++            relative = path.relative_to(source)
++            if '__pycache__' in relative.parts or path.suffix == '.pyc':
++                continue
++            if path.is_symlink():
++                path.resolve().relative_to(source)
++                data = os.readlink(path).encode()
++            elif path.is_file():
++                data = path.read_bytes()
++            else:
++                continue
++            rows.append((relative.as_posix(), hashlib.sha256(data).hexdigest()))
++    digest = hashlib.sha256(json.dumps(sorted(rows), separators=(',', ':')).encode()).hexdigest()
++    if len(rows) != SOURCE_FILES or digest != SOURCE_DIGEST:
++        raise ValueError('anvi\'o source differs from fixed 7.1 commit 258991a5bc0f483c958040a55d339e1f447429ac')
++    return digest
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--source', type=Path, required=True)
++    parser.add_argument('--record', type=Path, required=True)
++    parser.add_argument('native_args', nargs=argparse.REMAINDER)
++    args = parser.parse_args()
++    native_args = args.native_args[1:] if args.native_args[:1] == ['--'] else args.native_args
++    if not native_args or native_args[0] not in PROGRAMS:
++        parser.error('Expected one of ' + ', '.join(sorted(PROGRAMS)))
++    source = args.source.resolve()
++    original_popen, original_argv = subprocess.Popen, sys.argv
++    children = []
++    record = {'source_commit': '258991a5bc0f483c958040a55d339e1f447429ac', 'python_executable': sys.executable,
++              'native_args': native_args, 'success': False}
++    command_log = args.record.resolve().with_name(args.record.name + '.commands.jsonl')
++    command_log.write_text('')
++
++    def popen(command, *positional, **kwargs):
++        child = original_popen(command, *positional, **kwargs)
++        children.append((child, command))
++        return child
++
++    try:
++        record['source_digest'] = verify_source(source)
++        sys.path.insert(0, str(source))
++        # anvi'o's argument documentation resolves its own scripts through PATH.
++        # The verified source bin/ supplies those scripts in a fresh dependency-
++        # only Conda environment, without requiring an installed anvi'o package.
++        os.environ['PATH'] = str(source / 'bin') + os.pathsep + os.environ.get('PATH', '')
++        import anvio
++        if Path(anvio.__file__).resolve().parent != source / 'anvio' or anvio.anvio_version != '7.1':
++            raise ValueError('Unexpected imported anvi\'o source/version')
++        import anvio.utils as native_utils
++        native_utils.run_command = checked_command(native_utils.run_command, command_log)
++        record['worker_execution_transport'] = 'native run_command with positive-exit checks inside forked workers and a shared append-only command receipt'
++        if native_args[0] == 'anvi-run-ncbi-cogs':
++            # Fixed 7.1 requests --outfmt 6 directly in blastp, then forces view
++            # of a nonexistent DAA. Remove only that redundant conversion call.
++            # No search arguments, score thresholds, output parsing, or source
++            # files are modified. All actual child failures remain fatal.
++            import anvio.cogs as cogs
++            original = textwrap.dedent(inspect.getsource(cogs.COGs.search_with_diamond))
++            before = '    diamond.view()\n'
++            if original.count(before) != 1:
++                raise ValueError('Unexpected fixed anvi\'o DIAMOND conversion implementation')
++            effective = original.replace(before, '')
++            namespace = dict(cogs.__dict__)
++            exec(compile(effective, '<anvio7.1-direct-tsv-conversion-repair>', 'exec'), namespace)
++            cogs.COGs.search_with_diamond = namespace['search_with_diamond']
++            record['compatibility_repair'] = {
++                'scope': 'skip redundant DAA conversion after direct tabular blastp output; scientific search unchanged',
++                'original_function_sha256': hashlib.sha256(original.encode()).hexdigest(),
++                'effective_function_sha256': hashlib.sha256(effective.encode()).hexdigest(),
++                'diff': ''.join(difflib.unified_diff(original.splitlines(True), effective.splitlines(True), fromfile='original/search_with_diamond', tofile='effective/search_with_diamond'))}
++        subprocess.Popen = popen
++        sys.argv = [str(source / 'bin' / native_args[0])] + native_args[1:]
++        try:
++            runpy.run_path(sys.argv[0], run_name='__main__')
++        except SystemExit as exit_status:
++            if exit_status.code not in [None, 0]:
++                raise
++        failed = [(command, child.poll()) for child, command in children if child.poll() != 0]
++        if failed:
++            raise RuntimeError('anvi\'o child failed or remained running: ' + repr(failed))
++        record['success'] = True
++    except BaseException as error:
++        record['error'] = type(error).__name__ + ': ' + str(error)
++        raise
++    finally:
++        subprocess.Popen, sys.argv = original_popen, original_argv
++        record['children'] = [{'command': command, 'exit_code': child.poll()} for child, command in children]
++        record['native_commands'] = [json.loads(line) for line in command_log.read_text().splitlines()]
++        args.record.write_text(json.dumps(record, indent=2) + '\n')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/bin/plasx_checked.py b/bin/plasx_checked.py
+--- /dev/null
++++ b/bin/plasx_checked.py
+@@ -0,0 +1,84 @@
++#!/usr/bin/env python3
++"""Run the fixed native PlasX source, propagating failures through its tee pipes."""
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++import sys
++
++SOURCE_SHA256 = {
++    '__init__.py': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
++    'compress_utils.py': '2992c40e346c19f1ec97e6eb7e618d462305ac7fef47b1b251b47ccc942bbf21',
++    'constants.py': '3b95d18c34755a2f0e05dddf36145c3b96e78330eb012116447b033f4fcfc935',
++    'fasta_utils.py': '8cdce78e2ac9de525429268be0f7640079b452fcd08a910d5c6c323b94498dc7',
++    'learn.py': '2bc8b6514f12ac506b76c03109dfaf018f16711cbe12e8572667a859be450010',
++    'mmseqs.py': '97b6ae9100473e52c9345e292bf4c29aadd4ed3bf79e5fa5ff1c0a0602165c03',
++    'model.py': '68cff35789ada7491e69c91e1af90a226d9e88ed9c1fb96c324ba73fec42a5a4',
++    'nb_utils.py': '5bc6eceb2bb9d0c0ba716ea6e59b929c116f2c816bac9f750a0ae918cb55529e',
++    'pd_utils.py': 'e5f7b7efe17dd55781928e22c134fafc024d9392f4871839952ff25ab0baa961',
++    'plasx_script.py': '68d46395dd3cca5b5b3f0f22cf7112d2510481276c372766231b57a23278d603',
++    'utils.py': '218cbfd6bf0d66739e528937c35c374615754e64cd0c7f27bc24e02ac13b687c',
++}
++
++
++class CheckedProcesses:
++    def __init__(self):
++        self.original = subprocess.Popen
++        self.children = []
++
++    def popen(self, args, *positional, **kwargs):
++        original_args = args
++        if kwargs.get('shell'):
++            if not isinstance(args, str) or positional or kwargs.get('executable'):
++                raise ValueError('Unexpected PlasX shell invocation')
++            args = ['/bin/bash', '-o', 'pipefail', '-c', args]
++            kwargs['shell'] = False
++        child = self.original(args, *positional, **kwargs)
++        self.children.append((child, {'command': original_args, 'effective_command': args}))
++        return child
++
++    def records(self):
++        return [dict(row, exit_code=child.poll()) for child, row in self.children]
++
++
++def verify_source(directory):
++    directory = Path(directory)
++    actual = {name: hashlib.sha256((directory / name).read_bytes()).hexdigest() for name in SOURCE_SHA256}
++    if actual != SOURCE_SHA256:
++        raise ValueError('PlasX runtime differs from fixed commit 5c9acfd00a597da27ef5261acf72dbaf2117b645')
++    return actual
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--record', required=True)
++    parser.add_argument('native_args', nargs=argparse.REMAINDER)
++    args = parser.parse_args()
++    native_args = args.native_args[1:] if args.native_args[:1] == ['--'] else args.native_args
++    if not native_args or native_args[0] not in ['search_de_novo_families', 'predict']:
++        parser.error('Expected search_de_novo_families or predict')
++    record = {'source_commit': '5c9acfd00a597da27ef5261acf72dbaf2117b645', 'python_executable': sys.executable,
++              'native_args': native_args, 'shell_transport': 'bash -o pipefail; original scientific source unchanged', 'success': False}
++    audit = CheckedProcesses()
++    try:
++        import plasx
++        record['source_sha256'] = verify_source(Path(plasx.__file__).parent)
++        from plasx.plasx_script import run
++        subprocess.Popen = audit.popen
++        run(native_args)
++        failed = [row for row in audit.records() if row['exit_code'] != 0]
++        if failed:
++            raise RuntimeError('PlasX child process failed or remained running: ' + repr(failed))
++        record['success'] = True
++    except BaseException as error:
++        record['error'] = type(error).__name__ + ': ' + str(error)
++        raise
++    finally:
++        subprocess.Popen = audit.original
++        record['children'] = audit.records()
++        Path(args.record).write_text(json.dumps(record, indent=2) + '\n')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/bin/plasx_inputs.py b/bin/plasx_inputs.py
+--- /dev/null
++++ b/bin/plasx_inputs.py
+@@ -0,0 +1,254 @@
++#!/usr/bin/env python3
++"""Keep PlasX's per-sample anvi'o genes, annotations, and source contigs aligned."""
++import argparse
++import csv
++import gzip
++import hashlib
++import json
++import math
++from pathlib import Path
++import re
++import sqlite3
++
++
++def table(path, required):
++    with Path(path).open(newline='') as stream:
++        reader = csv.DictReader(stream, delimiter='\t')
++        if not reader.fieldnames or len(reader.fieldnames) != len(set(reader.fieldnames)) or not set(required) <= set(reader.fieldnames):
++            raise ValueError('Missing or duplicate columns in ' + str(path))
++        rows = list(reader)
++    if any(None in row or any(value is None for value in row.values()) for row in rows):
++        raise ValueError('Malformed table row in ' + str(path))
++    return rows
++
++
++def write_table(path, columns, rows):
++    with Path(path).open('w', newline='') as stream:
++        writer = csv.DictWriter(stream, fieldnames=columns, delimiter='\t', lineterminator='\n')
++        writer.writeheader()
++        writer.writerows(rows)
++
++
++def fasta(path):
++    path = Path(path)
++    opener = gzip.open if path.suffix.lower() == '.gz' else open
++    records = {}
++    current = None
++    with opener(path, 'rt') as stream:
++        for line in stream:
++            line = line.strip()
++            if not line:
++                continue
++            if line.startswith('>'):
++                fields = line[1:].split()
++                if not fields or fields[0] in records:
++                    raise ValueError('Empty or duplicate FASTA identifier')
++                current = fields[0]
++                records[current] = []
++            else:
++                if current is None or not re.fullmatch('[ACGTRYSWKMBDHVNacgtryswkmbdhvn]+', line):
++                    raise ValueError('Invalid nucleotide FASTA')
++                records[current].append(line.upper())
++    records = {key: ''.join(parts) for key, parts in records.items()}
++    if not records or any(not sequence for sequence in records.values()):
++        raise ValueError('Empty FASTA or contig')
++    return records
++
++
++def prepare(assembly, sample, prefix):
++    if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]*', sample):
++        raise ValueError('Unsafe sample identifier')
++    source = fasta(assembly)
++    namespace = hashlib.sha256(sample.encode()).hexdigest()
++    mapping = []
++    with Path(str(prefix) + '.contigs.fasta').open('w') as out:
++        for index, (original, sequence) in enumerate(source.items(), 1):
++            internal = 'px_' + namespace + '_' + str(index)
++            out.write('>' + internal + '\n' + sequence + '\n')
++            mapping.append(dict(sample_id=sample, contig=internal, original_contig=original,
++                                length=len(sequence), sequence_sha256=hashlib.sha256(sequence.encode()).hexdigest()))
++    write_table(str(prefix) + '.id_map.tsv', ['sample_id', 'contig', 'original_contig', 'length', 'sequence_sha256'], mapping)
++    return {'sample_id': sample, 'contigs': len(source), 'assembly_sha256': hashlib.sha256(Path(assembly).read_bytes()).hexdigest()}
++
++
++def check_resources(cog_db=None, pfam_db=None, profiles=None, model=None):
++    result = {}
++    if cog_db:
++        cog = Path(cog_db) / 'COG14'
++        if (cog / '.VERSION').read_text().strip() != '2':
++            raise ValueError('Expected anvi\'o COG14 data format 2')
++        for name in ['COG.txt', 'CATEGORIES.txt', 'PID-TO-CID.cPickle', 'MISSING_COG_IDs.cPickle', 'DB_DIAMOND/COG.dmnd']:
++            if not (cog / name).is_file() or not (cog / name).stat().st_size:
++                raise ValueError('Missing COG14 reference file: ' + name)
++        result['cog_version'] = 'COG14'
++    if pfam_db:
++        pfam = Path(pfam_db)
++        if (pfam / 'Pfam.version').read_text().splitlines()[0].split(':')[-1].strip() != '32.0':
++            raise ValueError('Expected Pfam32.0, the version used by PlasX')
++        for name in ['Pfam-A.hmm', 'Pfam-A.clans.tsv', 'Pfam-A.hmm.h3f', 'Pfam-A.hmm.h3i', 'Pfam-A.hmm.h3m', 'Pfam-A.hmm.h3p']:
++            if not (pfam / name).is_file() or not (pfam / name).stat().st_size:
++                raise ValueError('Missing Pfam32 reference file: ' + name)
++        result['pfam_version'] = '32.0'
++    if profiles:
++        profiles = Path(profiles)
++        for identity in [90, 80, 70, 60, 50, 40, 30, 25, 20, 5]:
++            for suffix in ['', '.dbtype', '.index', '_h', '_h.index']:
++                path = profiles / ('clu' + str(identity) + '.profile' + suffix)
++                if not path.is_file() or not path.stat().st_size:
++                    raise ValueError('Missing de novo family profile: ' + path.name)
++        for name in ['rep_lengths.pkl.blp', 'rep_min_align_identity.pkl.blp']:
++            if not (profiles / name).is_file() or not (profiles / name).stat().st_size:
++                raise ValueError('Missing de novo profile metadata: ' + name)
++        result['de_novo_identities'] = [90, 80, 70, 60, 50, 40, 30, 25, 20, 5]
++    if model:
++        features = set()
++        families = set()
++        with Path(model).open(newline='') as stream:
++            reader = csv.DictReader(stream, delimiter='\t')
++            if not {'accession', 'PlasX_coefficient'} <= set(reader.fieldnames or []):
++                raise ValueError('Expected PlasX coefficient table')
++            for row in reader:
++                accession = row['accession']
++                if not accession or accession in features or not math.isfinite(float(row['PlasX_coefficient'])):
++                    raise ValueError('Invalid or duplicate model feature/coefficient')
++                features.add(accession)
++                for prefix in ['COG', 'PF', 'mmseqs_']:
++                    if accession.startswith(prefix):
++                        families.add(prefix)
++        if 'INTERCEPT' not in features or families != {'COG', 'PF', 'mmseqs_'}:
++            raise ValueError('Model lacks intercept or one of the three annotation families')
++        result.update(model_sha256=hashlib.sha256(Path(model).read_bytes()).hexdigest(), model_features=len(features) - 1)
++    return result
++
++
++def load_mapping(mapping, sequence_path, sample):
++    rows = table(mapping, ['sample_id', 'contig', 'original_contig', 'length', 'sequence_sha256'])
++    sequences = fasta(sequence_path)
++    if not rows or len({r['contig'] for r in rows}) != len(rows) or len({r['original_contig'] for r in rows}) != len(rows):
++        raise ValueError('Empty or duplicate contig mapping')
++    if {r['contig'] for r in rows} != set(sequences) or {r['sample_id'] for r in rows} != {sample}:
++        raise ValueError('Contig mapping does not belong to this sample FASTA')
++    for row in rows:
++        sequence = sequences[row['contig']]
++        if int(row['length']) != len(sequence) or row['sequence_sha256'] != hashlib.sha256(sequence.encode()).hexdigest():
++            raise ValueError('Contig mapping sequence mismatch')
++    return {r['contig']: r for r in rows}, sequences
++
++
++def load_genes(path, sequences):
++    rows = table(path, ['gene_callers_id', 'contig', 'start', 'stop', 'direction', 'source', 'version', 'aa_sequence'])
++    genes = {}
++    for row in rows:
++        key = row['gene_callers_id']
++        if not re.fullmatch('[0-9]+', key) or key in genes or row['contig'] not in sequences:
++            raise ValueError('Duplicate, invalid, or foreign gene identity')
++        start, stop = int(row['start']), int(row['stop'])
++        if not 0 <= start < stop <= len(sequences[row['contig']]) or row['direction'] not in ['f', 'r']:
++            raise ValueError('Invalid gene coordinates')
++        if row['source'] != 'prodigal' or row['version'] != 'v2.6.3' or not re.fullmatch('[A-Z*]+', row['aa_sequence']):
++            raise ValueError('Unexpected gene caller or empty protein sequence')
++        genes[key] = row
++    return genes
++
++
++def check_annotations(path, genes, de_novo=False):
++    required = ['gene_callers_id', 'accession', 'e_value'] + (['contig', 'start', 'stop', 'direction'] if de_novo else ['source'])
++    rows = table(path, required)
++    for row in rows:
++        if row['gene_callers_id'] not in genes:
++            raise ValueError('Annotation references an unknown gene')
++        gene = genes[row['gene_callers_id']]
++        value = float(row['e_value'])
++        if not math.isfinite(value) or value < 0:
++            raise ValueError('Invalid annotation e-value')
++        if de_novo:
++            if any(row[key] != gene[key] for key in ['contig', 'start', 'stop', 'direction']):
++                raise ValueError('De novo annotation belongs to another gene/contig')
++            valid = re.fullmatch('mmseqs_(90|80|70|60|50|40|30|25|20|5)_[0-9]+', row['accession'])
++        else:
++            pattern = {'COG14_FUNCTION': 'COG[0-9]{4}', 'Pfam': 'PF[0-9]{5}\\.[0-9]+'}
++            valid = row['source'] in pattern and all(re.fullmatch(pattern[row['source']], accession) for accession in row['accession'].split('!!!'))
++        if not valid:
++            raise ValueError('Unexpected annotation source or accession')
++    return rows
++
++
++def validate_anvio(database, genes, sequences, annotations=None):
++    with sqlite3.connect(Path(database).resolve().as_uri() + '?mode=ro', uri=True) as connection:
++        metadata = dict(connection.execute('SELECT key, value FROM self'))
++        if metadata.get('version') != '20' or metadata.get('db_type') != 'contigs':
++            raise ValueError('Unexpected anvi\'o database format')
++        if not {'COG14_FUNCTION', 'Pfam'} <= set((metadata.get('gene_function_sources') or '').split(',')):
++            raise ValueError('anvi\'o database lacks a completed COG14/Pfam annotation source')
++        stored = dict(connection.execute('SELECT contig, sequence FROM contig_sequences'))
++        if stored != sequences:
++            raise ValueError('anvi\'o database sequences differ from source FASTA')
++        fields = ['gene_callers_id', 'contig', 'start', 'stop', 'direction', 'source', 'version']
++        native = connection.execute('SELECT ' + ','.join(fields) + ' FROM genes_in_contigs').fetchall()
++        exported = {tuple(row[field] for field in fields) for row in genes.values()}
++        if len(native) != len(genes) or {tuple(str(value) for value in row) for row in native} != exported:
++            raise ValueError('Exported gene calls differ from sample database')
++        proteins = {str(key): value for key, value in connection.execute('SELECT gene_callers_id, sequence FROM gene_amino_acid_sequences')}
++        if proteins != {key: row['aa_sequence'] for key, row in genes.items()}:
++            raise ValueError('Exported amino acid sequences differ from sample database')
++        if annotations is not None:
++            exported = table(annotations, ['gene_callers_id', 'source', 'accession', 'function', 'e_value'])
++            native = connection.execute("SELECT gene_callers_id, source, accession, function, e_value FROM gene_functions WHERE source IN ('COG14_FUNCTION','Pfam')").fetchall()
++            expected = sorted((str(gene), source, accession, function, float(evalue)) for gene, source, accession, function, evalue in native)
++            observed = sorted((row['gene_callers_id'], row['source'], row['accession'], row['function'], float(row['e_value'])) for row in exported)
++            if observed != expected:
++                raise ValueError('Exported annotations differ from this sample database')
++
++
++def finalize(scores, mapping, sequences, genes, cogs, denovo, output, state, sample):
++    cogs = check_annotations(cogs, genes)
++    denovo = check_annotations(denovo, genes, de_novo=True)
++    annotated = {genes[row['gene_callers_id']]['contig'] for row in cogs + denovo}
++    predictions = table(scores, ['contig', 'score'])
++    seen = set()
++    for row in predictions:
++        key = row['contig']
++        value = float(row['score'])
++        if key in seen or key not in mapping or not math.isfinite(value) or not 0 <= value <= 1:
++            raise ValueError('Invalid, duplicate, or foreign PlasX score')
++        seen.add(key)
++    if seen != annotated:
++        raise ValueError('PlasX score domain differs from annotated contigs')
++    # Preserve original floating point text. Missing annotations are unassessed,
++    # never an invented zero probability or intercept-only prediction.
++    write_table(output, ['contig', 'score'], [{'contig': mapping[row['contig']]['original_contig'], 'score': row['score']} for row in predictions])
++    gene_contigs = {row['contig'] for row in genes.values()}
++    statuses = []
++    for key, row in mapping.items():
++        status = 'scored' if key in seen else ('not_assessed_no_annotations' if key in gene_contigs else 'not_assessed_no_genes')
++        statuses.append({'sample_id': sample, 'contig': row['original_contig'], 'status': status})
++    write_table(state, ['sample_id', 'contig', 'status'], statuses)
++    return {'sample_id': sample, 'genes': len(genes), 'cog_pfam_annotations': len(cogs), 'de_novo_annotations': len(denovo),
++            'scored_contigs': len(seen), 'unassessed_contigs': len(mapping) - len(seen)}
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('operation', choices=['prepare', 'resources', 'check-anvio', 'finalize'])
++    for argument in ['assembly', 'sample', 'prefix', 'mapping', 'fasta', 'genes', 'annotations', 'database', 'de-novo', 'scores', 'output', 'state', 'record', 'cog-db', 'pfam-db', 'profiles', 'model']:
++        parser.add_argument('--' + argument)
++    args = parser.parse_args()
++    if args.operation == 'resources':
++        result = check_resources(args.cog_db, args.pfam_db, args.profiles, args.model)
++    elif args.operation == 'prepare':
++        result = prepare(args.assembly, args.sample, args.prefix)
++    else:
++        mapping, sequences = load_mapping(args.mapping, args.fasta, args.sample)
++        genes = load_genes(args.genes, sequences)
++        if args.operation == 'check-anvio':
++            validate_anvio(args.database, genes, sequences, args.annotations)
++            annotations = check_annotations(args.annotations, genes)
++            result = {'sample_id': args.sample, 'genes': len(genes), 'annotations': len(annotations)}
++        else:
++            result = finalize(args.scores, mapping, sequences, genes, args.annotations, args.de_novo, args.output, args.state, args.sample)
++    if args.record:
++        Path(args.record).write_text(json.dumps(result, indent=2) + '\n')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/envs/plasx-anvio.yml b/envs/plasx-anvio.yml
+--- /dev/null
++++ b/envs/plasx-anvio.yml
+@@ -0,0 +1,37 @@
++name: autoplasm-plasx-anvio
++channels:
++  - conda-forge
++  - bioconda
++dependencies:
++  # The source tree is a separate verified input; no nonexistent anvio7.1
++  # Conda package is requested. Production uses plasx-anvio-linux-64.lock.
++  - python=3.7.12
++  - numpy=1.19.5
++  - pandas=0.25.1
++  - scipy=1.7.3
++  - scikit-learn=0.24.2
++  - numba=0.53.1
++  - snakemake=5.10.0
++  - django=3.2.24
++  - bottle
++  - pysam
++  - ete3
++  - requests
++  - mistune<2
++  - six
++  - matplotlib
++  - statsmodels
++  - colored<2
++  - illumina-utils
++  - tabulate
++  - paste
++  - pyani
++  - psutil
++  - prodigal=2.6.3
++  - diamond=2.0.14
++  - hmmer=3.3.2
++  - blast=2.16.0
++  - cython=0.29.32
++  - setuptools-scm=6.4.2
++  - tomli=2.0.1
++  - setuptools=59.8.0
+diff --git a/envs/plasx-anvio-linux-64.lock b/envs/plasx-anvio-linux-64.lock
+--- /dev/null
++++ b/envs/plasx-anvio-linux-64.lock
+@@ -0,0 +1,352 @@
++@EXPLICIT
++https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda#a9f577daf3de00bca7c3c76c0ecbd1de
++https://conda.anaconda.org/conda-forge/linux-64/aioeasywebdav-2.4.0-py37h89c1867_1001.tar.bz2#02473a2f7ebefac22a45d49a93767e3c
++https://conda.anaconda.org/conda-forge/linux-64/aiohttp-3.8.3-py37h540881e_0.tar.bz2#664e786b00a89f4bc7ac6c0dbcc0b7af
++https://conda.anaconda.org/conda-forge/noarch/aiosignal-1.3.1-pyhd8ed1ab_0.tar.bz2#d1e1eb7e21a9e2c74279d87dafb68156
++https://conda.anaconda.org/conda-forge/linux-64/alsa-lib-1.2.8-h166bdaf_0.tar.bz2#be733e69048951df1e4b4b7bb8c7666f
++https://conda.anaconda.org/conda-forge/noarch/appdirs-1.4.4-pyh9f0ad1d_0.tar.bz2#5f095bc6454094e96f146491fd03633b
++https://conda.anaconda.org/conda-forge/noarch/asgiref-3.7.2-pyhd8ed1ab_0.conda#596932155bf88bb6837141550cb721b0
++https://conda.anaconda.org/conda-forge/noarch/async-timeout-4.0.3-pyhd8ed1ab_0.conda#3ce482ec3066e6d809dbbb1d1679f215
++https://conda.anaconda.org/conda-forge/noarch/asynctest-0.13.0-py_0.tar.bz2#b0e68312b9cdf1696f49c454d4864dfd
++https://conda.anaconda.org/conda-forge/linux-64/atk-1.0-2.38.0-h04ea711_2.conda#f730d54ba9cd543666d7220c9f7ed563
++https://conda.anaconda.org/conda-forge/linux-64/attr-2.5.2-hb03c661_1.conda#9bb149f49de3f322fca007283eaa2725
++https://conda.anaconda.org/conda-forge/noarch/attrs-24.2.0-pyh71513ae_0.conda#6732fa52eb8e66e5afeb32db8701a791
++https://conda.anaconda.org/conda-forge/noarch/backports-1.0-pyhd8ed1ab_4.conda#67bdebbc334513034826e9b63f769d4c
++https://conda.anaconda.org/conda-forge/noarch/backports.functools_lru_cache-2.0.0-pyhd8ed1ab_0.conda#c3e2817c65ba08250093d59860fe0b0e
++https://conda.anaconda.org/conda-forge/linux-64/bcrypt-3.2.2-py37h540881e_0.tar.bz2#ce4a786ba2c4ac2014095ae69ddfd4a0
++https://conda.anaconda.org/conda-forge/linux-64/biopython-1.79-py37h540881e_2.tar.bz2#646cd669595bf68029a667e2d52430b3
++https://conda.anaconda.org/bioconda/linux-64/blast-2.16.0-hc155240_3.tar.bz2#488f9f30f2427027f4a5a8b84de9d2dd
++https://conda.anaconda.org/bioconda/linux-64/blast-legacy-2.2.26-hf7ff83a_5.tar.bz2#5903537286f884c60a3c7f0f3247ad68
++https://conda.anaconda.org/conda-forge/linux-64/boost-cpp-1.74.0-h75c5d50_8.tar.bz2#9c5996e7741d205bc76a518173ff6b82
++https://conda.anaconda.org/conda-forge/noarch/boto3-1.33.13-pyhd8ed1ab_0.conda#4a1b38a0938b9fc23fb4fc202d832097
++https://conda.anaconda.org/conda-forge/noarch/botocore-1.33.13-pyhd8ed1ab_0.conda#d2566fd9134b6f8b8e69a07e9a1fa17e
++https://conda.anaconda.org/conda-forge/noarch/bottle-0.12.23-pyhd8ed1ab_0.conda#f2a23cc207750e042ad93e2baa6008b4
++https://conda.anaconda.org/conda-forge/linux-64/brotli-1.2.1-h505cf86_0.conda#65f1fc5f6a3a984a8a25641d0e60fc25
++https://conda.anaconda.org/conda-forge/linux-64/brotli-bin-1.2.1-h9908984_0.conda#903eceb31743f0ce070abb9b9f879714
++https://conda.anaconda.org/conda-forge/linux-64/brotli-python-1.0.9-py37hd23a5d3_7.tar.bz2#f330e49790eb1af580c0d710e63c8cb0
++https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_10.conda#e675fabcf81499adc7edf58124fb1e01
++https://conda.anaconda.org/conda-forge/linux-64/c-ares-1.34.9-hebe6cf0_0.conda#78b505af04bf7a87ca957ef0cb5946f5
++https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.10.19-hbd8a1cb_0.conda#a1d1bf676059d2863f000d5e2777743f
++https://conda.anaconda.org/conda-forge/noarch/cachetools-5.5.0-pyhd8ed1ab_0.conda#5bad039db72bd8f134a5cff3ebaa190d
++https://conda.anaconda.org/conda-forge/linux-64/cairo-1.16.0-ha61ee94_1014.tar.bz2#d1a88f3ed5b52e1024b80d4bcd26a7a0
++https://conda.anaconda.org/conda-forge/noarch/certifi-2024.8.30-pyhd8ed1ab_0.conda#12f7d00853807b0531775e9be891cb11
++https://conda.anaconda.org/conda-forge/linux-64/cffi-1.15.1-py37h43b0acd_1.tar.bz2#5111b64bdfdd72d85086ec49c952fe0d
++https://conda.anaconda.org/conda-forge/noarch/charset-normalizer-2.1.1-pyhd8ed1ab_0.tar.bz2#c1d5b294fbf9a795dec349a6f4d8be8e
++https://conda.anaconda.org/conda-forge/noarch/colorama-0.4.6-pyhd8ed1ab_0.tar.bz2#3faab06a954c2a04039983f2c4a50d99
++https://conda.anaconda.org/conda-forge/noarch/colored-1.4.4-pyhd8ed1ab_0.conda#46762cf2ddf6a1498eec36167d719fcc
++https://conda.anaconda.org/conda-forge/noarch/configargparse-1.7-pyhd8ed1ab_0.conda#0d07dc29b1c1cc973f76b74beb44915f
++https://conda.anaconda.org/conda-forge/linux-64/cryptography-38.0.2-py37h38fbfac_1.tar.bz2#d6b7647212ceb7fc3bf9b4d2908b1a3d
++https://conda.anaconda.org/conda-forge/linux-64/curl-7.87.0-h6312ad2_0.conda#e6ca70adeae12dce14cbf412b58ace64
++https://conda.anaconda.org/conda-forge/noarch/cycler-0.11.0-pyhd8ed1ab_0.tar.bz2#a50559fad0affdbb33729a68669ca1cb
++https://conda.anaconda.org/conda-forge/linux-64/cython-0.29.32-py37hd23a5d3_0.tar.bz2#5f8cf7c67c0b750545758d37a3321a5c
++https://conda.anaconda.org/conda-forge/linux-64/datrie-0.8.2-py37h540881e_4.tar.bz2#6d89ef6fb93349e471b7e9c426c10f0b
++https://conda.anaconda.org/conda-forge/linux-64/dbus-1.13.6-h5008d03_3.tar.bz2#ecfff944ba3960ecb334b9a2663d708d
++https://conda.anaconda.org/conda-forge/noarch/decorator-4.4.2-py_0.tar.bz2#d2eabb9cabd212e1ec6a9463bd846243
++https://conda.anaconda.org/conda-forge/noarch/defusedxml-0.7.1-pyhd8ed1ab_0.tar.bz2#961b3a227b437d82ad7054484cfa71b2
++https://conda.anaconda.org/bioconda/linux-64/diamond-2.0.14-hb97b32f_1.tar.bz2#2eb6fe88bca6c064e9dc4c46eeb42618
++https://conda.anaconda.org/conda-forge/noarch/django-3.2.24-pyhd8ed1ab_0.conda#dd8afe378b10a710341476dc2a9eb93b
++https://conda.anaconda.org/conda-forge/linux-64/docutils-0.19-py37h89c1867_0.tar.bz2#2f074ee1015c0861ea7d00243e40a24a
++https://conda.anaconda.org/conda-forge/noarch/dropbox-12.0.2-pyhd8ed1ab_0.conda#db8788ddce1eff2c354855ab7ae5536a
++https://conda.anaconda.org/bioconda/linux-64/entrez-direct-22.4-he881be0_0.tar.bz2#0994f567f11543b7aea1afce884c2ce6
++https://conda.anaconda.org/conda-forge/noarch/ete3-3.1.3-pyhd8ed1ab_0.conda#7fca9be27a33c9244676f43cc0bb792e
++https://conda.anaconda.org/conda-forge/linux-64/expat-2.8.5-hd2095e1_0.conda#30a967b6ac673c8f21b64604a2b9ccd6
++https://conda.anaconda.org/conda-forge/linux-64/fftw-3.3.11-nompi_h3b011a4_100.conda#0717f4eb3d18259358a1fa77edb18917
++https://conda.anaconda.org/conda-forge/noarch/filechunkio-1.8-py_2.tar.bz2#5e721173512c05bb5973ceb5616f8c03
++https://conda.anaconda.org/conda-forge/noarch/font-ttf-dejavu-sans-mono-2.37-hab24e00_0.tar.bz2#0c96522c6bdaed4b1566d11387caaf45
++https://conda.anaconda.org/conda-forge/noarch/font-ttf-inconsolata-3.000-h77eed37_0.tar.bz2#34893075a5c9e55cdafac56607368fc6
++https://conda.anaconda.org/conda-forge/noarch/font-ttf-source-code-pro-2.038-h77eed37_0.tar.bz2#4d59c254e01d9cde7957100457e2d5fb
++https://conda.anaconda.org/conda-forge/noarch/font-ttf-ubuntu-0.83-h77eed37_3.conda#49023d73832ef61042f6a237cb2687e7
++https://conda.anaconda.org/conda-forge/linux-64/fontconfig-2.14.2-h14ed4e7_0.conda#0f69b688f52ff6da70bccb7ff7001d1d
++https://conda.anaconda.org/conda-forge/noarch/fonts-conda-ecosystem-1-0.tar.bz2#fee5683a3f04bd15cbd8318b096a27ab
++https://conda.anaconda.org/conda-forge/noarch/fonts-conda-forge-1-hc364b38_1.conda#a7970cd949a077b7cb9696379d338681
++https://conda.anaconda.org/conda-forge/linux-64/fonttools-4.38.0-py37h540881e_0.tar.bz2#b2a41d12059b0557f3b654ddc08f1b33
++https://conda.anaconda.org/conda-forge/linux-64/freetype-2.12.1-h267a509_2.conda#9ae35c3d96db2c94ce0cef86efdfa2cb
++https://conda.anaconda.org/conda-forge/linux-64/fribidi-1.0.17-h7cc23a3_0.conda#f9d5302bca196ee87e62f393f2626562
++https://conda.anaconda.org/conda-forge/linux-64/frozenlist-1.3.1-py37h540881e_0.tar.bz2#d14a3eae304d08991d3642739ba0aaf3
++https://conda.anaconda.org/conda-forge/noarch/ftputil-5.1.0-pyhd8ed1ab_0.conda#33531fd156b65cd5e38c401f6c1d3fc8
++https://conda.anaconda.org/conda-forge/linux-64/gdk-pixbuf-2.42.8-hff1cb4f_1.tar.bz2#a61c6312192e7c9de71548a6706a21e6
++https://conda.anaconda.org/conda-forge/linux-64/gettext-0.25.1-h0e23cf9_2.conda#9b6567ae3ec9c82e453d1a1c289746c9
++https://conda.anaconda.org/conda-forge/linux-64/gettext-tools-0.25.1-h0e23cf9_2.conda#34cbda88de5f6fb5b1b967510b9c1df3
++https://conda.anaconda.org/conda-forge/linux-64/ghostscript-10.08.0-hd2095e1_0.conda#605758c0e7d8ab914071f8d15d5ef299
++https://conda.anaconda.org/conda-forge/linux-64/giflib-5.2.2-ha257d8a_1.conda#bd7c3a8586ed0101f094962100d30a63
++https://conda.anaconda.org/conda-forge/noarch/gitdb-4.0.11-pyhd8ed1ab_0.conda#623b19f616f2ca0c261441067e18ae40
++https://conda.anaconda.org/conda-forge/noarch/gitpython-3.1.43-pyhd8ed1ab_0.conda#0b2154c1818111e17381b1df5b4b0176
++https://conda.anaconda.org/conda-forge/linux-64/glib-2.80.2-hf974151_0.conda#d427988dc3dbd0a4c136f52db356cc6a
++https://conda.anaconda.org/conda-forge/linux-64/glib-tools-2.80.2-hb6ce0ca_0.conda#a965aeaf060289528a3fbe09326edae2
++https://conda.anaconda.org/conda-forge/linux-64/gmp-6.3.0-hfd2156b_3.conda#576e32739f323438bf69ab006c21be7b
++https://conda.anaconda.org/conda-forge/linux-64/gnutls-3.8.11-he7cfd77_0.conda#fe36db4c5e223b922a38191b9409b3de
++https://conda.anaconda.org/conda-forge/noarch/google-api-core-2.22.0-pyhd8ed1ab_0.conda#43ac2eb76299f388c89a360e9a23fb5a
++https://conda.anaconda.org/conda-forge/noarch/google-auth-2.23.0-pyh1a96a4e_0.conda#d933173dfd811f0b89d5aa5445a46a64
++https://conda.anaconda.org/conda-forge/noarch/google-cloud-core-2.3.3-pyhd8ed1ab_0.conda#a26b1fa8555cc1d2f0f7ff9985303e66
++https://conda.anaconda.org/conda-forge/noarch/google-cloud-storage-2.11.0-pyh1a96a4e_0.conda#b099a0ab31b9c7930a84e1d1d1cfacec
++https://conda.anaconda.org/conda-forge/linux-64/google-crc32c-1.1.2-py37h5d4fa31_3.tar.bz2#9cc34d2f6993c82ebebecb258b3efd05
++https://conda.anaconda.org/conda-forge/noarch/google-resumable-media-2.7.2-pyhd8ed1ab_1.conda#357cb6c361778650356349769e4c834b
++https://conda.anaconda.org/conda-forge/noarch/googleapis-common-protos-1.65.0-pyhd8ed1ab_0.conda#f5bdd5dd4ad1fd075a6f25670bdda1b6
++https://conda.anaconda.org/conda-forge/linux-64/graphite2-1.3.15-h54a6638_1.conda#f9fe2984587fa8235a6af6004760cd18
++https://conda.anaconda.org/conda-forge/linux-64/graphviz-2.50.0-h5abf519_3.tar.bz2#b3270521ce5733ce016ee094ef2e8d27
++https://conda.anaconda.org/conda-forge/linux-64/greenlet-1.1.3-py37hd23a5d3_0.tar.bz2#426c53c95df106039da865c0095e2a65
++https://conda.anaconda.org/conda-forge/linux-64/grpc-cpp-1.48.1-h05bd8bd_1.tar.bz2#e7f3d938891182a3d7a165443a19aabd
++https://conda.anaconda.org/conda-forge/linux-64/grpcio-1.48.1-py37h3fae8ff_1.tar.bz2#af613a38ded372711e73a77693715cdc
++https://conda.anaconda.org/conda-forge/linux-64/gst-plugins-base-1.21.3-h4243ec0_1.conda#905563d166c13ba299e39d6c9fcebd1c
++https://conda.anaconda.org/conda-forge/linux-64/gstreamer-1.21.3-h25f0c4b_1.conda#0c8a8f15aa319c91d9010072278feddd
++https://conda.anaconda.org/conda-forge/linux-64/gstreamer-orc-0.4.44-he11a670_0.conda#936fad7c4f913b163fdd196df1bd59d6
++https://conda.anaconda.org/conda-forge/linux-64/gtk2-2.24.33-h90689f9_2.tar.bz2#957a0255ab58aaf394a91725d73ab422
++https://conda.anaconda.org/conda-forge/linux-64/gts-0.7.6-h977cf35_4.conda#4d8df0b0db060d33c9a702ada998a8fe
++https://conda.anaconda.org/conda-forge/linux-64/harfbuzz-6.0.0-h8e241bc_0.conda#448fe40d2fed88ccf4d9ded37cbb2b38
++https://conda.anaconda.org/bioconda/linux-64/hmmer-3.3.2-hdbdd923_4.tar.bz2#805f24f8e8109e5d3d16cfad6799af46
++https://conda.anaconda.org/conda-forge/linux-64/icu-70.1-h27087fc_0.tar.bz2#87473a15119779e021c314249d4b4aed
++https://conda.anaconda.org/conda-forge/noarch/idna-3.10-pyhd8ed1ab_0.conda#7ba2ede0e7c795ff95088daf0dc59753
++https://conda.anaconda.org/bioconda/noarch/illumina-utils-2.14-pyhdfd78af_0.conda#632cd644ee1b62bd53653cc6289d0fda
++https://conda.anaconda.org/conda-forge/linux-64/imagemagick-7.1.0_27-pl5321hae5efcc_0.tar.bz2#1f89531e3f6039b84b1627fe355f3fbf
++https://conda.anaconda.org/conda-forge/linux-64/importlib-metadata-4.11.4-py37h89c1867_0.tar.bz2#71107630527e4bd82932952351231efe
++https://conda.anaconda.org/conda-forge/noarch/importlib_resources-6.0.0-pyhd8ed1ab_0.conda#acf36c4210f71dbf45a83409a9b5ff4d
++https://conda.anaconda.org/conda-forge/noarch/intervaltree-3.1.0-pyhd8ed1ab_1.conda#e32bb5b0369e819c4dde653d4c4572f3
++https://conda.anaconda.org/conda-forge/linux-64/jack-1.9.22-h11f4161_0.conda#504fa9e712b99494a9cf4630e3ca7d78
++https://conda.anaconda.org/conda-forge/linux-64/jarowinkler-1.2.3-py37hd23a5d3_0.tar.bz2#9963d45cf1ef6527ea3890f5517a63ee
++https://conda.anaconda.org/conda-forge/linux-64/jbig-2.2-hebe6cf0_0.conda#3bc495c25c564a1c4c3e5e8ff05ee2de
++https://conda.anaconda.org/conda-forge/noarch/jinja2-3.1.4-pyhd8ed1ab_0.conda#7b86ecb7d3557821c649b3c31e3eb9f2
++https://conda.anaconda.org/conda-forge/noarch/jmespath-1.0.1-pyhd8ed1ab_0.tar.bz2#2cfa3e1cf3fb51bb9b17acc5b5e9ea11
++https://conda.anaconda.org/conda-forge/noarch/joblib-1.3.2-pyhd8ed1ab_0.conda#4da50d410f553db77e62ab62ffaa1abc
++https://conda.anaconda.org/conda-forge/linux-64/jpeg-9e-h0b41bf4_3.conda#c7a069243e1fbe9a556ed2ec030e6407
++https://conda.anaconda.org/conda-forge/noarch/jsonschema-4.17.3-pyhd8ed1ab_0.conda#723268a468177cd44568eb8f794e0d80
++https://conda.anaconda.org/conda-forge/linux-64/jupyter_core-4.11.1-py37h89c1867_0.tar.bz2#6d184401b7a49bbebbfedc96bc7add1c
++https://conda.anaconda.org/conda-forge/linux-64/keyutils-1.6.3-h7cc23a3_1.conda#ba55d1b89fd7775e67de8291029b4059
++https://conda.anaconda.org/conda-forge/linux-64/kiwisolver-1.4.4-py37h7cecad7_0.tar.bz2#997912aa3ebab21640e3ba5ec168353d
++https://conda.anaconda.org/conda-forge/linux-64/krb5-1.20.1-hf9c8cef_0.conda#5f7e9efd540d7ac4b485660231ba6150
++https://conda.anaconda.org/conda-forge/linux-64/lame-4.0-h770b6ad_1.conda#5aecb65b6ecfee6f878e6789a8a779de
++https://conda.anaconda.org/conda-forge/linux-64/lcms2-2.14-h6ed2654_0.tar.bz2#dcc588839de1445d90995a0a2c4f3a39
++https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.46.1-bootstrap_ha15bf96_3.conda#e82d33173910cc8da8da4e51d732ff3e
++https://conda.anaconda.org/conda-forge/linux-64/lerc-4.2.0-hdb68285_0.conda#fb9d356b1a57d6d54768be7ebd5fce09
++https://conda.anaconda.org/conda-forge/linux-64/levenshtein-0.20.7-py37hd23a5d3_0.tar.bz2#f999d7d7443f315c37523cbd7bb12010
++https://conda.anaconda.org/conda-forge/linux-64/libabseil-20220623.0-cxx17_h05df665_6.conda#39f6394ae835f0b16f01cbbd3bb1e8e2
++https://conda.anaconda.org/conda-forge/linux-64/libasprintf-0.25.1-h0e23cf9_2.conda#708966b4a89392fe7b7d348f41501ffc
++https://conda.anaconda.org/conda-forge/linux-64/libasprintf-devel-0.25.1-h0e23cf9_2.conda#c0dd9a89527063ff9b238987c428eb2d
++https://conda.anaconda.org/conda-forge/linux-64/libattr-2.5.2-hb03c661_1.conda#7e7f0a692eb62b95d3010563e7f963b6
++https://conda.anaconda.org/conda-forge/linux-64/libblas-3.9.0-20_linux64_openblas.conda#2b7bb4f7562c8cf334fc2e20c2d28abc
++https://conda.anaconda.org/conda-forge/linux-64/libbrotlicommon-1.2.1-h39a168f_0.conda#9460bdde20bcdf9e6bbef0232b14ad2d
++https://conda.anaconda.org/conda-forge/linux-64/libbrotlidec-1.2.1-ha411449_0.conda#6d934e235f4d452ebec720ec7c3638a6
++https://conda.anaconda.org/conda-forge/linux-64/libbrotlienc-1.2.1-h018ffa1_0.conda#8f3078564b4a4cd9602ebaafe78e0b87
++https://conda.anaconda.org/conda-forge/linux-64/libcap-2.66-ha37c62d_0.tar.bz2#2d7665abd0997f1a6d4b7596bc27b657
++https://conda.anaconda.org/conda-forge/linux-64/libcblas-3.9.0-20_linux64_openblas.conda#36d486d72ab64ffea932329a1d3729a3
++https://conda.anaconda.org/conda-forge/linux-64/libclang-15.0.7-default_h127d8a8_5.conda#09b94dd3a7e304df5b83176239347920
++https://conda.anaconda.org/conda-forge/linux-64/libclang13-15.0.7-default_h5d6823c_5.conda#2d694a9ffdcc30e89dea34a8dcdab6ae
++https://conda.anaconda.org/conda-forge/linux-64/libcrc32c-1.1.2-h9c3ff4c_0.tar.bz2#c965a5aa0d5c1c37ffc62dff36e28400
++https://conda.anaconda.org/conda-forge/linux-64/libcups-2.3.3-h36d4200_3.conda#c9f4416a34bc91e0eb029f912c68f81f
++https://conda.anaconda.org/conda-forge/linux-64/libcurl-7.87.0-h6312ad2_0.conda#ad07f06bd133e76e12165bc3ec2c8646
++https://conda.anaconda.org/conda-forge/linux-64/libdb-6.2.32-h9c3ff4c_0.tar.bz2#3f3258d8f841fbac63b36b75bdac1afd
++https://conda.anaconda.org/conda-forge/linux-64/libdeflate-1.25-hd45a770_1.conda#40f9b31aa9cf007789867df0decd0492
++https://conda.anaconda.org/conda-forge/linux-64/libedit-3.1.20260512-pl5321h373387f_0.conda#27dbd7e2984b8fe48e069379636ccfdd
++https://conda.anaconda.org/conda-forge/linux-64/libev-4.33-h280c20c_3.conda#7bc31538d6e3fb349e897353969237ec
++https://conda.anaconda.org/conda-forge/linux-64/libevent-2.1.10-h9b69904_4.tar.bz2#390026683aef81db27ff1b8570ca1336
++https://conda.anaconda.org/conda-forge/linux-64/libexpat-2.8.5-hd2095e1_0.conda#72cfd2b95b0540247220b42f58a148d7
++https://conda.anaconda.org/conda-forge/linux-64/libffi-3.4.6-h2dba641_1.conda#ede4673863426c0883c0063d853bbd85
++https://conda.anaconda.org/conda-forge/linux-64/libflac-1.5.0-he200343_1.conda#47595b9d53054907a00d95e4d47af1d6
++https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda#735629b400b70eeab21a2ba8f5b1c2ce
++https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-16.2.0-h69a702a_7.conda#2005515ac9340f816fb2ac7e83afe553
++https://conda.anaconda.org/conda-forge/linux-64/libgcrypt-1.12.2-ha770c72_2.conda#9b60e73e62433df9e16378cd4f198dd0
++https://conda.anaconda.org/conda-forge/linux-64/libgcrypt-devel-1.12.2-h7cc23a3_2.conda#9d124596b3081d5c22bceeaf0d706362
++https://conda.anaconda.org/conda-forge/linux-64/libgcrypt-lib-1.12.2-h7cc23a3_2.conda#d41f64fd667061c0fe8524f2c878ae93
++https://conda.anaconda.org/conda-forge/linux-64/libgcrypt-tools-1.12.2-h7cc23a3_2.conda#7305fab503f7546526e4cc26eaf93a67
++https://conda.anaconda.org/conda-forge/linux-64/libgd-2.3.3-h18fbbfe_3.tar.bz2#ea9758cf553476ddf75c789fdd239dc5
++https://conda.anaconda.org/conda-forge/linux-64/libgettextpo-0.25.1-h0e23cf9_2.conda#de2346aa9d78288e6924b01a2db091c1
++https://conda.anaconda.org/conda-forge/linux-64/libgettextpo-devel-0.25.1-h0e23cf9_2.conda#e98641c8a9e77ee9825c3064d96df89d
++https://conda.anaconda.org/conda-forge/linux-64/libgfortran-16.2.0-h69a702a_7.conda#3a8d285f5f22138ef826ad54cf267e73
++https://conda.anaconda.org/conda-forge/linux-64/libgfortran-ng-16.2.0-h69a702a_7.conda#a31f744c0c83d31dacf9c01b2e3c12a2
++https://conda.anaconda.org/conda-forge/linux-64/libgfortran5-16.2.0-h6b99dfc_7.conda#7719ed7be38ad8c492c4bd5cc2bce0c4
++https://conda.anaconda.org/conda-forge/linux-64/libglib-2.80.2-hf974151_0.conda#72724f6a78ecb15559396966226d5838
++https://conda.anaconda.org/conda-forge/linux-64/libgomp-16.2.0-he0feb66_7.conda#d904c7ddd95e026254b4b80808ee9e12
++https://conda.anaconda.org/conda-forge/linux-64/libgpg-error-1.61-h54a6638_2.conda#d42eda95b8dfc91f3cc48d950efec715
++https://conda.anaconda.org/conda-forge/linux-64/libiconv-1.18-h0cb94f2_3.conda#f92233bf33e24a25668bb2119e2c51f9
++https://conda.anaconda.org/conda-forge/linux-64/libidn2-2.3.8-hfac485b_1.conda#842a81de672ddcf476337c8bde3cad33
++https://conda.anaconda.org/conda-forge/linux-64/liblapack-3.9.0-20_linux64_openblas.conda#6fabc51f5e647d09cc010c40061557e0
++https://conda.anaconda.org/conda-forge/linux-64/libllvm10-10.0.1-he513fc3_3.tar.bz2#b1c57947b2a9231e0cd037ab0ed96b5d
++https://conda.anaconda.org/conda-forge/linux-64/libllvm15-15.0.7-hadd5161_1.conda#17d91085ccf5934ce652cb448d0cb65a
++https://conda.anaconda.org/conda-forge/linux-64/libltdl-2.4.3a-h5888daf_0.conda#8e5de39cab514fa908fcaa7ba37a8738
++https://conda.anaconda.org/conda-forge/linux-64/libnghttp2-1.51.0-hdcd2b5c_0.conda#c42b460bae0365fb9777b1ff9d09a554
++https://conda.anaconda.org/conda-forge/linux-64/libnsl-2.0.1-hb9d3cd8_1.conda#d864d34357c3b65a4b731f78c0801dc4
++https://conda.anaconda.org/conda-forge/linux-64/libogg-1.3.5-hd0c01bc_1.conda#68e52064ed3897463c0e958ab5c8f91b
++https://conda.anaconda.org/conda-forge/linux-64/libopenblas-0.3.25-pthreads_h413a1c8_0.conda#d172b34a443b95f86089e8229ddc9a17
++https://conda.anaconda.org/conda-forge/linux-64/libopus-1.6.1-hebe6cf0_1.conda#8a1d977c3d77666406a40c0ab648ff52
++https://conda.anaconda.org/conda-forge/linux-64/libpng-1.6.43-h2797004_0.conda#009981dd9cfcaa4dbfa25ffaed86bcae
++https://conda.anaconda.org/conda-forge/linux-64/libpq-15.1-h2baec63_3.conda#afa03514a4a0f7aaa724b500d6339e80
++https://conda.anaconda.org/conda-forge/linux-64/libprotobuf-3.21.8-h6239696_0.tar.bz2#168d0025f7cab5a36862547afe221e5c
++https://conda.anaconda.org/conda-forge/linux-64/librsvg-2.54.4-h7abd40a_0.tar.bz2#921e53675ed5ea352f022b79abab076a
++https://conda.anaconda.org/conda-forge/linux-64/libsndfile-1.2.2-hbc6d301_3.conda#a2bc10137c845d9c45067f3c53aad6e5
++https://conda.anaconda.org/conda-forge/linux-64/libsodium-1.0.18-h36c2ea0_1.tar.bz2#c3788462a6fbddafdb413a9f9053e58d
++https://conda.anaconda.org/conda-forge/linux-64/libsqlite-3.46.0-hde9e2c9_0.conda#18aa975d2094c34aef978060ae7da7d8
++https://conda.anaconda.org/conda-forge/linux-64/libssh2-1.10.0-haa6b8db_3.tar.bz2#89acee135f0809a18a1f4537390aa2dd
++https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda#9b6707e0caca917fa6ea9ee473f37a5d
++https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-16.2.0-hdf11a46_7.conda#25a23bde5e26d548374f3e02b4669670
++https://conda.anaconda.org/conda-forge/linux-64/libsystemd0-252-h2a991cd_0.tar.bz2#3c5ae9f61f663b3d5e1bf7f7da0c85f5
++https://conda.anaconda.org/conda-forge/linux-64/libtasn1-4.21.0-hb03c661_1.conda#e9268f0d59cc7559d0e910b402cd437a
++https://conda.anaconda.org/conda-forge/linux-64/libtiff-4.4.0-h82bc61c_5.conda#e712a63a21f9db647982971dc121cdcf
++https://conda.anaconda.org/conda-forge/linux-64/libtool-2.5.4-h5888daf_0.conda#90697d80c181414aa3472199e136a04e
++https://conda.anaconda.org/conda-forge/linux-64/libudev1-253-h0b41bf4_0.conda#6c2addbd9aa4ee47c76d50c9f0df8cd6
++https://conda.anaconda.org/conda-forge/linux-64/libunistring-0.9.10-h7f98852_0.tar.bz2#7245a044b4a1980ed83196176b78b73a
++https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.42.4-hcfc3c73_0.conda#54a948337e66706380ff24d6b5fde63f
++https://conda.anaconda.org/conda-forge/linux-64/libvorbis-1.3.7-h54a6638_2.conda#b4ecbefe517ed0157c37f8182768271c
++https://conda.anaconda.org/conda-forge/linux-64/libwebp-1.2.4-h522a892_0.tar.bz2#802e43f480122a85ae6a34c1909f8f98
++https://conda.anaconda.org/conda-forge/linux-64/libwebp-base-1.2.4-h166bdaf_0.tar.bz2#ac2ccf7323d21f2994e4d1f5da664f37
++https://conda.anaconda.org/conda-forge/linux-64/libxcb-1.13-h7f98852_1004.tar.bz2#b3653fdc58d03face9724f602218a904
++https://conda.anaconda.org/conda-forge/linux-64/libxcrypt-4.4.38-h280c20c_0.conda#f7a7ff5a6ab331e037abd34f379a631d
++https://conda.anaconda.org/conda-forge/linux-64/libxkbcommon-1.5.0-h79f4944_1.conda#04a39cdd663f295653fc143851830563
++https://conda.anaconda.org/conda-forge/linux-64/libxml2-2.10.3-hca2bb57_4.conda#bb808b654bdc3c783deaf107a2ffb503
++https://conda.anaconda.org/conda-forge/linux-64/libxslt-1.1.37-h873f0b0_0.tar.bz2#ed0d77d947ddeb974892de8df7224d12
++https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.2.13-h4ab18f5_6.conda#27329162c0dc732bcf67a4e0cd488125
++https://conda.anaconda.org/conda-forge/linux-64/llvmlite-0.36.0-py37h9d7f4d0_0.tar.bz2#8e333fd35f32fd48850476bb9806ba42
++https://conda.anaconda.org/conda-forge/linux-64/lxml-4.9.1-py37h540881e_0.tar.bz2#a8906be3fc6b955e81c655a7a6bc601f
++https://conda.anaconda.org/conda-forge/linux-64/lz4-c-1.9.4-hcb278e6_0.conda#318b08df404f9c9be5712aaa5a6f0bb0
++https://conda.anaconda.org/conda-forge/linux-64/markupsafe-2.1.1-py37h540881e_1.tar.bz2#a9123517674ab0589d955a5adbf58573
++https://conda.anaconda.org/conda-forge/linux-64/matplotlib-3.5.3-py37h89c1867_2.tar.bz2#1661863ed79a2876d057b1dee66ab499
++https://conda.anaconda.org/conda-forge/linux-64/matplotlib-base-3.5.3-py37hf395dca_2.tar.bz2#dcbe09584d1271ddd3d8636776d7b09d
++https://conda.anaconda.org/conda-forge/noarch/mistune-0.8.4-pyh1a96a4e_1006.conda#ce48978fe2a49a887758ce17456601ad
++https://conda.anaconda.org/conda-forge/linux-64/mpg123-1.33.7-h877a99e_1.conda#e7cc06dba8d5fb83d9ae033225ffa458
++https://conda.anaconda.org/conda-forge/linux-64/multidict-6.0.2-py37h540881e_1.tar.bz2#679ac96314f306004f7a1ae32bff2fc8
++https://conda.anaconda.org/bioconda/linux-64/mummer-3.23-pl5321h503566f_21.tar.bz2#b80359aa9d930b5cbd09e6da0bb2ab65
++https://conda.anaconda.org/conda-forge/noarch/munkres-1.1.4-pyh9f0ad1d_0.tar.bz2#2ba8498c1018c1e9c61eb99b973dfe19
++https://conda.anaconda.org/conda-forge/linux-64/mysql-common-8.0.32-h14678bc_0.conda#25af35815c0cdf5a80afc04a2fb67407
++https://conda.anaconda.org/conda-forge/linux-64/mysql-libs-8.0.32-h54cf53e_0.conda#de25cc32a88d37a753a729fda6629d95
++https://conda.anaconda.org/conda-forge/noarch/namedlist-1.8-pyh9f0ad1d_0.tar.bz2#6af152795d6ded9b7d47458c573ccb33
++https://conda.anaconda.org/conda-forge/noarch/nbformat-5.8.0-pyhd8ed1ab_0.conda#1ca43103a08456b19222d93fd9d119ac
++https://conda.anaconda.org/bioconda/linux-64/ncbi-vdb-3.4.1-hd63eeec_0.conda#70de9f284c305131b458cf69676f1b2f
++https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda#ee6c0cd80a60961a1f48aa3e0b91f986
++https://conda.anaconda.org/conda-forge/linux-64/nettle-3.10.1-h5ef0d04_1.conda#7b8f8d1226c95f61a51436a657c84770
++https://conda.anaconda.org/conda-forge/noarch/networkx-2.5.1-pyhd8ed1ab_0.tar.bz2#c949bad9afedd108f9c6a00faa93e8e2
++https://conda.anaconda.org/conda-forge/linux-64/nspr-4.40-h29cc59b_0.conda#4ebda462e16da6e6164cb82b9d58fcea
++https://conda.anaconda.org/conda-forge/linux-64/nss-3.100-hca3bf56_0.conda#949c4a82290ee58b3c970cef4bcfd4ad
++https://conda.anaconda.org/conda-forge/linux-64/numba-0.53.1-py37hb11d6e1_1.tar.bz2#8483c7b083801880f6bdbd1598f3ea7f
++https://conda.anaconda.org/conda-forge/linux-64/numpy-1.19.5-py37h3e96413_3.tar.bz2#7d74599bf4ce2f2e70bdf4ba65ca8620
++https://conda.anaconda.org/conda-forge/linux-64/openjpeg-2.5.0-h7d73246_1.tar.bz2#a11b4df9271a8d7917686725aa04c8f2
++https://conda.anaconda.org/conda-forge/linux-64/openssl-1.1.1w-hd590300_0.conda#301e70057a3bd399640bb16bbdf87995
++https://conda.anaconda.org/conda-forge/linux-64/p11-kit-0.25.3-he72ba39_0.conda#9786cffb976e3ed9cece48db0e17bc4e
++https://conda.anaconda.org/conda-forge/noarch/packaging-23.2-pyhd8ed1ab_0.conda#79002079284aa895f883c6b7f3f88fd6
++https://conda.anaconda.org/conda-forge/linux-64/pandas-0.25.1-py37hb3f55d8_0.tar.bz2#35055363484f5852c52f9279076e7457
++https://conda.anaconda.org/conda-forge/linux-64/pango-1.50.14-hd33c08f_0.conda#a8b9e35dd7be2c945b0de4fe19a7c3a9
++https://conda.anaconda.org/conda-forge/noarch/paramiko-3.5.0-pyhd8ed1ab_0.conda#3a359c35a1f9ec2859fbddcabcfd4c4d
++https://conda.anaconda.org/conda-forge/noarch/paste-3.10.1-pyhd8ed1ab_0.conda#1b5a4308958dc95529f6ba35f38b3054
++https://conda.anaconda.org/conda-forge/noarch/patsy-0.5.6-pyhd8ed1ab_0.conda#a5b55d1cb110cdcedc748b5c3e16e687
++https://conda.anaconda.org/conda-forge/linux-64/pcre2-10.43-hcad00b1_0.conda#8292dea9e022d9610a11fce5e0896ed8
++https://conda.anaconda.org/conda-forge/linux-64/perl-5.32.1-10_h7cc23a3_perl5.conda#dfa988f7a513f0f441ba36d128b5d327
++https://conda.anaconda.org/bioconda/noarch/perl-archive-tar-3.14-pl5321hcbfc158_0.conda#290aa04cc6fe79133433eb72de48edc0
++https://conda.anaconda.org/conda-forge/noarch/perl-carp-1.50-pl5321hd8ed1ab_0.tar.bz2#bdddc03e28019b902da71b722f2288d7
++https://conda.anaconda.org/conda-forge/noarch/perl-common-sense-3.75-pl5321hd8ed1ab_0.tar.bz2#ef70dc77e8b10bbb62f5e843b401ef0e
++https://conda.anaconda.org/conda-forge/linux-64/perl-compress-raw-bzip2-2.214-pl5321hda65f42_0.conda#1ec33b9f74a71c17cc5579e35027832a
++https://conda.anaconda.org/conda-forge/linux-64/perl-compress-raw-zlib-2.214-pl5321h4dac143_0.conda#943e7033e6f709adf0d89a3af51ab81b
++https://conda.anaconda.org/conda-forge/linux-64/perl-encode-3.24-pl5321hb03c661_0.conda#35776d4c5766e9d98754d1e7530c2961
++https://conda.anaconda.org/conda-forge/noarch/perl-exporter-5.74-pl5321hd8ed1ab_0.tar.bz2#fd2eac4e35f8c970870a3961c1df3e29
++https://conda.anaconda.org/conda-forge/noarch/perl-exporter-tiny-1.002002-pl5321hd8ed1ab_0.tar.bz2#48d709826875be1f2c108d3d1d8efec7
++https://conda.anaconda.org/conda-forge/noarch/perl-extutils-makemaker-7.70-pl5321hd8ed1ab_0.conda#ec3e57ed34f7765bfc7054a05868ce5d
++https://conda.anaconda.org/bioconda/linux-64/perl-io-compress-2.216-pl5321h503566f_0.conda#0784cb3c120f934a5fe61961c8238330
++https://conda.anaconda.org/bioconda/noarch/perl-io-zlib-1.15-pl5321hdfd78af_1.tar.bz2#db92645dabe9467115729e4479841b5d
++https://conda.anaconda.org/bioconda/noarch/perl-json-4.11-pl5321hdfd78af_0.conda#56411755d21870a9ec16c76fd7b66dba
++https://conda.anaconda.org/bioconda/linux-64/perl-json-xs-4.04-pl5321h9948957_0.conda#7916b2e794393b3389535ba750f489da
++https://conda.anaconda.org/bioconda/noarch/perl-list-moreutils-0.430-pl5321hdfd78af_0.tar.bz2#7f04c79d216d0f8e7b6d5a51de4aafa0
++https://conda.anaconda.org/bioconda/linux-64/perl-list-moreutils-xs-0.430-pl5321h7b50bb2_5.tar.bz2#9192770eb08524038c3fcf24e915b10c
++https://conda.anaconda.org/conda-forge/noarch/perl-parent-0.243-pl5321hd8ed1ab_0.conda#314caa3b72d65f8078d426c6721dcacc
++https://conda.anaconda.org/conda-forge/linux-64/perl-pathtools-3.75-pl5321hb9d3cd8_2.conda#03d88c89dfac8a26adcdeff242f94007
++https://conda.anaconda.org/conda-forge/linux-64/perl-scalar-list-utils-1.70-pl5321hb03c661_0.conda#046486011bf7674e3c2f2a1513ac4f3d
++https://conda.anaconda.org/conda-forge/linux-64/perl-storable-3.15-pl5321hb9d3cd8_2.conda#212f63a5c7c753ecf0a74c349b9270c5
++https://conda.anaconda.org/bioconda/noarch/perl-types-serialiser-1.01-pl5321hdfd78af_0.tar.bz2#cfc65753e827bbef80c00eaa395f6ae7
++https://conda.anaconda.org/conda-forge/linux-64/pillow-9.2.0-py37h850a105_2.tar.bz2#9532a440710f0245e79070561762e138
++https://conda.anaconda.org/conda-forge/noarch/pip-24.0-pyhd8ed1ab_0.conda#f586ac1e56c8638b64f9c8122a7b8a67
++https://conda.anaconda.org/conda-forge/linux-64/pixman-0.46.4-h54a6638_3.conda#0ee5bb30034b081a1386c1e2c98ab0a7
++https://conda.anaconda.org/conda-forge/linux-64/pkg-config-0.29.2-h1114479_1013.conda#0aab2923309084c5f89ef32cd39a19b2
++https://conda.anaconda.org/conda-forge/noarch/pkgutil-resolve-name-1.3.10-pyhd8ed1ab_1.conda#405678b942f2481cecdb3e010f4925d9
++https://conda.anaconda.org/conda-forge/noarch/ply-3.11-pyhd8ed1ab_2.conda#18c6deb6f9602e32446398203c8f0e91
++https://conda.anaconda.org/conda-forge/noarch/prettytable-3.7.0-pyhd8ed1ab_0.conda#37be07a7152c86cf4db36155f577afff
++https://conda.anaconda.org/bioconda/linux-64/prodigal-2.6.3-h7b50bb2_10.tar.bz2#66cc94ede7d4cd483a0412adaf9532ce
++https://conda.anaconda.org/conda-forge/noarch/proto-plus-1.25.0-pyhd8ed1ab_0.conda#36147996294573f1e8f9fea08e5938de
++https://conda.anaconda.org/conda-forge/linux-64/protobuf-4.21.8-py37hd23a5d3_0.tar.bz2#83dbafa4dffc2e1f75d76feef02fa677
++https://conda.anaconda.org/conda-forge/linux-64/psutil-5.9.3-py37h540881e_0.tar.bz2#0c813ad118e926df328bf74899a48047
++https://conda.anaconda.org/conda-forge/linux-64/pthread-stubs-0.4-h7cc23a3_1004.conda#bb66b610707b811e3c65181a6431e7a8
++https://conda.anaconda.org/conda-forge/linux-64/pulseaudio-16.1-h4ab2085_1.conda#5a3c2296c2b45f74fb2fd946cb107b3f
++https://conda.anaconda.org/bioconda/noarch/pyani-0.2.13.1-pyhdc42f0e_0.tar.bz2#82fb5119b05be82b0f53315dbfe61af1
++https://conda.anaconda.org/conda-forge/noarch/pyasn1-0.5.1-pyhd8ed1ab_0.conda#fb1a800972b072aa4d16450983c81418
++https://conda.anaconda.org/conda-forge/noarch/pyasn1-modules-0.3.0-pyhd8ed1ab_0.conda#26db749166cdca55e5ef1ffdc7767d0e
++https://conda.anaconda.org/conda-forge/noarch/pycparser-2.21-pyhd8ed1ab_0.tar.bz2#076becd9e05608f8dc72757d5f3a91ff
++https://conda.anaconda.org/conda-forge/noarch/pygments-2.17.2-pyhd8ed1ab_0.conda#140a7f159396547e9799aa98f9f0742e
++https://conda.anaconda.org/conda-forge/linux-64/pygraphviz-1.7-py37ha333112_1.tar.bz2#582e2fe19a4dbf52fbfec5420748ccf4
++https://conda.anaconda.org/conda-forge/linux-64/pynacl-1.5.0-py37h540881e_1.tar.bz2#f7bfc5540f7c99b5d06cc771054ea078
++https://conda.anaconda.org/conda-forge/noarch/pyopenssl-23.2.0-pyhd8ed1ab_1.conda#34f7d568bf59d18e3fef8c405cbece21
++https://conda.anaconda.org/conda-forge/noarch/pyparsing-3.1.4-pyhd8ed1ab_0.conda#4d91352a50949d049cf9714c8563d433
++https://conda.anaconda.org/conda-forge/linux-64/pyqt-5.15.7-py37hf30b843_1.tar.bz2#cb2e6395058db647f996c176844869fe
++https://conda.anaconda.org/conda-forge/linux-64/pyqt5-sip-12.11.0-py37hd23a5d3_1.tar.bz2#f16423973a3f8c9749ea2b2488435694
++https://conda.anaconda.org/conda-forge/linux-64/pyrsistent-0.18.1-py37h540881e_1.tar.bz2#8e25160800dafbc2a24c0aaa99a981ef
++https://conda.anaconda.org/bioconda/linux-64/pysam-0.21.0-py37hee149a5_0.tar.bz2#6ada996da44926c292ebbcc438b9fcf5
++https://conda.anaconda.org/conda-forge/noarch/pysftp-0.2.9-py_1.tar.bz2#3172621a36e00ef8711a393784d8fa7f
++https://conda.anaconda.org/conda-forge/linux-64/pysocks-1.7.1-py37h89c1867_5.tar.bz2#8c4b0563f96363ee99f1ab864616ac63
++https://conda.anaconda.org/conda-forge/linux-64/python-3.7.12-hb7a2778_100_cpython.tar.bz2#2d94b3e6a9fdaf83f6955d008c8011a7
++https://conda.anaconda.org/conda-forge/noarch/python-dateutil-2.9.0-pyhd8ed1ab_0.conda#2cf4264fffb9e6eff6031c5b6884d61c
++https://conda.anaconda.org/conda-forge/noarch/python-fastjsonschema-2.20.0-pyhd8ed1ab_0.conda#b98d2018c01ce9980c03ee2850690fab
++https://conda.anaconda.org/conda-forge/noarch/python-irodsclient-3.1.1-pyhff2d567_0.conda#4dd72af6a642b345aead5d286a991635
++https://conda.anaconda.org/conda-forge/noarch/python-levenshtein-0.20.7-pyhd8ed1ab_0.tar.bz2#e91c3128f04231f700f6a26dca7bc7f8
++https://conda.anaconda.org/conda-forge/linux-64/python_abi-3.7-4_cp37m.conda#d5fa71a1bac31ad985348ffff6b399c4
++https://conda.anaconda.org/conda-forge/noarch/pytz-2024.2-pyhd8ed1ab_0.conda#260009d03c9d5c0f111904d851f053dc
++https://conda.anaconda.org/conda-forge/noarch/pyu2f-0.1.5-pyhd8ed1ab_0.tar.bz2#caabbeaa83928d0c3e3949261daa18eb
++https://conda.anaconda.org/conda-forge/linux-64/pyyaml-6.0-py37h540881e_4.tar.bz2#f231119f9790da6da6bd93b250b7e42e
++https://conda.anaconda.org/conda-forge/linux-64/qt-main-5.15.6-h18908ee_6.conda#25a16022091129a86e199d1909daaf00
++https://conda.anaconda.org/conda-forge/linux-64/rapidfuzz-2.12.0-py37hd23a5d3_0.tar.bz2#f48c2cccbe5aa05bfd3ed90afa3e9f0e
++https://conda.anaconda.org/conda-forge/noarch/ratelimiter-1.2.0-pyhd8ed1ab_1003.tar.bz2#432d4fa75ebc28bf4b337eeff0606cf4
++https://conda.anaconda.org/conda-forge/linux-64/re2-2022.06.01-h27087fc_1.conda#68070cd09c67755f37e0db13f00a008b
++https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-hd6e31c0_1.conda#69c01c781e7c8190bbdaf79e3848c5ca
++https://conda.anaconda.org/conda-forge/noarch/requests-2.32.2-pyhd8ed1ab_0.conda#e1643b34b19df8c028a4f00bf5df58a6
++https://conda.anaconda.org/bioconda/linux-64/rpsbproc-0.5.0-h6a68c12_1.tar.bz2#ef373c653f48a754162f5929679a2d8e
++https://conda.anaconda.org/conda-forge/noarch/rsa-4.9-pyhd8ed1ab_0.tar.bz2#03bf410858b2cefc267316408a77c436
++https://conda.anaconda.org/conda-forge/noarch/s3transfer-0.8.2-pyhd8ed1ab_0.conda#75e12933f4bf755c9cdd37072bcb6203
++https://conda.anaconda.org/conda-forge/linux-64/scikit-learn-0.24.2-py37hf0f1638_1.tar.bz2#3cde85d75521487b4f3ea133151a3ed0
++https://conda.anaconda.org/conda-forge/linux-64/scipy-1.7.3-py37hf2a6cf1_0.tar.bz2#129c613e1d0f09d9fd0473a0da6161a9
++https://conda.anaconda.org/conda-forge/noarch/seaborn-base-0.12.2-pyhd8ed1ab_0.conda#cf88f3a1c11536bc3c10c14ad00ccc42
++https://conda.anaconda.org/conda-forge/linux-64/setuptools-59.8.0-py37h89c1867_1.tar.bz2#136867136f5a231f42cb5ea0e0b5a18b
++https://conda.anaconda.org/conda-forge/noarch/setuptools-scm-6.4.2-pyhd8ed1ab_0.tar.bz2#4b55bf84b0f8113833a653d7ba1f52c8
++https://conda.anaconda.org/conda-forge/linux-64/sip-6.7.2-py37hd23a5d3_0.tar.bz2#fb9027defa1761293a82f0364cf1b660
++https://conda.anaconda.org/conda-forge/noarch/six-1.16.0-pyh6c4a22f_0.tar.bz2#e5f25f8dbc060e9a8d912e432202afc2
++https://conda.anaconda.org/conda-forge/noarch/smmap-5.0.0-pyhd8ed1ab_0.tar.bz2#62f26a3d1387acee31322208f0cfa3e0
++https://conda.anaconda.org/bioconda/noarch/snakemake-5.10.0-0.tar.bz2#295935c36469fab7092425d6a04333bc
++https://conda.anaconda.org/bioconda/noarch/snakemake-minimal-5.10.0-py_0.tar.bz2#2476c446cf00f279b679d843934be9ed
++https://conda.anaconda.org/conda-forge/noarch/sortedcontainers-2.4.0-pyhd8ed1ab_0.tar.bz2#6d6552722448103793743dabfbda532d
++https://conda.anaconda.org/conda-forge/linux-64/sqlalchemy-1.4.42-py37h540881e_0.tar.bz2#921bb310665fba1ed0f64f3287fda6d4
++https://conda.anaconda.org/conda-forge/linux-64/sqlite-3.46.0-h6d4b2fc_0.conda#77ea8dff5cf8550cc8f5629a6af56323
++https://conda.anaconda.org/conda-forge/noarch/sqlparse-0.4.4-pyhd8ed1ab_0.conda#2e2f31b3b1c866c29636377e14f8c4c6
++https://conda.anaconda.org/conda-forge/linux-64/statsmodels-0.12.2-py37hb1e94ed_0.tar.bz2#c3f01208d8839fbe0897ce6bc160c721
++https://conda.anaconda.org/conda-forge/noarch/stone-3.3.2-pyhd8ed1ab_0.conda#f5cf4cb84f5774a7c3deb90caa34afef
++https://conda.anaconda.org/conda-forge/noarch/tabulate-0.9.0-pyhd8ed1ab_1.tar.bz2#4759805cce2d914c38472f70bf4d8bcb
++https://conda.anaconda.org/conda-forge/noarch/threadpoolctl-3.1.0-pyh8a188c0_0.tar.bz2#a2995ee828f65687ac5b1e71a2ab1e0c
++https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h4845f30_101.conda#d453b98d9c83e71da0741bb0ff4d76bc
++https://conda.anaconda.org/conda-forge/noarch/toml-0.10.2-pyhd8ed1ab_0.tar.bz2#f832c45a477c78bebd107098db465095
++https://conda.anaconda.org/conda-forge/noarch/tomli-2.0.1-pyhd8ed1ab_0.tar.bz2#5844808ffab9ebdb694585b50ba02a96
++https://conda.anaconda.org/conda-forge/noarch/toposort-1.7-pyhd8ed1ab_0.tar.bz2#ce711f7c322298edf8e7bd592a06b4b7
++https://conda.anaconda.org/conda-forge/linux-64/tornado-6.2-py37h540881e_0.tar.bz2#2f0863ba6b29d1d2872b064dd697a492
++https://conda.anaconda.org/conda-forge/noarch/tqdm-4.67.1-pyhd8ed1ab_0.conda#4085c9db273a148e149c03627350e22c
++https://conda.anaconda.org/conda-forge/noarch/traitlets-5.9.0-pyhd8ed1ab_0.conda#d0b4f5c87cd35ac3fb3d47b223263a64
++https://conda.anaconda.org/conda-forge/noarch/typing-extensions-4.7.1-hd8ed1ab_0.conda#f96688577f1faa58096d06a45136afa2
++https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.7.1-pyha770c72_0.conda#c39d6a09fe819de4951c2642629d9115
++https://conda.anaconda.org/conda-forge/linux-64/unicodedata2-14.0.0-py37h540881e_1.tar.bz2#e37e8aa9b6686b6755a469592cc280fe
++https://conda.anaconda.org/conda-forge/noarch/urllib3-1.26.19-pyhd8ed1ab_0.conda#6bb37c314b3cc1515dcf086ffe01c46e
++https://conda.anaconda.org/conda-forge/noarch/wcwidth-0.2.10-pyhd8ed1ab_0.conda#48978e4e99db7d1ee0d277f6dee20684
++https://conda.anaconda.org/conda-forge/linux-64/wget-1.20.3-ha56f1ee_1.tar.bz2#674f6b42484dbfd11906c3b0a93585e9
++https://conda.anaconda.org/conda-forge/noarch/wheel-0.42.0-pyhd8ed1ab_0.conda#1cdea58981c5cbc17b51973bcaddcea7
++https://conda.anaconda.org/conda-forge/linux-64/wrapt-1.14.1-py37h540881e_0.tar.bz2#e5e85a4d8c788b1e39cf39120db964d9
++https://conda.anaconda.org/conda-forge/linux-64/xcb-util-0.4.0-h516909a_0.tar.bz2#a88ab22508ba067b689dc12696157cee
++https://conda.anaconda.org/conda-forge/linux-64/xcb-util-image-0.4.0-h166bdaf_0.tar.bz2#c9b568bd804cb2903c6be6f5f68182e4
++https://conda.anaconda.org/conda-forge/linux-64/xcb-util-keysyms-0.4.0-h166bdaf_0.tar.bz2#637054603bb7594302e3bf83f0a99879
++https://conda.anaconda.org/conda-forge/linux-64/xcb-util-renderutil-0.3.9-h166bdaf_0.tar.bz2#732e22f1741bccea861f5668cf7342a7
++https://conda.anaconda.org/conda-forge/linux-64/xcb-util-wm-0.4.1-h516909a_0.tar.bz2#847df113dba16f0079758cacf9024409
++https://conda.anaconda.org/conda-forge/linux-64/xkeyboard-config-2.38-h0b41bf4_0.conda#9ac34337e5101a87e5d91da05d84aa48
++https://conda.anaconda.org/conda-forge/linux-64/xorg-kbproto-1.0.7-hb9d3cd8_1003.conda#e87bfacb110d85e1eb6099c9ed8e7236
++https://conda.anaconda.org/conda-forge/linux-64/xorg-libice-1.0.10-h7f98852_0.tar.bz2#d6b0b50b49eccfe0be0373be628be0f3
++https://conda.anaconda.org/conda-forge/linux-64/xorg-libsm-1.2.3-hd9c2040_1000.tar.bz2#9e856f78d5c80d5a78f61e72d1d473a3
++https://conda.anaconda.org/conda-forge/linux-64/xorg-libx11-1.8.4-h0b41bf4_0.conda#ea8fbfeb976ac49cbeb594e985393514
++https://conda.anaconda.org/conda-forge/linux-64/xorg-libxau-1.0.12-h7cc23a3_2.conda#da33efee1a93603d92e06d4a2b68def6
++https://conda.anaconda.org/conda-forge/linux-64/xorg-libxdmcp-1.1.5-h7cc23a3_2.conda#eabfc45786244de252090cf8d55128a8
++https://conda.anaconda.org/conda-forge/linux-64/xorg-libxext-1.3.4-h0b41bf4_2.conda#82b6df12252e6f32402b96dacc656fec
++https://conda.anaconda.org/conda-forge/linux-64/xorg-libxrender-0.9.10-h7f98852_1003.tar.bz2#f59c1242cc1dd93e72c2ee2b360979eb
++https://conda.anaconda.org/conda-forge/linux-64/xorg-libxt-1.3.0-hd590300_0.conda#ab2044e8d87dda9f74652e8e084a5569
++https://conda.anaconda.org/conda-forge/linux-64/xorg-renderproto-0.11.1-hb9d3cd8_1003.conda#bf90782559bce8447609933a7d45995a
++https://conda.anaconda.org/conda-forge/linux-64/xorg-xextproto-7.3.0-hb9d3cd8_1004.conda#bc4cd53a083b6720d61a1519a1900878
++https://conda.anaconda.org/conda-forge/linux-64/xorg-xproto-7.0.31-hb9d3cd8_1008.conda#a63f5b66876bb1ec734ab4bdc4d11e86
++https://conda.anaconda.org/conda-forge/linux-64/xz-5.2.6-h166bdaf_0.tar.bz2#2161070d867d1b1204ea749c8eec4ef0
++https://conda.anaconda.org/conda-forge/linux-64/yaml-0.2.5-hebe6cf0_3.conda#e741576fb8f89821ac7c1c537322a33d
++https://conda.anaconda.org/conda-forge/linux-64/yarl-1.7.2-py37h540881e_2.tar.bz2#19b4db3d2d94a9a96b66ddf6ef19e640
++https://conda.anaconda.org/conda-forge/noarch/zipp-3.15.0-pyhd8ed1ab_0.conda#13018819ca8f5b7cc675a8faf1f5fedf
++https://conda.anaconda.org/conda-forge/linux-64/zlib-1.2.13-h4ab18f5_6.conda#559d338a4234c2ad6e676f460a093e67
++https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.6-ha6fb4c9_0.conda#4d056880988120e29d75bfff282e0f45
+diff --git a/envs/plasx-linux-64.lock b/envs/plasx-linux-64.lock
+--- /dev/null
++++ b/envs/plasx-linux-64.lock
+@@ -0,0 +1,64 @@
++@EXPLICIT
++https://conda.anaconda.org/conda-forge/noarch/python_abi-3.8-9_cp38.conda#3ac64ed0f76dd83db3b262eeeef226de
++https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.10.19-hbd8a1cb_0.conda#a1d1bf676059d2863f000d5e2777743f
++https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.46.1-bootstrap_ha15bf96_3.conda#e82d33173910cc8da8da4e51d732ff3e
++https://conda.anaconda.org/conda-forge/linux-64/libgomp-16.2.0-he0feb66_7.conda#d904c7ddd95e026254b4b80808ee9e12
++https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda#a9f577daf3de00bca7c3c76c0ecbd1de
++https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda#735629b400b70eeab21a2ba8f5b1c2ce
++https://conda.anaconda.org/conda-forge/linux-64/libiconv-1.18-h0cb94f2_3.conda#f92233bf33e24a25668bb2119e2c51f9
++https://conda.anaconda.org/conda-forge/linux-64/libnsl-2.0.1-hb9d3cd8_1.conda#d864d34357c3b65a4b731f78c0801dc4
++https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.42.4-hcfc3c73_0.conda#54a948337e66706380ff24d6b5fde63f
++https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.5-h781a0a9_0.conda#5a51a2ea653f120240b1a9bf76e0aae9
++https://conda.anaconda.org/conda-forge/linux-64/libffi-3.7.0-h81df57d_1.conda#6525a0b06aa4fd390795f0740636a9dd
++https://conda.anaconda.org/conda-forge/linux-64/libxcrypt-4.4.38-h280c20c_0.conda#f7a7ff5a6ab331e037abd34f379a631d
++https://conda.anaconda.org/conda-forge/linux-64/liblzma-5.8.3-hb03c661_1.conda#1390b7c5ac0b1d8e447bc5efa6d3c8c2
++https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda#ee6c0cd80a60961a1f48aa3e0b91f986
++https://conda.anaconda.org/conda-forge/linux-64/libgfortran5-16.2.0-h6b99dfc_7.conda#7719ed7be38ad8c492c4bd5cc2bce0c4
++https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_10.conda#e675fabcf81499adc7edf58124fb1e01
++https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-16.2.0-h69a702a_7.conda#2005515ac9340f816fb2ac7e83afe553
++https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda#9b6707e0caca917fa6ea9ee473f37a5d
++https://conda.anaconda.org/conda-forge/linux-64/libgettextpo-0.25.1-h0e23cf9_2.conda#de2346aa9d78288e6924b01a2db091c1
++https://conda.anaconda.org/conda-forge/linux-64/xz-gpl-tools-5.8.3-ha02ee65_1.conda#137db930adb0b3c5407485e0e1a50cfa
++https://conda.anaconda.org/conda-forge/linux-64/xz-tools-5.8.3-hb03c661_1.conda#10d693a2db6e8339e4eebcb3a3dae88d
++https://conda.anaconda.org/conda-forge/linux-64/liblzma-devel-5.8.3-hb03c661_1.conda#6d83d6a332c19424e9e66b69b180ec11
++https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-hd6e31c0_1.conda#69c01c781e7c8190bbdaf79e3848c5ca
++https://conda.anaconda.org/conda-forge/linux-64/libgfortran-16.2.0-h69a702a_7.conda#3a8d285f5f22138ef826ad54cf267e73
++https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.2.13-h4ab18f5_6.conda#27329162c0dc732bcf67a4e0cd488125
++https://conda.anaconda.org/conda-forge/linux-64/libasprintf-0.25.1-h0e23cf9_2.conda#708966b4a89392fe7b7d348f41501ffc
++https://conda.anaconda.org/conda-forge/linux-64/gmp-6.3.0-hfd2156b_3.conda#576e32739f323438bf69ab006c21be7b
++https://conda.anaconda.org/conda-forge/linux-64/snappy-1.2.2-h34e00bb_2.conda#2b7e31ffbd476eecf33b3b833692339c
++https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-16.2.0-hdf11a46_7.conda#25a23bde5e26d548374f3e02b4669670
++https://conda.anaconda.org/conda-forge/linux-64/xz-5.8.3-ha02ee65_1.conda#36a079606b3aaf9d726211825f182452
++https://conda.anaconda.org/conda-forge/linux-64/libgfortran-ng-16.2.0-h69a702a_7.conda#a31f744c0c83d31dacf9c01b2e3c12a2
++https://conda.anaconda.org/conda-forge/linux-64/libsqlite-3.46.0-hde9e2c9_0.conda#18aa975d2094c34aef978060ae7da7d8
++https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h4845f30_101.conda#d453b98d9c83e71da0741bb0ff4d76bc
++https://conda.anaconda.org/conda-forge/linux-64/zlib-1.2.13-h4ab18f5_6.conda#559d338a4234c2ad6e676f460a093e67
++https://conda.anaconda.org/conda-forge/linux-64/mpfr-4.2.2-ha2cb11d_1.conda#7dcc10f6c0bc3596d5519a710a84dfd4
++https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.6-ha6fb4c9_0.conda#4d056880988120e29d75bfff282e0f45
++https://conda.anaconda.org/conda-forge/linux-64/lz4-c-1.9.4-hcb278e6_0.conda#318b08df404f9c9be5712aaa5a6f0bb0
++https://conda.anaconda.org/conda-forge/linux-64/llvm-openmp-8.0.1-hc9558a2_0.tar.bz2#67590caab043d6d7ffc371f9cced7848
++https://conda.anaconda.org/conda-forge/linux-64/libopenblas-0.3.25-pthreads_h413a1c8_0.conda#d172b34a443b95f86089e8229ddc9a17
++https://conda.anaconda.org/conda-forge/linux-64/python-3.8.19-hd12c33a_0_cpython.conda#53aabe8cf596487ec6f1ce319c93a741
++https://conda.anaconda.org/conda-forge/linux-64/libllvm10-10.0.1-he513fc3_3.tar.bz2#b1c57947b2a9231e0cd037ab0ed96b5d
++https://conda.anaconda.org/conda-forge/linux-64/gawk-5.4.1-h0a3468a_0.conda#64fd8d804a6aaef55d6d6c562446d72b
++https://conda.anaconda.org/conda-forge/linux-64/blosc-1.21.5-hc2324a3_1.conda#11d76bee958b1989bd1ac6ee7372ea6d
++https://conda.anaconda.org/conda-forge/linux-64/openmp-8.0.1-0.tar.bz2#b35241079152e5cc891c99368395b2c6
++https://conda.anaconda.org/conda-forge/linux-64/libblas-3.9.0-20_linux64_openblas.conda#2b7bb4f7562c8cf334fc2e20c2d28abc
++https://conda.anaconda.org/conda-forge/linux-64/setuptools-59.8.0-py38h578d9bd_1.tar.bz2#da023e4a9c777abc28434d7a6473dcc2
++https://conda.anaconda.org/conda-forge/linux-64/liblapack-3.9.0-20_linux64_openblas.conda#6fabc51f5e647d09cc010c40061557e0
++https://conda.anaconda.org/conda-forge/linux-64/libcblas-3.9.0-20_linux64_openblas.conda#36d486d72ab64ffea932329a1d3729a3
++https://conda.anaconda.org/conda-forge/noarch/wheel-0.45.1-pyhd8ed1ab_0.conda#bdb2f437ce62fd2f1fef9119a37a12d9
++https://conda.anaconda.org/conda-forge/noarch/pip-24.3.1-pyh8b19718_0.conda#5dd546fe99b44fda83963d15f84263b7
++https://conda.anaconda.org/conda-forge/noarch/six-1.16.0-pyh6c4a22f_0.tar.bz2#e5f25f8dbc060e9a8d912e432202afc2
++https://conda.anaconda.org/conda-forge/noarch/pytz-2024.2-pyhd8ed1ab_0.conda#260009d03c9d5c0f111904d851f053dc
++https://conda.anaconda.org/conda-forge/noarch/joblib-1.4.2-pyhd8ed1ab_0.conda#25df261d4523d9f9783bcdb7208d872f
++https://conda.anaconda.org/conda-forge/noarch/threadpoolctl-3.5.0-pyhc1e730c_0.conda#df68d78237980a159bd7149f33c0e8fd
++https://conda.anaconda.org/conda-forge/noarch/python-dateutil-2.9.0-pyhd8ed1ab_0.conda#2cf4264fffb9e6eff6031c5b6884d61c
++https://conda.anaconda.org/bioconda/linux-64/mmseqs2-10.6d92c-h2d02072_0.tar.bz2#e65d1913d4c453acf03a7ae1fe79fde1
++https://conda.anaconda.org/conda-forge/linux-64/python-blosc-1.10.6-py38h8f669ce_1.tar.bz2#0d74eed248a6e9bacfc82667db40864d
++https://conda.anaconda.org/conda-forge/linux-64/numpy-1.19.5-py38h8246c76_3.tar.bz2#0ac1e1515921296a689bad87e4affeb9
++https://conda.anaconda.org/conda-forge/linux-64/llvmlite-0.36.0-py38h4630a5e_0.tar.bz2#a805cb9a530a6524f7f832cce981fa0e
++https://conda.anaconda.org/conda-forge/linux-64/scipy-1.7.3-py38h56a6a73_0.tar.bz2#2d318049369bb52d2687b0ac2be82751
++https://conda.anaconda.org/conda-forge/linux-64/pandas-1.2.5-py38h1abd341_0.tar.bz2#b7c0ddb0b4a016268bd915d8fb55693f
++https://conda.anaconda.org/conda-forge/linux-64/numba-0.53.1-py38h8b71fd7_1.tar.bz2#5664278be8b3e6e54ea258b67e1861d0
++https://conda.anaconda.org/conda-forge/linux-64/scikit-learn-0.24.2-py38hacb3eff_1.tar.bz2#76b8b44deb038fed10283f8c879befba
+diff --git a/tests/nextflow/plasx_native.nf b/tests/nextflow/plasx_native.nf
+--- /dev/null
++++ b/tests/nextflow/plasx_native.nf
+@@ -0,0 +1,22 @@
++nextflow.enable.dsl=2
++include { PLASX_ANNOTATE; PLASX } from '../../modules/detection/plasx'
++
++workflow ANNOTATE_ONLY {
++    def resource = { location -> Channel.value(tuple(file(location, checkIfExists: true),
++        files("${location}/**", type: 'file', hidden: true))) }
++    ch_assembly = Channel.of(tuple([id: params.sample_id], file(params.assembly, checkIfExists: true)))
++    PLASX_ANNOTATE(ch_assembly, resource.call(params.plasx_anvio_source), resource.call(params.plasx_cog_db), resource.call(params.plasx_pfam_db))
++}
++
++workflow {
++    def resource = { location -> Channel.value(tuple(file(location, checkIfExists: true),
++        files("${location}/**", type: 'file', hidden: true))) }
++    if (params.annotation_only) {
++        ANNOTATE_ONLY()
++    } else {
++        ch_assembly = Channel.of(tuple([id: params.sample_id], file(params.assembly, checkIfExists: true)))
++        PLASX_ANNOTATE(ch_assembly, resource.call(params.plasx_anvio_source), resource.call(params.plasx_cog_db), resource.call(params.plasx_pfam_db))
++        PLASX(PLASX_ANNOTATE.out.annotations, resource.call(params.plasx_source), resource.call(params.plasx_profiles),
++            Channel.value(file(params.plasx_model, checkIfExists: true)))
++    }
++}
+diff --git a/tests/test_plasx_inputs.py b/tests/test_plasx_inputs.py
+--- /dev/null
++++ b/tests/test_plasx_inputs.py
+@@ -0,0 +1,191 @@
++"""Identity, missing evidence, and failure controls for per-sample PlasX inputs."""
++import gzip
++import importlib.util
++from pathlib import Path
++import subprocess
++import multiprocessing
++import sqlite3
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def module(name):
++    spec = importlib.util.spec_from_file_location(name, ROOT / 'bin' / (name + '.py'))
++    result = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(result)
++    return result
++
++
++px = module('plasx_inputs')
++checked = module('plasx_checked')
++anvio_checked = module('anvio_checked')
++
++
++class PlasXInputs(unittest.TestCase):
++    def setUp(self):
++        self.temporary = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temporary.cleanup)
++        self.base = Path(self.temporary.name)
++        self.assembly = self.base / 'assembly.fa'
++        self.assembly.write_text('>original|1 description\nATGAAATAA\n>original.2\nATGAAATAA\n>no_genes\nACGT\n')
++        self.prefix = self.base / 'S.1'
++        px.prepare(self.assembly, 'S.1', self.prefix)
++        self.mapping, self.sequences = px.load_mapping(str(self.prefix) + '.id_map.tsv', str(self.prefix) + '.contigs.fasta', 'S.1')
++        self.keys = list(self.mapping)
++        self.gene_path = self.base / 'genes.tsv'
++        columns = ['gene_callers_id', 'contig', 'start', 'stop', 'direction', 'source', 'version', 'aa_sequence']
++        px.write_table(self.gene_path, columns, [dict(zip(columns, [str(i), self.keys[i], '0', '9', 'f', 'prodigal', 'v2.6.3', 'MK'])) for i in range(2)])
++        self.genes = px.load_genes(self.gene_path, self.sequences)
++        self.annotations = self.base / 'annotations.tsv'
++        self.annotations.write_text('gene_callers_id\tsource\taccession\te_value\n0\tPfam\tPF00001.2\t1e-20\n')
++        self.denovo = self.base / 'denovo.tsv'
++        self.denovo.write_text('gene_callers_id\tcontig\tstart\tstop\tdirection\te_value\taccession\n')
++        self.scores = self.base / 'scores.tsv'
++        self.scores.write_text('contig\tscore\n' + self.keys[0] + '\t0.90000000000000002\n')
++
++    def finish(self):
++        return px.finalize(self.scores, self.mapping, self.sequences, self.genes, self.annotations, self.denovo,
++                           self.base / 'output.tsv', self.base / 'states.tsv', 'S.1')
++
++    def test_original_ids_probabilities_and_missing_evidence(self):
++        result = self.finish()
++        self.assertEqual((self.base / 'output.tsv').read_text(), 'contig\tscore\noriginal|1\t0.90000000000000002\n')
++        self.assertEqual(result['scored_contigs'], 1)
++        states = px.table(self.base / 'states.tsv', ['contig', 'status'])
++        self.assertEqual([r['status'] for r in states], ['scored', 'not_assessed_no_annotations', 'not_assessed_no_genes'])
++
++    def test_compressed_input_and_duplicate_identifiers(self):
++        compressed = self.base / 'assembly.GZ'
++        with gzip.open(compressed, 'wb') as stream:
++            stream.write(self.assembly.read_bytes())
++        px.prepare(compressed, 'S.1', self.base / 'compressed')
++        self.assertEqual((self.base / 'compressed.contigs.fasta').read_bytes(), Path(str(self.prefix) + '.contigs.fasta').read_bytes())
++        self.assembly.write_text('>duplicate\nACGT\n>duplicate\nTGCA\n')
++        with self.assertRaisesRegex(ValueError, 'duplicate'):
++            px.prepare(self.assembly, 'S.1', self.base / 'duplicate')
++
++    def test_same_gene_numbers_from_another_sample_are_rejected(self):
++        px.prepare(self.assembly, 'S.2', self.base / 'S.2')
++        other, sequences = px.load_mapping(self.base / 'S.2.id_map.tsv', self.base / 'S.2.contigs.fasta', 'S.2')
++        self.assertTrue(set(other).isdisjoint(self.mapping))
++        with self.assertRaisesRegex(ValueError, 'foreign gene'):
++            px.load_genes(self.gene_path, sequences)
++        with self.assertRaisesRegex(ValueError, 'this sample'):
++            px.load_mapping(str(self.prefix) + '.id_map.tsv', str(self.prefix) + '.contigs.fasta', 'S.2')
++
++    def test_foreign_annotations_with_valid_local_gene_numbers_fail_db_comparison(self):
++        database = self.base / 'sample.db'
++        with sqlite3.connect(database) as connection:
++            connection.executescript('CREATE TABLE self(key TEXT,value TEXT); CREATE TABLE contig_sequences(contig TEXT,sequence TEXT); '
++                                     'CREATE TABLE genes_in_contigs(gene_callers_id INT,contig TEXT,start INT,stop INT,direction TEXT,source TEXT,version TEXT); '
++                                     'CREATE TABLE gene_amino_acid_sequences(gene_callers_id INT,sequence TEXT); '
++                                     'CREATE TABLE gene_functions(gene_callers_id INT,source TEXT,accession TEXT,function TEXT,e_value REAL);')
++            connection.executemany('INSERT INTO self VALUES (?,?)', [('version', '20'), ('db_type', 'contigs'), ('gene_function_sources', 'COG14_FUNCTION,Pfam')])
++            connection.executemany('INSERT INTO contig_sequences VALUES (?,?)', self.sequences.items())
++            connection.executemany('INSERT INTO genes_in_contigs VALUES (?,?,?,?,?,?,?)',
++                                   [(int(key), row['contig'], int(row['start']), int(row['stop']), row['direction'], row['source'], row['version']) for key, row in self.genes.items()])
++            connection.executemany('INSERT INTO gene_amino_acid_sequences VALUES (?,?)', [(int(key), row['aa_sequence']) for key, row in self.genes.items()])
++            connection.execute('INSERT INTO gene_functions VALUES (?,?,?,?,?)', (0, 'Pfam', 'PF00001.2', 'original annotation', 1e-20))
++        self.annotations.write_text('gene_callers_id\tsource\taccession\tfunction\te_value\n0\tPfam\tPF00001.2\toriginal annotation\t1e-20\n')
++        px.validate_anvio(database, self.genes, self.sequences, self.annotations)
++        self.annotations.write_text('gene_callers_id\tsource\taccession\tfunction\te_value\n0\tCOG14_FUNCTION\tCOG0001\tforeign annotation\t1e-10\n')
++        self.assertEqual(len(px.check_annotations(self.annotations, self.genes)), 1)
++        with self.assertRaisesRegex(ValueError, 'this sample database'):
++            px.validate_anvio(database, self.genes, self.sequences, self.annotations)
++
++    def test_annotation_identity_coordinates_and_versions(self):
++        self.assertEqual(px.check_annotations(self.annotations, self.genes)[0]['accession'], 'PF00001.2')
++        for text in ['0\tPfam\tPF00001\t1e-20', '0\tCOG20_FUNCTION\tCOG0001\t1e-20',
++                     '999\tPfam\tPF00001.2\t1e-20', '0\tPfam\tPF00001.2\tNaN']:
++            self.annotations.write_text('gene_callers_id\tsource\taccession\te_value\n' + text + '\n')
++            with self.subTest(text=text), self.assertRaises(ValueError):
++                px.check_annotations(self.annotations, self.genes)
++        self.denovo.write_text('gene_callers_id\tcontig\tstart\tstop\tdirection\te_value\taccession\n0\t' + self.keys[1] + '\t0\t9\tf\t0\tmmseqs_90_123\n')
++        with self.assertRaisesRegex(ValueError, 'another gene'):
++            px.check_annotations(self.denovo, self.genes, de_novo=True)
++
++    def test_missing_duplicate_foreign_and_nonfinite_scores_fail(self):
++        for rows in ['', self.keys[0] + '\t0.9\n' + self.keys[0] + '\t0.9\n',
++                     'other\t0.9\n', self.keys[0] + '\tNaN\n', self.keys[0] + '\t1.1\n']:
++            self.scores.write_text('contig\tscore\n' + rows)
++            with self.subTest(rows=rows), self.assertRaises(ValueError):
++                self.finish()
++
++    def test_all_unannotated_is_unassessed_without_fabricated_scores(self):
++        self.annotations.write_text('gene_callers_id\tsource\taccession\te_value\n')
++        self.scores.write_text('contig\tscore\n')
++        result = self.finish()
++        self.assertEqual(result['scored_contigs'], 0)
++        self.assertEqual((self.base / 'output.tsv').read_text(), 'contig\tscore\n')
++
++
++class PlasXExecution(unittest.TestCase):
++    def test_partial_output_and_error_inside_worker_are_not_success(self):
++        with tempfile.TemporaryDirectory() as folder:
++            root = Path(folder)
++
++            def native(command, log):
++                return subprocess.run(command, stdout=subprocess.DEVNULL).returncode
++
++            run = anvio_checked.checked_command(native, root / 'worker.jsonl')
++
++            def worker():
++                try:
++                    run(['/bin/bash', '-c', 'echo partial > "$1"; exit 7', 'bash', str(root / 'partial')], str(root / 'log'))
++                except RuntimeError:
++                    raise SystemExit(19)
++
++            process = multiprocessing.get_context('fork').Process(target=worker)
++            process.start()
++            process.join(10)
++            self.assertFalse(process.is_alive())
++            self.assertEqual(process.exitcode, 19)
++            self.assertTrue((root / 'partial').is_file())
++            self.assertIn('"exit_code": 7', (root / 'worker.jsonl').read_text())
++
++    def test_failed_native_pipeline_is_not_hidden_by_tee(self):
++        with tempfile.TemporaryDirectory() as folder:
++            pipeline = 'exit 7 | tee ' + str(Path(folder) / 'log')
++            self.assertEqual(subprocess.run(pipeline, shell=True).returncode, 0)
++            audit = checked.CheckedProcesses()
++            child = audit.popen(pipeline, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
++            child.communicate()
++            self.assertEqual(child.returncode, 7)
++            self.assertEqual(audit.records()[0]['exit_code'], 7)
++
++
++class PlasXReferences(unittest.TestCase):
++    def test_latest_pfam_cannot_replace_trained_version(self):
++        with tempfile.TemporaryDirectory() as folder:
++            root = Path(folder)
++            (root / 'Pfam.version').write_text('Pfam release : 35.0\n')
++            with self.assertRaisesRegex(ValueError, 'Pfam32.0'):
++                px.check_resources(pfam_db=root)
++
++    def test_all_ten_profile_groups_are_required(self):
++        with tempfile.TemporaryDirectory() as folder:
++            root = Path(folder)
++            for identity in [90, 80, 70, 60, 50, 40, 30, 25, 20, 5]:
++                for suffix in ['', '.dbtype', '.index', '_h', '_h.index']:
++                    (root / ('clu' + str(identity) + '.profile' + suffix)).write_text('REFERENCE_STRUCTURE_CONTROL_ONLY\n')
++            for name in ['rep_lengths.pkl.blp', 'rep_min_align_identity.pkl.blp']:
++                (root / name).write_text('REFERENCE_STRUCTURE_CONTROL_ONLY\n')
++            self.assertEqual(len(px.check_resources(profiles=root)['de_novo_identities']), 10)
++            (root / 'clu5.profile.index').unlink()
++            with self.assertRaisesRegex(ValueError, 'clu5.profile.index'):
++                px.check_resources(profiles=root)
++
++    def test_partial_or_nonfinite_model_is_rejected(self):
++        with tempfile.TemporaryDirectory() as folder:
++            model = Path(folder) / 'model.tsv'
++            for rows in ['INTERCEPT\t0\nCOG0001\t1\nPF00001.2\t1\n',
++                         'INTERCEPT\t0\nCOG0001\t1\nPF00001.2\t1\nmmseqs_90_1\tNaN\n']:
++                model.write_text('accession\tPlasX_coefficient\n' + rows)
++                with self.subTest(rows=rows), self.assertRaises(ValueError):
++                    px.check_resources(model=model)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tests/run_plasx_validation.py b/tests/run_plasx_validation.py
+--- /dev/null
++++ b/tests/run_plasx_validation.py
+@@ -0,0 +1,90 @@
++#!/usr/bin/env python3
++"""Actual main-entry rejection controls for complete per-sample PlasX resources."""
++import argparse
++from concurrent.futures import ThreadPoolExecutor
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++RESOURCES = ['plasx_anvio_source', 'plasx_source', 'plasx_cog_db', 'plasx_pfam_db', 'plasx_profiles', 'plasx_model']
++
++
++def run(base, replay):
++    base.mkdir(parents=True, exist_ok=False)
++    fixture = base / 'fixture'
++    fixture.mkdir()
++    (fixture / 'samples.tsv').write_text('sample_id\tassembly\nS1\tunused.fa\n')
++    (fixture / 'model.tsv').write_text('RESOURCE_VALIDATION_ONLY\n')
++    for folder, names in [('anvio', ['anvio/__init__.py', 'bin/anvi-gen-contigs-database', 'bin/anvi-export-gene-calls',
++                                    'bin/anvi-run-ncbi-cogs', 'bin/anvi-run-pfams', 'bin/anvi-export-functions']),
++                          ('plasx', ['plasx/model.py', 'plasx/mmseqs.py', 'plasx/plasx_script.py'])]:
++        for name in names:
++            path = fixture / folder / name
++            path.parent.mkdir(parents=True, exist_ok=True)
++            path.write_text('RESOURCE_VALIDATION_ONLY\n')
++    options = {name: [] for name in ['polishing_tools', 'plasmid_binning_tools', 'typing_tools', 'typing_optional_tools',
++               'host_prediction_tools', 'mag_tools', 'host_linking_methods', 'host_linking_optional_methods', 'annotation_tools',
++               'annotation_optional_tools', 'comparative_tools', 'comparative_optional_tools']}
++    options.update(platform='assembly', samplesheet=str(fixture / 'samples.tsv'), genomad_db=str(fixture),
++                   host_plasmid_linking=False, plasmid_detection_tools=['genomad', 'plasx'], plasx_splits=32,
++                   plasx_anvio_source=str(fixture / 'anvio'), plasx_source=str(fixture / 'plasx'),
++                   plasx_cog_db=str(fixture), plasx_pfam_db=str(fixture), plasx_profiles=str(fixture),
++                   plasx_model=str(fixture / 'model.tsv'))
++    cases = []
++    if replay:
++        for row in csv.DictReader((ROOT / 'docs/tool-audit/p0-main-cases.tsv').open(), delimiter='\t'):
++            if row['case'].startswith('plasx-'):
++                continue
++            cases.append((row['case'], json.loads((ROOT / row['artifacts'] / 'params.json').read_text()), row['stderr_diagnostic'], False))
++    for resource in RESOURCES:
++        cases.append(('plasx-missing-' + resource, dict(options, **{resource: None}), 'an enabled tool requires --' + resource, True))
++    cases += [('plasx-retired-shared-annotations', dict(options, plasx_annotations=str(fixture / 'model.tsv')), '--plasx_annotations is retired', True),
++              ('plasx-source-not-directory', dict(options, plasx_source=str(fixture / 'model.tsv')), '--plasx_source must be a directory', True),
++              ('plasx-model-not-file', dict(options, plasx_model=str(fixture)), '--plasx_model must be a coefficient table file', True),
++              ('plasx-anvio-missing-program', dict(options, plasx_anvio_source=str(fixture)), '--plasx_anvio_source missing source file anvio/__init__.py', True),
++              ('plasx-missing-program', dict(options, plasx_source=str(fixture)), '--plasx_source missing source file plasx/model.py', True)]
++    for value in [-1, 1.5, 'invalid']:
++        cases.append(('plasx-invalid-splits-' + str(value), dict(options, plasx_splits=value), '--plasx_splits must be a nonnegative integer', True))
++    source_sha = hashlib.sha256((ROOT / 'main.nf').read_bytes()).hexdigest()
++
++    def execute(case):
++        name, parameters, diagnostic, new = case
++        directory = base / name
++        directory.mkdir()
++        parameters['outdir'] = str(directory / 'out')
++        (directory / 'params.json').write_text(json.dumps(parameters, indent=2) + '\n')
++        command = [str(ROOT / 'results/tool-audit/runtime/bin/nextflow'), '-C',
++                   str(ROOT / 'results/tool-audit/20261020-main-p0/combined.config'), 'run', str(ROOT / 'main.nf'),
++                   '-params-file', str(directory / 'params.json'), '-work-dir', str(directory / 'work'),
++                   '-with-trace', str(directory / 'trace.tsv'), '-ansi-log', 'false']
++        process = subprocess.run(command, capture_output=True, text=True)
++        (directory / 'stdout.log').write_text(process.stdout)
++        (directory / 'stderr.log').write_text(process.stderr)
++        tasks = list(csv.DictReader((directory / 'trace.tsv').open(), delimiter='\t')) if (directory / 'trace.tsv').exists() else []
++        checks = {'rejected': process.returncode != 0, 'precise_diagnostic': diagnostic in process.stdout + process.stderr,
++                  'zero_tasks': not tasks, 'zero_commands': not list((directory / 'work').rglob('.command.sh'))}
++        row = {'case': name, 'new_case': new, 'artifacts': str(directory.relative_to(ROOT)), 'command': command,
++               'exit': process.returncode, 'stderr_diagnostic': diagnostic, 'checks': checks}
++        print(name, checks, flush=True)
++        return row
++
++    with ThreadPoolExecutor(max_workers=2) as executor:
++        rows = list(executor.map(execute, cases))
++    assert hashlib.sha256((ROOT / 'main.nf').read_bytes()).hexdigest() == source_sha
++    receipt = {'pass': all(all(row['checks'].values()) for row in rows), 'main_sha256': source_sha, 'runs': rows,
++               'new_cases': sum(row['new_case'] for row in rows),
++               'scope': 'actual main rejection paths, all zero analysis tasks; replays do not increase unique-case denominator; no successful end-to-end or scientific validation'}
++    (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    return receipt['pass']
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--replay-old', action='store_true')
++    args = parser.parse_args()
++    raise SystemExit(0 if run(args.output.resolve(), args.replay_old) else 1)
+diff --git a/tests/plasx-native.lock.json b/tests/plasx-native.lock.json
+--- /dev/null
++++ b/tests/plasx-native.lock.json
+@@ -0,0 +1,395 @@
++{
++  "status": "locked_assets_not_a_validation_certificate",
++  "plasx_commit": "5c9acfd00a597da27ef5261acf72dbaf2117b645",
++  "anvio_commit": "258991a5bc0f483c958040a55d339e1f447429ac",
++  "method": "per-sample anvi’o COG2014/Pfam32 plus all ten de-novo families; original native PlasX model",
++  "model_sha256": "c80948687b28f900a977b2ec755e62d48c28939a1c545ed870c7abdee419aa41",
++  "downloads": {
++    "PlasX_coefficients_and_gene_enrichments.txt.gz": {
++      "url": "https://zenodo.org/records/5819401/files/PlasX_coefficients_and_gene_enrichments.txt.gz",
++      "bytes": 16843622,
++      "sha256": "317f3e7d27115d71a05ca0d31a8eaf7d668a81f23335f6e4480b4637b22cc3b9",
++      "md5": "0ad227c0603236088d67656877877557"
++    },
++    "PlasX_mmseqs_profiles.tar.gz": {
++      "url": "https://zenodo.org/records/5819401/files/PlasX_mmseqs_profiles.tar.gz",
++      "bytes": 1700322242,
++      "sha256": "914fd70d84343d55a111ebc4c0fc5e6d366543929c8aea9a0e63ce07325de512",
++      "md5": "0cb528ebeac860360bbeffafc872473c"
++    }
++  },
++  "profiles": {
++    "files": [
++      {
++        "path": "clu20.profile",
++        "bytes": 677824294,
++        "sha256": "beee16b7dd58b79f5d2abef8b0f499c52fee0c847b22e7b4739dd51a1232bf24"
++      },
++      {
++        "path": "clu20.profile.dbtype",
++        "bytes": 4,
++        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
++      },
++      {
++        "path": "clu20.profile.index",
++        "bytes": 2025340,
++        "sha256": "acb75591ed157f5f8848bb4def050f9467ea6040ae3b6d65eda974c03c859780"
++      },
++      {
++        "path": "clu20.profile_h",
++        "bytes": 923701,
++        "sha256": "5b8b3420773a9ba50769145bfb7b6de2a89e300c70143173397a2bc8b809dfca"
++      },
++      {
++        "path": "clu20.profile_h.index",
++        "bytes": 1583646,
++        "sha256": "ff3cb6c667b350098d9a22d203c2567d609dabc31c3eaca13c4c32e5f0836805"
++      },
++      {
++        "path": "clu25.profile",
++        "bytes": 557793985,
++        "sha256": "4db6469eeb51d7f25eb89b32278d44b79e2221fbf611927b703b6b9d8b752482"
++      },
++      {
++        "path": "clu25.profile.dbtype",
++        "bytes": 4,
++        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
++      },
++      {
++        "path": "clu25.profile.index",
++        "bytes": 1676547,
++        "sha256": "8f52d0f4d99f84b65be85b3fdda6c1b09396f8d2aea70500a772c5be8848d013"
++      },
++      {
++        "path": "clu25.profile_h",
++        "bytes": 766280,
++        "sha256": "222539732b243ce2abb25eac2430d78a755b04878fe8eaa1c58a0b7bec458ffb"
++      },
++      {
++        "path": "clu25.profile_h.index",
++        "bytes": 1311575,
++        "sha256": "d071dd9cce962fbf4eed8b73faadea591393817f48050a690aa64c7403a18b23"
++      },
++      {
++        "path": "clu30.profile",
++        "bytes": 510111140,
++        "sha256": "6bb594438cea488547f19927998d287f7bb9e3bfec3eab2d177453641751fbda"
++      },
++      {
++        "path": "clu30.profile.dbtype",
++        "bytes": 4,
++        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
++      },
++      {
++        "path": "clu30.profile.index",
++        "bytes": 1690191,
++        "sha256": "640f1e87e77bc9102e0523dbe2a161e576452c9459851ef638025905b4e623df"
++      },
++      {
++        "path": "clu30.profile_h",
++        "bytes": 774696,
++        "sha256": "dabd3a4a9dd4aff2968146cc909448cae76640ab2f99a3655d8ff765ee832364"
++      },
++      {
++        "path": "clu30.profile_h.index",
++        "bytes": 1325732,
++        "sha256": "36ce43ba297e322f20d8e083524225b9e5924109242e2e0e5023ea5aad1abbe1"
++      },
++      {
++        "path": "clu40.profile",
++        "bytes": 335257247,
++        "sha256": "2896b267929d0aaa875e03b88fdc654aead1be8b22758aa4b8c36373bbd65891"
++      },
++      {
++        "path": "clu40.profile.dbtype",
++        "bytes": 4,
++        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
++      },
++      {
++        "path": "clu40.profile.index",
++        "bytes": 1157717,
++        "sha256": "e6f06f06766b4d70a6adf049d798c5801b2833a670af11aa817f27392decef43"
++      },
++      {
++        "path": "clu40.profile_h",
++        "bytes": 534012,
++        "sha256": "cda9f66ca2102aa6e472c7cb077402508f72419939d2254e04a5759962849142"
++      },
++      {
++        "path": "clu40.profile_h.index",
++        "bytes": 910029,
++        "sha256": "630e691fae6540d2848a56ba4af7b369d9156d4407c38f5d85db43a8eab00370"
++      },
++      {
++        "path": "clu5.profile",
++        "bytes": 3657788391,
++        "sha256": "39ccf44c857586928e434af87a8fa7d1d21b237ee20cfa843a7e8db9bbf26133"
++      },
++      {
++        "path": "clu5.profile.dbtype",
++        "bytes": 4,
++        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
++      },
++      {
++        "path": "clu5.profile.index",
++        "bytes": 17647922,
++        "sha256": "587204d169e0a19564054a7b91fdf8dcd0410f18f311ffc3771358f38cb47d7e"
++      },
++      {
++        "path": "clu5.profile_h",
++        "bytes": 7767393,
++        "sha256": "fc78931244b7447884c79915b676131084da83fbf2282f34a95b430dc544645b"
++      },
++      {
++        "path": "clu5.profile_h.index",
++        "bytes": 14082154,
++        "sha256": "ab98569970a2b1d326f6b6a9c1dcb7700b7c700a0cde237e7913fa7062b96e33"
++      },
++      {
++        "path": "clu50.profile",
++        "bytes": 154859574,
++        "sha256": "255698436db5ef36fdf6b86336f7d97b986bf8e5c9be38cc04e5fc1dae9390a1"
++      },
++      {
++        "path": "clu50.profile.dbtype",
++        "bytes": 4,
++        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
++      },
++      {
++        "path": "clu50.profile.index",
++        "bytes": 555150,
++        "sha256": "b01c4fc2413b38112a8e429e619deb71704ebc612a487f2f62ef294af0a3b1c5"
++      },
++      {
++        "path": "clu50.profile_h",
++        "bytes": 260594,
++        "sha256": "7ecc823787579311d8cd5692de4346f8c7dcf4e24edde0cbe56397571e016033"
++      },
++      {
++        "path": "clu50.profile_h.index",
++        "bytes": 438773,
++        "sha256": "be7733e6448bd063bc214c72b5626ded46f9bb554d7c09cc6f453f597692175f"
++      },
++      {
++        "path": "clu60.profile",
++        "bytes": 172467761,
++        "sha256": "f0b1308f6a050c76662ec034600ce00d6aa3dc9a0b6de7342617145519669609"
++      },
++      {
++        "path": "clu60.profile.dbtype",
++        "bytes": 4,
++        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
++      },
++      {
++        "path": "clu60.profile.index",
++        "bytes": 726528,
++        "sha256": "9421f955ba3123277a85342a2e08b1584933748895f7d7c3f95658176d99c58e"
++      },
++      {
++        "path": "clu60.profile_h",
++        "bytes": 339904,
++        "sha256": "331513006635621dfd51631c90eebdf6f4b819920e47ad241b0e9dfe29f26be5"
++      },
++      {
++        "path": "clu60.profile_h.index",
++        "bytes": 575663,
++        "sha256": "6d3d7145838917a3a4e8ca0ccbf1dc989d5c1e10a01c0440f5dd765f4b73530d"
++      },
++      {
++        "path": "clu70.profile",
++        "bytes": 103150101,
++        "sha256": "9762bdb1b6b1984fe17256a3b383216e29ef6ff0fb397bd995e1ebea090e07e1"
++      },
++      {
++        "path": "clu70.profile.dbtype",
++        "bytes": 4,
++        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
++      },
++      {
++        "path": "clu70.profile.index",
++        "bytes": 427690,
++        "sha256": "c0b610eaa28437ca04c204db7480a0b4336538412292d81c297fb06b72472743"
++      },
++      {
++        "path": "clu70.profile_h",
++        "bytes": 203705,
++        "sha256": "ac77513cf2ae47d628e5d2801ebe0121b96fd13801fc3de48c861f49ea44bf9a"
++      },
++      {
++        "path": "clu70.profile_h.index",
++        "bytes": 340965,
++        "sha256": "edd979a4a0bb89c4342c3487cddc53b64f8a3d1eb66fa0ec92a75bc55cb6aa90"
++      },
++      {
++        "path": "clu80.profile",
++        "bytes": 60386849,
++        "sha256": "57edf21ba2bd793f3755984b269e621d4ce2a14acbe5393bd38a1f9b71ffb361"
++      },
++      {
++        "path": "clu80.profile.dbtype",
++        "bytes": 4,
++        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
++      },
++      {
++        "path": "clu80.profile.index",
++        "bytes": 233257,
++        "sha256": "4c355c2a2b4936284b546c1574b1ce0d40fedec41879be1aa4abe2bc4263d0fa"
++      },
++      {
++        "path": "clu80.profile_h",
++        "bytes": 110973,
++        "sha256": "79014866943e69d60b35e30e6072dab8408e1bcad445e8fa0e280c1afa3e1eb1"
++      },
++      {
++        "path": "clu80.profile_h.index",
++        "bytes": 181670,
++        "sha256": "4bf0da7e0816c2456bdc29b6e91d4ebc024a12d31a9eb0ca8af45d414bc58871"
++      },
++      {
++        "path": "clu90.profile",
++        "bytes": 63204106,
++        "sha256": "20d4d8d436003038dc691f612e0c1607726fe7949e1a42e02c00c1d3d20a6103"
++      },
++      {
++        "path": "clu90.profile.dbtype",
++        "bytes": 4,
++        "sha256": "26b25d457597a7b0463f9620f666dd10aa2c4373a505967c7c8d70922a2d6ece"
++      },
++      {
++        "path": "clu90.profile.index",
++        "bytes": 205142,
++        "sha256": "e7ad18725b7627604ed9f926049e8021474988798355a3c6a26c9f6ae089b9b6"
++      },
++      {
++        "path": "clu90.profile_h",
++        "bytes": 96751,
++        "sha256": "101198dc4d206218e003765d3da46ed750ff24986a211ee7c835641d2259b4f9"
++      },
++      {
++        "path": "clu90.profile_h.index",
++        "bytes": 157927,
++        "sha256": "2e83242049b2f147890a2346c514d492ad4d4ef60a3871b310b067389407021b"
++      },
++      {
++        "path": "rep_lengths.pkl.blp",
++        "bytes": 3051896,
++        "sha256": "07658ed0bced95a5d7ec7d7caaa4ced19be6f077490a3d1713d2b8624c196e36"
++      },
++      {
++        "path": "rep_lengths.txt",
++        "bytes": 13621022,
++        "sha256": "d52bfec11b10f38ef0ef4c3dd29fa1a0e7d3d28603d353e7ad8e8094eaadd8d2"
++      },
++      {
++        "path": "rep_min_align_identity.pkl.blp",
++        "bytes": 5541199,
++        "sha256": "3994bf67258dea4c235a25fe6942b4d8c8a6c6eaaec12ae5452a7376d58a28f9"
++      },
++      {
++        "path": "rep_min_align_identity.txt",
++        "bytes": 18268258,
++        "sha256": "eecb18151cbb4889d95c7a81c03a12fd032d8a5b7836e34ed60b8fba2adab05f"
++      }
++    ],
++    "total_bytes": 6392357490,
++    "scope": "all regular files extracted from the complete verified official PlasX profile archive, no subset/index rebuild"
++  },
++  "raw_annotation_resources": [
++    {
++      "file": "Pfam_v32/Pfam-A.hmm.gz",
++      "url": "https://ftp.ebi.ac.uk/pub/databases/Pfam/releases/Pfam32.0/Pfam-A.hmm.gz",
++      "bytes": 270995712,
++      "sha256": "33a7713c080c8f921863ee87793f36b4bce0fc05ff5fec767109a4e9ffbf9c1e",
++      "md5": "1456545a3f37eb25fa40225cb378a415",
++      "official_md5": "1456545a3f37eb25fa40225cb378a415",
++      "integrity_scope": "official MD5 verified"
++    },
++    {
++      "file": "Pfam_v32/Pfam.version.gz",
++      "url": "https://ftp.ebi.ac.uk/pub/databases/Pfam/releases/Pfam32.0/Pfam.version.gz",
++      "bytes": 114,
++      "sha256": "7852cbaa548a6c0fcdb6ec1a707c5ef35684bd4dcc0a9c7c9a1fb90e0ff499d5",
++      "md5": "de7496fad69c1040fd74db1cb5eef0fc",
++      "official_md5": "de7496fad69c1040fd74db1cb5eef0fc",
++      "integrity_scope": "official MD5 verified"
++    },
++    {
++      "file": "Pfam_v32/Pfam-A.clans.tsv.gz",
++      "url": "https://ftp.ebi.ac.uk/pub/databases/Pfam/releases/Pfam32.0/Pfam-A.clans.tsv.gz",
++      "bytes": 330094,
++      "sha256": "65b613272dd525ca769ae5d127bf215d2dfcacdf221b2666d4c065886d7a1b7f",
++      "md5": "1b52ac0bb6e3bb80063f31e1bd0ffa70",
++      "official_md5": "1b52ac0bb6e3bb80063f31e1bd0ffa70",
++      "integrity_scope": "official MD5 verified"
++    },
++    {
++      "file": "COG_2014/COG14/RAW_DATA_FROM_NCBI/cog2003-2014.csv",
++      "url": "https://ftp.ncbi.nih.gov/pub/COG/COG2014/data/cog2003-2014.csv",
++      "bytes": 158356921,
++      "sha256": "937ff2746098ec514d2b3e8820438510c527a2a0b9bef702a87e03f811a58ea9",
++      "md5": "519694be6fe2394797e9f23bdfe06316",
++      "official_md5": null,
++      "integrity_scope": "HTTPS origin plus Content-Length and recorded local hashes; no independent publisher checksum available in source directory"
++    },
++    {
++      "file": "COG_2014/COG14/RAW_DATA_FROM_NCBI/cognames2003-2014.tab",
++      "url": "https://ftp.ncbi.nih.gov/pub/COG/COG2014/data/cognames2003-2014.tab",
++      "bytes": 260673,
++      "sha256": "7746d2d412874ce1bd66e660ecd5244430663180758d3b8eb4ef18b32acb00e3",
++      "md5": "e7de08419101ee106d8a33df5636215a",
++      "official_md5": null,
++      "integrity_scope": "HTTPS origin plus Content-Length and recorded local hashes; no independent publisher checksum available in source directory"
++    },
++    {
++      "file": "COG_2014/COG14/RAW_DATA_FROM_NCBI/fun2003-2014.tab",
++      "url": "https://ftp.ncbi.nih.gov/pub/COG/COG2014/data/fun2003-2014.tab",
++      "bytes": 961,
++      "sha256": "3bdcb2d4afbaf06fadaf7d6280cc4e5476b525de865eae0d27bdef66eb3fe69c",
++      "md5": "7e992f9ffb4165c25f17bdb6d67fe571",
++      "official_md5": null,
++      "integrity_scope": "HTTPS origin plus Content-Length and recorded local hashes; no independent publisher checksum available in source directory"
++    },
++    {
++      "file": "COG_2014/COG14/RAW_DATA_FROM_NCBI/prot2003-2014.fa.gz",
++      "url": "https://ftp.ncbi.nih.gov/pub/COG/COG2014/data/prot2003-2014.fa.gz",
++      "bytes": 423934259,
++      "sha256": "34ebaa5a3990ee3840a73318eb970a48cfdc3f01eb8ca6ea50643d22f676965f",
++      "md5": "1a7affeeff04fe1347323c6777d4fe53",
++      "official_md5": null,
++      "integrity_scope": "HTTPS origin plus Content-Length and recorded local hashes; no independent publisher checksum available in source directory"
++    }
++  ],
++  "environment_locks": {
++    "plasx-linux-64.lock": "09a81346d084501586f679ee28c1a48b55197f3bf9f64eccefcdcefd6eb9b573",
++    "plasx-anvio-linux-64.lock": "ec02fee9ac6f88c9190ac6101c97781f8b6f104abb02879ddd29abc06b8c5755"
++  },
++  "limitations": [
++    "full native search and current workflow validation ongoing; no image, AWS, independent biological accuracy, or full-platform certification"
++  ],
++  "sources": [
++    {
++      "repository": "michaelkyu/PlasX",
++      "commit": "5c9acfd00a597da27ef5261acf72dbaf2117b645",
++      "archive": "plasx-source.tar.gz",
++      "url": "https://codeload.github.com/michaelkyu/PlasX/tar.gz/5c9acfd00a597da27ef5261acf72dbaf2117b645",
++      "sha256": "5d08bd8640fb82fbda322e078f818037074067829af32fa994151ec314775df0",
++      "bytes": 303354
++    },
++    {
++      "repository": "merenlab/anvio",
++      "commit": "258991a5bc0f483c958040a55d339e1f447429ac",
++      "archive": "anvio-source.tar.gz",
++      "url": "https://codeload.github.com/merenlab/anvio/tar.gz/258991a5bc0f483c958040a55d339e1f447429ac",
++      "sha256": "546745b96fad69f8d0b088a4b6a8f90cc2a367acf581f2e2ac0bcdc41cdf6643",
++      "bytes": 200325989
++    }
++  ],
++  "official_fixture_sha256": {
++    "test-contigs-cogs-and-pfams.txt": "753c3a224cc7db9d00d82320d09e8ad9c943d443178ecf46d7626baaf866ce40",
++    "test-contigs-de-novo-families.txt": "836470a46ae6c454a680de0e6c7bf5c244d65283330178643bb99eab72f8d667",
++    "test-contigs-gene-calls.txt": "6485d220fd62aa0f20e680bc8c3eb4896db677e1dc28691ea1316428847e9a75",
++    "test-contigs-scores.txt": "7957d81f2a657eb65dc12e3dab032301016c2716c6d11d9440f1b10b92dbc442",
++    "test-contigs.fa": "9a14bfd7bb825d8c1aaf3fde27590826f1e82d7e0867cb95a0e34b4b7aaa2d1b"
++  },
++  "validation_record": "docs/tool-audit/contracts/plasx-native.md; results/tool-audit/20261024-plasx-native/receipt.json when present; historical preparation used resource-preparation.lock.json"
++}
+diff --git a/tests/prepare_plasx_resources.py b/tests/prepare_plasx_resources.py
+--- /dev/null
++++ b/tests/prepare_plasx_resources.py
+@@ -0,0 +1,202 @@
++#!/usr/bin/env python3
++"""Prepare complete, pinned PlasX references and fixed source trees; no cloud resources."""
++import argparse
++import gzip
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import sys
++import tarfile
++import time
++import urllib.request
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def load_helper(name):
++    spec = importlib.util.spec_from_file_location(name, ROOT / 'bin' / (name + '.py'))
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++def sha256(path):
++    digest = hashlib.sha256()
++    with Path(path).open('rb') as stream:
++        for block in iter(lambda: stream.read(1024 * 1024), b''):
++            digest.update(block)
++    return digest.hexdigest()
++
++
++def matches(path, expected):
++    return path.is_file() and path.stat().st_size == expected['bytes'] and sha256(path) == expected['sha256']
++
++
++def fetch(expected, destination, cache=None, cache_relative=None):
++    if destination.exists():
++        if not matches(destination, expected):
++            raise ValueError('Existing file differs from lock: ' + str(destination))
++        return
++    destination.parent.mkdir(parents=True, exist_ok=True)
++    if cache:
++        for candidate in [cache / (cache_relative or destination.name), cache / destination.name]:
++            if matches(candidate, expected):
++                shutil.copyfile(candidate, destination)
++                print('verified cached download', destination.name, flush=True)
++                return
++    partial = destination.with_name(destination.name + '.part')
++    for attempt in range(2):
++        try:
++            with urllib.request.urlopen(expected['url'], timeout=45) as response, partial.open('wb') as stream:
++                size = 0
++                while True:
++                    block = response.read(1024 * 1024)
++                    if not block:
++                        break
++                    stream.write(block)
++                    size += len(block)
++                if response.headers.get('Content-Length') and size != int(response.headers['Content-Length']):
++                    raise ValueError('Incomplete HTTP download: ' + destination.name)
++            if not matches(partial, expected):
++                raise ValueError('Download differs from pinned bytes/SHA256: ' + destination.name)
++            if expected.get('md5') and hashlib.md5(partial.read_bytes()).hexdigest() != expected['md5']:
++                raise ValueError('Download differs from recorded MD5: ' + destination.name)
++            partial.rename(destination)
++            print('verified public download', destination.name, flush=True)
++            return
++        except Exception:
++            if attempt:
++                raise
++            time.sleep(3)
++
++
++def extract(archive, destination, strip_root=False):
++    destination.mkdir(exist_ok=False, parents=True)
++    destination = destination.resolve()
++    seen = set()
++    with tarfile.open(archive) as stream:
++        for member in stream:
++            parts = Path(member.name).parts[1:] if strip_root else Path(member.name).parts
++            relative = Path(*parts)
++            if not parts or relative == Path('.'):
++                continue
++            if relative.is_absolute() or '..' in relative.parts or str(relative) in seen:
++                raise ValueError('Unsafe or duplicate archive member: ' + member.name)
++            seen.add(str(relative))
++            path = destination / relative
++            # Existing archive-created symlinks cannot redirect later members.
++            path.parent.resolve().relative_to(destination)
++            if member.isdir():
++                path.mkdir(exist_ok=True, parents=True)
++            elif member.isfile():
++                path.parent.mkdir(parents=True, exist_ok=True)
++                with stream.extractfile(member) as source, path.open('xb') as out:
++                    shutil.copyfileobj(source, out)
++                path.chmod(0o755 if member.mode & 0o111 else 0o644)
++            elif member.issym():
++                if Path(member.linkname).is_absolute():
++                    raise ValueError('Absolute archive symlink')
++                (path.parent / member.linkname).resolve().relative_to(destination)
++                path.parent.mkdir(parents=True, exist_ok=True)
++                path.symlink_to(member.linkname)
++            else:
++                raise ValueError('Unsupported archive member: ' + member.name)
++
++
++def format_databases(directory, threads):
++    source = (directory / 'sources/anvio').resolve()
++    load_helper('anvio_checked').verify_source(source)
++    sys.path.insert(0, str(source))
++    os.environ['PATH'] = str(source / 'bin') + os.pathsep + os.environ.get('PATH', '')
++    from anvio.cogs import COGsSetup, COG_DATA_VERSION
++    from anvio.pfam import PfamSetup
++    import anvio.utils as utils
++    command_log = directory / 'database-format-commands.jsonl'
++    command_log.write_text('')
++    utils.run_command = load_helper('anvio_checked').checked_command(utils.run_command, command_log)
++    setup = COGsSetup(argparse.Namespace(cog_data_dir=str(directory / 'COG_2014'), cog_version='COG14',
++                      num_threads=threads, reset=False, just_do_it=False))
++    # Complete raw data were preloaded with locked checksums. The native
++    # formatter requires this layout marker before it can consume that data.
++    Path(setup.COG_data_dir_version).write_text(COG_DATA_VERSION)
++    setup.create()
++    pfam = PfamSetup(argparse.Namespace(pfam_data_dir=str(directory / 'Pfam_v32'), pfam_version='32.0', reset=False))
++    pfam.decompress_files()
++    pfam.hmmpress_files()
++
++
++def prepare(args):
++    directory = args.outdir.resolve()
++    directory.mkdir(parents=True, exist_ok=False)
++    lock = json.loads(args.lock.read_text())
++    downloads = directory / 'downloads'
++    for item in lock['sources']:
++        path = downloads / item['archive']
++        fetch(item, path, args.cache)
++        extract(path, directory / 'sources' / ('anvio' if item['repository'] == 'merenlab/anvio' else 'plasx'), strip_root=True)
++    load_helper('anvio_checked').verify_source(directory / 'sources/anvio')
++    load_helper('plasx_checked').verify_source(directory / 'sources/plasx/plasx')
++    for name, item in lock['downloads'].items():
++        fetch(item, downloads / name, args.cache)
++    extract(downloads / 'PlasX_mmseqs_profiles.tar.gz', directory / 'profiles')
++    for item in lock['profiles']['files']:
++        if not matches(directory / 'profiles' / item['path'], item):
++            raise ValueError('Profile extraction differs from complete pinned archive: ' + item['path'])
++    model = directory / 'model/PlasX_coefficients_and_gene_enrichments.txt'
++    model.parent.mkdir()
++    with gzip.open(downloads / 'PlasX_coefficients_and_gene_enrichments.txt.gz', 'rb') as source, model.open('wb') as out:
++        shutil.copyfileobj(source, out)
++    if sha256(model) != lock['model_sha256']:
++        raise ValueError('Coefficient decompression mismatch')
++    for item in lock['raw_annotation_resources']:
++        path = downloads / Path(item['file']).name
++        fetch(item, path, args.cache, item['file'])
++        staged = directory / item['file']
++        staged.parent.mkdir(parents=True, exist_ok=True)
++        shutil.copyfile(path, staged)
++    command = [str(args.anvio_prefix.resolve() / 'bin/python'), str(Path(__file__).resolve()),
++               'format', '--outdir', str(directory), '--threads', str(args.threads)]
++    environment = dict(os.environ, PATH=str(args.anvio_prefix.resolve() / 'bin') + os.pathsep + os.environ.get('PATH', ''),
++                       PYTHONDONTWRITEBYTECODE='1', MPLCONFIGDIR=str(directory / 'matplotlib'))
++    with (directory / 'format.stdout').open('w') as stdout, (directory / 'format.stderr').open('w') as stderr:
++        process = subprocess.run(command, env=environment, stdout=stdout, stderr=stderr)
++    (directory / 'format-run.json').write_text(json.dumps({'command': command, 'exit_code': process.returncode}, indent=2) + '\n')
++    process.check_returncode()
++    load_helper('plasx_inputs').check_resources(directory / 'COG_2014', directory / 'Pfam_v32', directory / 'profiles', model)
++    files = []
++    for folder in ['sources', 'profiles', 'model', 'COG_2014', 'Pfam_v32']:
++        for path in sorted((directory / folder).rglob('*')):
++            if path.is_file():
++                files.append({'path': str(path.relative_to(directory)), 'bytes': path.stat().st_size, 'sha256': sha256(path)})
++    receipt = {'lock_sha256': sha256(args.lock), 'source_lock_status': lock['status'], 'format_exit_code': process.returncode,
++               'scope': 'complete fixed source/COG2014/Pfam32/de-novo/model preparation; no classifier or biological validation claim',
++               'files': files, 'parameters': {'plasx_anvio_source': str(directory / 'sources/anvio'),
++               'plasx_source': str(directory / 'sources/plasx'), 'plasx_cog_db': str(directory / 'COG_2014'),
++               'plasx_pfam_db': str(directory / 'Pfam_v32'), 'plasx_profiles': str(directory / 'profiles'), 'plasx_model': str(model)}}
++    (directory / 'prepared-resources.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    print('Complete resource preparation verified:', directory / 'prepared-resources.json', flush=True)
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('mode', choices=['prepare', 'format'])
++    parser.add_argument('--outdir', type=Path, required=True, help='New dedicated output directory for prepare')
++    parser.add_argument('--anvio-prefix', type=Path, help='Environment created from envs/plasx-anvio-linux-64.lock')
++    parser.add_argument('--cache', type=Path, help='Optional existing verified-download cache')
++    parser.add_argument('--lock', type=Path, default=ROOT / 'tests/plasx-native.lock.json')
++    parser.add_argument('--threads', type=int, default=2)
++    args = parser.parse_args()
++    if args.threads <= 0 or (args.mode == 'prepare' and args.anvio_prefix is None):
++        parser.error('positive --threads and --anvio-prefix are required')
++    if args.mode == 'format':
++        format_databases(args.outdir.resolve(), args.threads)
++    else:
++        prepare(args)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/run_plasx_native.py b/tests/run_plasx_native.py
+--- /dev/null
++++ b/tests/run_plasx_native.py
+@@ -0,0 +1,175 @@
++#!/usr/bin/env python3
++"""Independently verify a completed full PlasX workflow; never infer accuracy from it.
++
++Uses only the standard library for family counts and logistic arithmetic. The
++optional original CLI comparison executes the locked upstream source, not an
++observer. This is a verifier of an existing execution, not a new search run.
++"""
++import argparse
++from collections import Counter, defaultdict
++import csv
++import hashlib
++import json
++import math
++import os
++from pathlib import Path
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def sha(path):
++    digest = hashlib.sha256()
++    with Path(path).open('rb') as stream:
++        for block in iter(lambda: stream.read(1048576), b''):
++            digest.update(block)
++    return digest.hexdigest()
++
++
++def rows(path):
++    with Path(path).open() as stream:
++        return list(csv.DictReader(stream, delimiter='\t'))
++
++
++def families(genes, annotations, contig_map=None):
++    """Count every annotation occurrence, including !!! multi-accessions.
++
++    The upstream sparse matrix sums repeated entries; a set of families or a
++    binary presence matrix would silently change the fitted model's inputs.
++    """
++    gene_map = {row['gene_callers_id']: row['contig'] for row in genes}
++    assert len(gene_map) == len(genes), 'Duplicate gene IDs'
++    result = defaultdict(Counter)
++    for table in annotations:
++        for row in table:
++            contig = row.get('contig') or gene_map[row['gene_callers_id']]
++            assert contig == gene_map[row['gene_callers_id']], 'Foreign annotation contig'
++            if contig_map is not None:
++                contig = contig_map[contig]
++            for accession in row['accession'].split('!!!'):
++                assert accession, 'Empty annotation accession'
++                result[contig][accession] += 1
++    return dict(result)
++
++
++def probabilities(counts, model):
++    wanted = set().union(*(set(value) for value in counts.values())) if counts else set()
++    coefficients = {}
++    intercept = None
++    with Path(model).open() as stream:
++        for row in csv.DictReader(stream, delimiter='\t'):
++            feature = row['accession']
++            if feature == 'INTERCEPT':
++                assert intercept is None, 'Duplicate intercept'
++                intercept = float(row['PlasX_coefficient'])
++            elif feature in wanted:
++                assert feature not in coefficients, 'Duplicate coefficient'
++                coefficients[feature] = float(row['PlasX_coefficient'])
++    assert intercept is not None and math.isfinite(intercept)
++    assert all(math.isfinite(value) for value in coefficients.values())
++    values = {}
++    for contig, observed in counts.items():
++        z = math.fsum([intercept] + [n * coefficients.get(feature, 0.0) for feature, n in observed.items()])
++        values[contig] = 1 / (1 + math.exp(-z)) if z >= 0 else math.exp(z) / (1 + math.exp(z))
++    return values
++
++
++def compare_scores(expected, actual):
++    assert set(actual) == set(expected), 'Score contig domain differs'
++    assert all(math.isfinite(value) and 0 <= value <= 1 for value in actual.values())
++    error = max((abs(actual[key] - value) for key, value in expected.items()), default=0)
++    assert error <= 1e-12, ('Logistic score differs', error)
++    return error
++
++
++def scores(path):
++    table = rows(path)
++    result = {row['contig']: float(row['score']) for row in table}
++    assert len(result) == len(table), 'Duplicate scored contig'
++    return result
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    location = parser.add_mutually_exclusive_group(required=True)
++    location.add_argument('--workflow', type=Path, help='Recorded complete cold workflow, including source and trace receipt')
++    location.add_argument('--products', type=Path, help='Published products only; caller must separately verify actual execution')
++    for name in ['model', 'output', 'source']:
++        parser.add_argument('--' + name, required=True, type=Path)
++    parser.add_argument('--sample', default='S.1')
++    parser.add_argument('--prefix', type=Path, help='Optional native prefix for unmodified upstream predict')
++    args = parser.parse_args()
++    lock = json.loads((ROOT / 'tests/plasx-native.lock.json').read_text())
++    assert sha(args.model) == lock['model_sha256'], 'Original full model identity differs'
++    for name, expected in lock['official_fixture_sha256'].items():
++        assert sha(args.source / 'test' / name) == expected, 'Official fixture identity differs: ' + name
++    base = args.output.resolve()
++    base.mkdir(exist_ok=False)
++    execution_sources = {}
++    execution_inputs = []
++    if args.workflow:
++        workflow = args.workflow.resolve()
++        execution = json.loads((workflow / 'execution.json').read_text())
++        assert execution['exit_code'] == 0 and execution['source_unchanged']
++        execution_sources = execution['source_sha256']
++        assert all(sha(ROOT / path) == value for path, value in execution_sources.items()), 'Execution source changed'
++        trace = rows(workflow / 'trace.tsv')
++        assert len(trace) == 2 and all(row['status'] == 'COMPLETED' and row['exit'] == '0' for row in trace)
++        assert {row['name'].split(' (')[0] for row in trace} == {'PLASX_ANNOTATE', 'PLASX'}
++        out = workflow / 'out/04_plasmid_detection/plasx'
++        execution_inputs = [workflow / 'execution.json', workflow / 'trace.tsv']
++    else:
++        out = args.products.resolve()
++    sample = args.sample
++    paths = {key: out / (sample + '.' + key + '.tsv') for key in ['gene_calls', 'cogs_pfams', 'de_novo', 'id_map', 'plasx', 'plasx_state']}
++    genes = rows(paths['gene_calls'])
++    mapping = rows(paths['id_map'])
++    assert all(row['sample_id'] == sample for row in mapping)
++    names = {row['contig']: row['original_contig'] for row in mapping}
++    assert len(names) == len(mapping) == len(set(names.values()))
++    counts = families(genes, [rows(paths['cogs_pfams']), rows(paths['de_novo'])], names)
++    actual = scores(paths['plasx'])
++    error = compare_scores(probabilities(counts, args.model), actual)
++    states = rows(paths['plasx_state'])
++    assert len(states) == len(names) and {row['contig'] for row in states} == set(names.values())
++    gene_contigs = {names[row['contig']] for row in genes}
++    for row in states:
++        expected = 'scored' if row['contig'] in counts else 'not_assessed_no_annotations' if row['contig'] in gene_contigs else 'not_assessed_no_genes'
++        assert row['sample_id'] == sample and row['status'] == expected
++    original = None
++    if args.prefix:
++        output = base / 'original-current-scores.tsv'
++        command = [str(args.prefix.resolve() / 'bin/python'), '-c', 'from plasx.plasx_script import run; run()', 'predict',
++                   '-a', str(paths['cogs_pfams']), str(paths['de_novo']), '-g', str(paths['gene_calls']),
++                   '-m', str(args.model.resolve()), '-o', str(output)]
++        env = dict(os.environ, PYTHONPATH=str(args.source.resolve()), PYTHONDONTWRITEBYTECODE='1')
++        with (base / 'original.stdout.log').open('w') as stdout, (base / 'original.stderr.log').open('w') as stderr:
++            process = subprocess.run(command, cwd=base, env=env, stdout=stdout, stderr=stderr)
++        original = {'command': command, 'exit_code': process.returncode}
++        assert process.returncode == 0, original
++        restored = {names[key]: value for key, value in scores(output).items()}
++        original['maximum_absolute_difference'] = compare_scores(actual, restored)
++    official = args.source / 'test'
++    old_counts = families(rows(official / 'test-contigs-gene-calls.txt'), [rows(official / 'test-contigs-cogs-and-pfams.txt'), rows(official / 'test-contigs-de-novo-families.txt')])
++    official_scores = scores(official / 'test-contigs-scores.txt')
++    official_error = compare_scores(probabilities(old_counts, args.model), official_scores)
++    difference = []
++    for contig in sorted(set(counts) | set(old_counts)):
++        old, new = old_counts.get(contig, Counter()), counts.get(contig, Counter())
++        changed = {key: {'official_precomputed': old[key], 'automatic': new[key]} for key in old.keys() | new.keys() if old[key] != new[key]}
++        if changed:
++            difference.append({'contig': contig, 'family_counts_changed': changed, 'official_score': official_scores.get(contig), 'automatic_score': actual.get(contig)})
++    (base / 'annotation-differences.json').write_text(json.dumps(difference, indent=2) + '\n')
++    result = {'pass': True, 'scope': ('recorded cold source/trace and products' if args.workflow else 'products only; actual execution must be checked separately') + '; independent stdlib count/logistic arithmetic, optional new original predict; no new full search or biological accuracy claim',
++              'genes': len(genes), 'cog_pfam_rows': len(rows(paths['cogs_pfams'])), 'de_novo_rows': len(rows(paths['de_novo'])), 'scored_contigs': len(actual),
++              'state_counts': Counter(row['status'] for row in states), 'score_maximum_absolute_difference': error, 'official_fixture_arithmetic_error': official_error,
++              'strict_half_positive_counts': {'automatic': sum(value > .5 for value in actual.values()), 'official_precomputed': sum(value > .5 for value in official_scores.values())},
++              'contigs_with_changed_family_counts': len(difference), 'original_current_predict': original,
++              'source_sha256': {'tests/run_plasx_native.py': sha(__file__), 'tests/plasx-native.lock.json': sha(ROOT / 'tests/plasx-native.lock.json'), **execution_sources},
++              'input_sha256': {str(path): sha(path) for path in [args.model, *execution_inputs, *paths.values()]}}
++    (base / 'run.json').write_text(json.dumps(result, indent=2) + '\n')
++    print(json.dumps({key: result[key] for key in ['pass', 'genes', 'scored_contigs', 'score_maximum_absolute_difference', 'strict_half_positive_counts', 'contigs_with_changed_family_counts']}))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/test_plasx_native_oracle.py b/tests/test_plasx_native_oracle.py
+--- /dev/null
++++ b/tests/test_plasx_native_oracle.py
+@@ -0,0 +1,54 @@
++"""Counterfactuals for independent PlasX model arithmetic and score domains."""
++import importlib.util
++import math
++from pathlib import Path
++import tempfile
++import unittest
++
++spec = importlib.util.spec_from_file_location('plasx_native_oracle', Path(__file__).with_name('run_plasx_native.py'))
++oracle = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(oracle)
++
++
++class NativeOracleTests(unittest.TestCase):
++    def test_repeated_families_and_multi_accessions_are_counts_not_presence(self):
++        genes = [{'gene_callers_id': '1', 'contig': 'internal'}, {'gene_callers_id': '2', 'contig': 'internal'}]
++        annotations = [[{'gene_callers_id': '1', 'accession': 'COG1!!!PF1.2'},
++                        {'gene_callers_id': '2', 'accession': 'COG1'}],
++                       [{'gene_callers_id': '1', 'contig': 'internal', 'accession': 'mmseqs_5_7'}]]
++        counts = oracle.families(genes, annotations, {'internal': 'original'})
++        self.assertEqual(counts, {'original': {'COG1': 2, 'PF1.2': 1, 'mmseqs_5_7': 1}})
++        with tempfile.TemporaryDirectory() as temp:
++            model = Path(temp) / 'model.tsv'
++            model.write_text('accession\tPlasX_coefficient\nINTERCEPT\t-1\nCOG1\t2\nPF1.2\t-3\nmmseqs_5_7\t1\n')
++            observed = oracle.probabilities(counts, model)['original']
++            self.assertAlmostEqual(observed, 1 / (1 + math.exp(-1)))
++            self.assertNotAlmostEqual(observed, 1 / (1 + math.exp(1)))  # incorrect binary features
++
++    def test_foreign_annotation_and_duplicate_gene_ids_are_rejected(self):
++        gene = {'gene_callers_id': '1', 'contig': 'A'}
++        with self.assertRaisesRegex(AssertionError, 'Foreign annotation'):
++            oracle.families([gene], [[{'gene_callers_id': '1', 'contig': 'B', 'accession': 'COG1'}]])
++        with self.assertRaisesRegex(AssertionError, 'Duplicate gene'):
++            oracle.families([gene, gene], [])
++
++    def test_missing_score_or_added_unassessed_score_is_not_a_pass(self):
++        for observed in [{}, {'A': .8, 'unassessed': 0}]:
++            with self.subTest(observed=observed), self.assertRaisesRegex(AssertionError, 'domain'):
++                oracle.compare_scores({'A': .8}, observed)
++
++    def test_changed_score_and_nonfinite_score_are_rejected(self):
++        for observed in [.7, float('nan'), float('inf'), -1, 2]:
++            with self.subTest(observed=observed), self.assertRaises(AssertionError):
++                oracle.compare_scores({'A': .8}, {'A': observed})
++
++    def test_empty_annotation_domain_does_not_manufacture_intercept_scores(self):
++        with tempfile.TemporaryDirectory() as temp:
++            model = Path(temp) / 'model.tsv'
++            model.write_text('accession\tPlasX_coefficient\nINTERCEPT\t-1\n')
++            self.assertEqual(oracle.probabilities({}, model), {})
++            self.assertEqual(oracle.compare_scores({}, {}), 0)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tests/nf-test/nodes-detection-plasx.nf.test b/tests/nf-test/nodes-detection-plasx.nf.test
+--- /dev/null
++++ b/tests/nf-test/nodes-detection-plasx.nf.test
+@@ -0,0 +1,63 @@
++// Actual complete two-stage method, full locked databases and dependency-only
++// Conda environments. The upstream example is a software fixture, not an
++// independent biological benchmark. AUTOPLASM_PLASX_ROOT supplies locked assets.
++nextflow_pipeline {
++    name 'P3 real nodes: full automatic PlasX annotation and scoring'
++    script 'tests/nextflow/plasx_native.nf'
++    tag 'P3'
++    tag 'detection'
++    tag 'backend-conda'
++
++    test('all three family sources come from this sample and original model arithmetic agrees') {
++        when {
++            params {
++                sample_id = 'S.1'
++                assembly = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/primary/test/test-contigs.fa"
++                plasx_anvio_source = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/anvio-primary-complete"
++                plasx_source = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/primary"
++                plasx_cog_db = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/COG_2014"
++                plasx_pfam_db = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/Pfam_v32"
++                plasx_profiles = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/profiles"
++                plasx_model = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/PlasX_coefficients_and_gene_enrichments.txt"
++                plasx_splits = 32
++                annotation_only = false
++                outdir = "$outputDir"
++            }
++        }
++        then {
++            assert workflow.success
++            assert workflow.trace.failed().isEmpty()
++            assert workflow.trace.succeeded().size() == 2
++            def base = new File(params.outdir, '04_plasmid_detection/plasx')
++            def identity = new groovy.json.JsonSlurper().parse(new File(base, 'S.1.plasx_identity.json'))
++            assert identity.sample_id == 'S.1'
++            assert identity.genes > 0 && identity.cog_pfam_annotations > 0 && identity.de_novo_annotations > 0
++            assert identity.scored_contigs > 0 && identity.unassessed_contigs > 0
++            for (step in ['genes', 'export_genes', 'cogs', 'pfams', 'export_functions']) {
++                def audit = new groovy.json.JsonSlurper().parse(new File(base, "S.1.anvio_${step}.json"))
++                assert audit.success
++                assert audit.source_commit == '258991a5bc0f483c958040a55d339e1f447429ac'
++                assert !audit.children.any { it.exit_code != 0 }
++            }
++            for (step in ['search', 'predict']) {
++                def audit = new groovy.json.JsonSlurper().parse(new File(base, "S.1.plasx_${step}.json"))
++                assert audit.success
++                assert audit.source_commit == '5c9acfd00a597da27ef5261acf72dbaf2117b645'
++                assert audit.source_sha256.size() == 11
++                assert !audit.children.any { it.exit_code != 0 }
++            }
++            def command = ['python3', new File('tests/run_plasx_native.py').absolutePath,
++                           '--products', base.absolutePath, '--model', params.plasx_model.toString(),
++                           '--source', params.plasx_source.toString(), '--output', new File(params.outdir, 'independent-oracle').absolutePath]
++            def process = new ProcessBuilder(command).redirectErrorStream(true).start()
++            def log = process.inputStream.text
++            assert process.waitFor() == 0: log
++            def result = new groovy.json.JsonSlurper().parse(new File(params.outdir, 'independent-oracle/run.json'))
++            assert result.pass
++            assert result.score_maximum_absolute_difference <= 1e-12
++            assert result.official_fixture_arithmetic_error <= 1e-12
++            assert result.state_counts.scored == identity.scored_contigs
++            // Do not snapshot automatic scores as independent biological truth.
++        }
++    }
++}

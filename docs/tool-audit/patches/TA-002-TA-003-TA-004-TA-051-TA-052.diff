@@ -1,0 +1,873 @@
+--- a/main.nf
++++ b/main.nf
+@@ -164,6 +164,11 @@
+     if (!['opera_ms', 'hybridspades'].contains(params.hybrid_assembler)) {
+         paramError("hybrid_assembler must be opera_ms or hybridspades")
+     }
++    if (selectedTools(params.plasmid_binning_tools).contains('recycler') &&
++        !((params.platform == 'illumina' && params.short_read_assembler == 'metaspades') ||
++          (params.platform == 'hybrid' && params.hybrid_assembler == 'hybridspades'))) {
++        paramError("Recycler requires illumina with --short_read_assembler metaspades or hybrid with --hybrid_assembler hybridspades (same-run SPAdes FASTG/k provenance and original short-read pairs)")
++    }
+ }
+ 
+ workflow {
+--- a/modules/nf-core/spades/main.nf
++++ b/modules/nf-core/spades/main.nf
+@@ -22,6 +22,8 @@
+     // assembly_graph.fastg. The pipeline's SCAPP/Recycler plasmid binning
+     // consumes the FASTG graph (upstream only exports the GFA sibling).
+     tuple val(meta), path('*.assembly_graph.fastg'), optional:true, emit: fastg
++    // Local interface: graph and k provenance come from this same successful task.
++    tuple val(meta), path('*.assembly_graph.fastg'), path('*.graph_provenance.json'), optional:true, emit: recycler_graph
+     tuple val(meta), path('*.warnings.log')         , optional:true, emit: warnings
+     tuple val(meta), path('*.spades.log')         , emit: log
+     tuple val("${task.process}"), val('spades'), eval("spades.py --version 2>&1 | sed -n 's/^.*SPAdes genome assembler v//p'"), topic: versions, emit: versions_spades
+@@ -38,6 +40,9 @@
+     def nanopore_reads = nanopore ? "--nanopore $nanopore" : ""
+     def custom_hmms = hmm ? "--custom-hmms $hmm" : ""
+     def reads = yml ? "--dataset $yml" : "$illumina_reads $pacbio_reads $nanopore_reads"
++    // Embed the helper in the task script so containers/test harnesses do not
++    // depend on a host-only repository path. Its contents enter the task hash.
++    def graphProvenanceScript = file("${moduleDir}/../../../bin/spades_graph_provenance.py").text
+     """
+     spades.py \\
+         $args \\
+@@ -68,6 +73,12 @@
+     # Local patch (refactor/nf-core-modules): keep the FASTG graph for SCAPP.
+     if [ -f assembly_graph.fastg ]; then
+         cp assembly_graph.fastg ${prefix}.assembly_graph.fastg
++        cat > .spades_graph_provenance.py <<'SPADES_GRAPH_PROVENANCE_PY'
++${graphProvenanceScript}
++SPADES_GRAPH_PROVENANCE_PY
++        python3 .spades_graph_provenance.py --assembly-dir . \\
++            --graph ${prefix}.assembly_graph.fastg --log ${prefix}.spades.log \\
++            --out ${prefix}.graph_provenance.json
+     fi
+ 
+     if [ -f gene_clusters.fasta ]; then
+@@ -89,6 +100,7 @@
+     echo "" | gzip > ${prefix}.gene_clusters.fa.gz
+     echo "" | gzip > ${prefix}.assembly.gfa.gz
+     touch ${prefix}.assembly_graph.fastg
++    echo '{"stub":true}' > ${prefix}.graph_provenance.json
+     touch ${prefix}.spades.log
+     touch ${prefix}.warnings.log
+     """
+--- a/modules/binning/recycler.nf
++++ b/modules/binning/recycler.nf
+@@ -1,26 +1,36 @@
+ /*
+  * Recycler plasmid reconstruction from graph cycles (pipeline step:
+- * plasmid_binning_recycler; optional; requires fastg graph + BAM).
++ * plasmid_binning_recycler; optional; requires same-graph BAM/BAI and k provenance).
+  */
+ process RECYCLER {
+     tag { meta.id }
+     label 'process_medium'
+-    conda "${projectDir}/envs/recycler.yml"
++    conda "${moduleDir}/../../envs/recycler.yml"
+     container 'quay.io/biocontainers/recycler:0.7--py_3'
+ 
+     publishDir "${params.outdir}/05_plasmid_binning/recycler", mode: params.publish_dir_mode
+ 
+     input:
+-    tuple val(meta), path(assembly_graph), path(bam)
++    tuple val(meta), path(assembly_graph), path(provenance), path(bam), path(bai)
+ 
+     output:
+     tuple val(meta), path("${meta.id}.recycler_out", type: 'dir'), emit: output_dir
+ 
+     script:
+-    // recycle.py requires integer -k/--max_k (the SPAdes k used to build the
+-    // graph); 55 is the metaSPAdes default that produces the production fastg.
++    def validator = file("${moduleDir}/../../bin/validate_recycler_inputs.py").text
++    def runner = file("${moduleDir}/../../bin/run_recycler_checked.py").text
+     """
+-    recycle.py -g ${assembly_graph} -k 55 -b ${bam} \\
+-        -o ${meta.id}.recycler_out
++    cat > validate_recycler_inputs.py <<'RECYCLER_VALIDATOR_PY'
++${validator}
++RECYCLER_VALIDATOR_PY
++    cat > run_recycler_checked.py <<'RECYCLER_RUNNER_PY'
++${runner}
++RECYCLER_RUNNER_PY
++    python validate_recycler_inputs.py --graph "${assembly_graph}" --bam "${bam}" \\
++        --provenance "${provenance}" --out ${meta.id}.recycler.inputs.json
++    python run_recycler_checked.py --graph "${assembly_graph}" --bam "${bam}" \\
++        --contract ${meta.id}.recycler.inputs.json --out ${meta.id}.recycler_out
++    cp ${meta.id}.recycler.inputs.json ${meta.id}.recycler_out/input_contract.json
++    cp "${provenance}" ${meta.id}.recycler_out/graph_provenance.json
+     """
+ }
+--- /dev/null
++++ b/modules/binning/recycler_inputs.nf
+@@ -0,0 +1,65 @@
++/* Dedicated graph-node mapping; contig coverage BAMs are not Recycler inputs.
++ * BWA preparation follows Recycler 0.7's documented recipe. Its independently
++ * pinned nf-core BWA stack is recorded in docs/tool-audit/evidence/.
++ */
++process RECYCLER_REFERENCE {
++    tag { meta.id }
++    label 'process_low'
++    conda "${moduleDir}/../../envs/recycler.yml"
++    container 'quay.io/biocontainers/recycler:0.7--py_3'
++
++    input:
++    tuple val(meta), path(graph), path(provenance), path(read1), path(read2)
++
++    output:
++    tuple val(meta), path(graph), path(provenance), path("${meta.id}.graph_nodes.fasta"), path(read1), path(read2), emit: reference
++
++    script:
++    def validator = file("${moduleDir}/../../bin/validate_recycler_inputs.py").text
++    def extractor = file("${moduleDir}/../../bin/recycler_graph_reference.py").text
++    """
++    cat > validate_recycler_inputs.py <<'RECYCLER_VALIDATOR_PY'
++${validator}
++RECYCLER_VALIDATOR_PY
++    cat > recycler_graph_reference.py <<'RECYCLER_REFERENCE_PY'
++${extractor}
++RECYCLER_REFERENCE_PY
++    python recycler_graph_reference.py --graph "${graph}" --provenance "${provenance}" \\
++        --out ${meta.id}.graph_nodes.fasta
++    """
++}
++
++process RECYCLER_ALIGN {
++    tag { meta.id }
++    label 'process_medium'
++    conda "${moduleDir}/recycler_align.yml"
++    container 'community.wave.seqera.io/library/bwa_htslib_samtools:83b50ff84ead50d0'
++
++    input:
++    tuple val(meta), path(graph), path(provenance), path(reference), path(read1), path(read2)
++
++    output:
++    tuple val(meta), path(graph), path(provenance), path("${meta.id}.graph_nodes.bam"), path("${meta.id}.graph_nodes.bam.bai"), emit: bam
++
++    script:
++    """
++    set -o pipefail
++    bwa index "${reference}"
++    bwa mem -t ${task.cpus} "${reference}" "${read1}" "${read2}" \\
++        | samtools view -b -F 0x0800 - \\
++        | samtools sort -@ ${task.cpus} -o ${meta.id}.graph_nodes.bam -
++    samtools index ${meta.id}.graph_nodes.bam
++    """
++}
++
++workflow RECYCLER_INPUTS {
++    take:
++    graph_reads // one keyed tuple(meta, FASTG, provenance, original read1, read2)
++
++    main:
++    RECYCLER_REFERENCE(graph_reads)
++    RECYCLER_ALIGN(RECYCLER_REFERENCE.out.reference)
++
++    emit:
++    bam = RECYCLER_ALIGN.out.bam
++}
+--- /dev/null
++++ b/modules/binning/recycler_align.yml
+@@ -0,0 +1,7 @@
++channels:
++  - conda-forge
++  - bioconda
++dependencies:
++  - bioconda::bwa=0.7.19
++  - bioconda::htslib=1.22.1
++  - bioconda::samtools=1.22.1
+--- a/envs/recycler.yml
++++ b/envs/recycler.yml
+@@ -3,4 +3,4 @@
+   - conda-forge
+   - bioconda
+ dependencies:
+-  - recycler>=0.62
++  - recycler=0.7
+--- a/subworkflows/plasmid_downstream.nf
++++ b/subworkflows/plasmid_downstream.nf
+@@ -32,6 +32,7 @@
+ include { MOBSUITE_RECON as MOB_RECON } from '../modules/nf-core/mobsuite/recon'
+ include { SCAPP_BIN } from '../modules/binning/scapp_bin'
+ include { RECYCLER } from '../modules/binning/recycler'
++include { RECYCLER_INPUTS } from '../modules/binning/recycler_inputs'
+ 
+ workflow PLASMID_DOWNSTREAM {
+     take:
+@@ -40,6 +41,7 @@
+     ch_contig_bam    // tuple(meta, bam) or empty
+     ch_contig_table  // tuple(meta, coverm tsv) or empty
+     ch_short_reads   // tuple(meta, r1, r2) or empty (SCAPP binning)
++    ch_recycler_graph // tuple(meta, FASTG, graph_provenance.json) from same SPAdes task
+ 
+     main:
+     // ---------------- typing (06) ----------------
+@@ -130,7 +132,9 @@
+         SCAPP_BIN(ch_graph.join(ch_short_reads))
+     }
+     if (selectedTools(params.plasmid_binning_tools).contains('recycler')) {
+-        RECYCLER(ch_graph.join(ch_contig_bam))
++        RECYCLER_INPUTS(ch_recycler_graph.join(ch_short_reads,
++            failOnDuplicate: true, failOnMismatch: true))
++        RECYCLER(RECYCLER_INPUTS.out.bam)
+     }
+ 
+     emit:
+--- a/subworkflows/illumina.nf
++++ b/subworkflows/illumina.nf
+@@ -68,10 +68,12 @@
+     // ---------------- assembly (02) ----------------
+     ch_assembly = Channel.empty()
+     ch_graph = Channel.empty()
++    ch_recycler_graph = Channel.empty()
+     if (params.short_read_assembler == 'metaspades') {
+         METASPADES(ch_final_reads.map { meta, r1, r2 -> tuple(meta, [r1, r2], [], []) }, [], [])
+         ch_assembly = METASPADES.out.contigs
+         ch_graph = METASPADES.out.fastg
++        ch_recycler_graph = METASPADES.out.recycler_graph
+     } else {
+         MEGAHIT(ch_final_reads)
+         ch_assembly = MEGAHIT.out.contigs
+@@ -97,7 +99,7 @@
+     // ---------------- downstream: typing / annotation / binning ----------------
+     PLASMID_DOWNSTREAM(
+         ch_plasmids, ch_graph, CONTIG_COVERAGE.out.bam,
+-        CONTIG_COVERAGE.out.table, ch_final_reads
++        CONTIG_COVERAGE.out.table, ch_final_reads, ch_recycler_graph
+     )
+ 
+     // ---------------- abundance (10) ----------------
+--- a/subworkflows/hybrid.nf
++++ b/subworkflows/hybrid.nf
+@@ -116,9 +116,11 @@
+ 
+     // ---------------- hybrid assembly (02) ----------------
+     ch_asm_in = ch_final_short.join(ch_final_long)
++    ch_recycler_graph = Channel.empty()
+     if (params.hybrid_assembler == 'hybridspades') {
+         HYBRIDSPADES(ch_asm_in.map { meta, r1, r2, lr -> tuple(meta, [r1, r2], [], [lr]) }, [], [])
+         ch_assembly = HYBRIDSPADES.out.contigs
++        ch_recycler_graph = HYBRIDSPADES.out.recycler_graph
+     } else {
+         OPERA_MS(ch_asm_in)
+         ch_assembly = OPERA_MS.out.assembly
+@@ -136,7 +138,7 @@
+ 
+     PLASMID_DOWNSTREAM(
+         ch_plasmids, Channel.empty(), CONTIG_COVERAGE.out.bam,
+-        CONTIG_COVERAGE.out.table, ch_final_short
++        CONTIG_COVERAGE.out.table, ch_final_short, ch_recycler_graph
+     )
+ 
+     // ---------------- abundance (10): short and long chains ----------------
+--- a/subworkflows/assembly.nf
++++ b/subworkflows/assembly.nf
+@@ -25,7 +25,7 @@
+ 
+     PLASMID_DOWNSTREAM(
+         ch_plasmids, Channel.empty(), Channel.empty(),
+-        Channel.empty(), Channel.empty()
++        Channel.empty(), Channel.empty(), Channel.empty()
+     )
+ 
+     HOST_PREDICTION(Channel.empty(), Channel.empty(), ch_plasmids, false, true)
+--- a/subworkflows/ont.nf
++++ b/subworkflows/ont.nf
+@@ -102,7 +102,7 @@
+ 
+     PLASMID_DOWNSTREAM(
+         ch_plasmids, METAFLYE.out.gfa, CONTIG_COVERAGE.out.bam,
+-        CONTIG_COVERAGE.out.table, Channel.empty()
++        CONTIG_COVERAGE.out.table, Channel.empty(), Channel.empty()
+     )
+ 
+     // ---------------- abundance (10) ----------------
+--- a/subworkflows/pacbio_hifi.nf
++++ b/subworkflows/pacbio_hifi.nf
+@@ -89,7 +89,7 @@
+ 
+     PLASMID_DOWNSTREAM(
+         ch_plasmids, HIFIASM_META.out.graph, CONTIG_COVERAGE.out.bam,
+-        CONTIG_COVERAGE.out.table, Channel.empty()
++        CONTIG_COVERAGE.out.table, Channel.empty(), Channel.empty()
+     )
+ 
+     // ---------------- abundance (10) ----------------
+--- a/bin/validate_recycler_inputs.py
++++ b/bin/validate_recycler_inputs.py
+@@ -65,6 +65,21 @@
+     return value.hexdigest()
+ 
+ 
++def graph_provenance(graph, path):
++    with open(path) as stream:
++        record = json.load(stream)
++    k = record.get('max_k')
++    if (record.get('schema') != 1 or record.get('producer') != 'spades' or
++            record.get('version') != '4.1.0'):
++        raise ValueError('unsupported graph provenance schema/producer/version: %s' % path)
++    # bool is an int in both Python2 and Python3; exclude it explicitly.
++    if isinstance(k, bool) or not isinstance(k, type(1)) or k <= 0 or k % 2 != 1:
++        raise ValueError('invalid graph maximum k: %r' % k)
++    if record.get('graph_sha256') != digest(graph):
++        raise ValueError('graph/provenance SHA256 mismatch: %s' % path)
++    return record
++
++
+ def validate(graph, bam_path):
+     import pysam
+     references = graph_references(graph)
+@@ -106,9 +121,14 @@
+     parser.add_argument('--graph', required=True)
+     parser.add_argument('--bam', required=True)
+     parser.add_argument('--out')
++    parser.add_argument('--provenance')
+     args = parser.parse_args()
+     try:
+         result = validate(args.graph, args.bam)
++        if args.provenance:
++            record = graph_provenance(args.graph, args.provenance)
++            result['max_k'] = record['max_k']
++            result['provenance_sha256'] = digest(args.provenance)
+     except Exception as error:
+         print('Recycler input contract violation: graph=%s bam=%s: %s' %
+               (args.graph, args.bam, error), file=sys.stderr)
+--- a/bin/recycler_graph_reference.py
++++ b/bin/recycler_graph_reference.py
+@@ -8,16 +8,19 @@
+ from __future__ import print_function
+ import argparse
+ import sys
+-from validate_recycler_inputs import graph_sequences
++from validate_recycler_inputs import graph_sequences, graph_provenance
+ 
+ 
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--graph', required=True)
+     parser.add_argument('--out', required=True)
++    parser.add_argument('--provenance')
+     args = parser.parse_args()
+     try:
+         sequences = graph_sequences(args.graph)
++        if args.provenance:
++            graph_provenance(args.graph, args.provenance)
+     except Exception as error:
+         print('Recycler graph reference violation: graph=%s: %s' %
+               (args.graph, error), file=sys.stderr)
+--- /dev/null
++++ b/bin/spades_graph_provenance.py
+@@ -0,0 +1,102 @@
++#!/usr/bin/env python3
++"""Bind a completed SPAdes 4.1.0 FASTG to its actual final iteration k.
++
++Run inside the assembler task, while its plan and iteration files still exist.
++The generated plan's final graph copy, config and graph bytes must agree.
++"""
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import re
++import shutil
++import sys
++
++
++def digest(path):
++    value = hashlib.sha256()
++    with path.open('rb') as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
++            value.update(chunk)
++    return value.hexdigest()
++
++
++def collect(assembly_dir, graph, log, plan):
++    assembly_dir = assembly_dir.resolve()
++    copies = [stage for stage in plan if stage.get('short_name') == 'copy_files']
++    if len(copies) != 1:
++        raise ValueError('expected exactly one final copy_files stage')
++    args = copies[0].get('args', [])
++    if not args or Path(args[0]).name != 'copy_files.py' or len(args[1:]) % 2:
++        raise ValueError('invalid copy_files argument pairs')
++    pairs = list(zip(args[1::2], args[2::2]))
++    matches = [(Path(a).resolve(), Path(b).resolve()) for a, b in pairs
++               if Path(b).resolve() == assembly_dir / 'assembly_graph.fastg']
++    if len(matches) != 1:
++        raise ValueError('expected exactly one final FASTG copy')
++    source, target = matches[0]
++    match = re.fullmatch(r'K([0-9]+)', source.parent.name)
++    if (not match or source.parent.parent != assembly_dir or
++            source.name != 'assembly_graph.fastg'):
++        raise ValueError('final graph source is not this assembly K directory')
++    k = int(match.group(1))
++    config = source.parent / 'configs/config.info'
++    text = config.read_text()
++    config_k = re.findall(r'^K\s+(\d+)\s*$', text, re.M)
++    if config_k != [str(k)] or k <= 0 or k % 2 != 1:
++        raise ValueError('final iteration K/config mismatch')
++    if not re.search(r'^main_iteration\s+true\s*$', text, re.M):
++        raise ValueError('graph source is not the main iteration')
++    if graph.stat().st_size == 0 or not (digest(source) == digest(target) == digest(graph)):
++        raise ValueError('final graph/source/export bytes mismatch or empty graph')
++    log_text = log.read_text()
++    for marker in ['===== K%d finished.' % k, '===== Copy files finished.',
++                   '======= SPAdes pipeline finished.']:
++        if marker not in log_text:
++            raise ValueError('missing assembler completion marker: ' + marker)
++    return {'schema': 1, 'producer': 'spades', 'version': '4.1.0', 'max_k': k,
++            'graph_sha256': digest(graph), 'graph_file': graph.name,
++            'copy_source': str(source.relative_to(assembly_dir)),
++            'config_sha256': digest(config), 'log_sha256': digest(log)}
++
++
++def load_plan(path):
++    # Use the same bundled safe YAML reader as the declared SPAdes version.
++    binary = shutil.which('spades.py')
++    if not binary:
++        raise ValueError('spades.py is not available in this task environment')
++    sys.path.insert(0, str(Path(binary).resolve().parent))
++    import spades_init
++    spades_init.init()
++    if spades_init.spades_version != '4.1.0':
++        raise ValueError('unsupported SPAdes provenance version: ' + spades_init.spades_version)
++    sys.path.insert(0, spades_init.ext_python_modules_home)
++    import pyyaml3
++    with path.open() as stream:
++        plan = pyyaml3.safe_load(stream)
++    if not isinstance(plan, list) or not all(isinstance(s, dict) for s in plan):
++        raise ValueError('invalid SPAdes execution plan')
++    return plan
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--assembly-dir', type=Path, required=True)
++    parser.add_argument('--graph', type=Path, required=True)
++    parser.add_argument('--log', type=Path, required=True)
++    parser.add_argument('--out', type=Path, required=True)
++    args = parser.parse_args()
++    try:
++        plan_file = args.assembly_dir / 'run_spades.yaml'
++        result = collect(args.assembly_dir, args.graph, args.log, load_plan(plan_file))
++        result['plan_sha256'] = digest(plan_file)
++    except Exception as error:
++        print('SPAdes graph provenance violation: graph=%s: %s' %
++              (args.graph, error), file=sys.stderr)
++        return 2
++    args.out.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
++    return 0
++
++
++if __name__ == '__main__':
++    sys.exit(main())
+--- /dev/null
++++ b/bin/run_recycler_checked.py
+@@ -0,0 +1,72 @@
++#!/usr/bin/env python
++"""Run Recycler after input validation; report edge-free graphs explicitly.
++
++Recycler 0.7 crashes in percentile([]) after removing all isolated nodes.
++A graph with zero edges has no cycles. No tool exception is converted to zero.
++Python 2/3 compatible, executed in the fixed Recycler environment.
++"""
++from __future__ import print_function
++import argparse
++import json
++import os
++import runpy
++import sys
++from distutils.spawn import find_executable
++from recyclelib import utils
++from recyclelib.utils import get_fastg_digraph
++
++
++def configure_k_defaults(k):
++    # v0.7 CLI passes max_k explicitly to some calls but omits it from
++    # self-loop selection, output names and nested coverage calculations.
++    # Apply the same requested k to those omitted defaults. Explicit arguments
++    # still win. Refuse unexpected signatures rather than patching blindly.
++    expected = [('get_seq_from_path', (55, True)),
++                ('get_wgtd_path_coverage_CV', (55,)),
++                ('get_path_mean_std', (55,))]
++    for name, defaults in expected:
++        function = getattr(utils, name)
++        if function.__defaults__ != defaults:
++            raise ValueError('unsupported Recycler helper defaults: ' + name)
++    for name, defaults in expected:
++        getattr(utils, name).__defaults__ = (k,) + defaults[1:]
++    return [name for name, _ in expected]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--graph', required=True)
++    parser.add_argument('--bam', required=True)
++    parser.add_argument('--contract', required=True)
++    parser.add_argument('--out', required=True)
++    args = parser.parse_args()
++    with open(args.contract) as stream:
++        contract = json.load(stream)
++    graph = get_fastg_digraph(args.graph)
++    contract['graph_edges'] = graph.number_of_edges()
++    if graph.number_of_edges() == 0:
++        os.mkdir(args.out)
++        stem = os.path.splitext(os.path.basename(args.graph))[0]
++        for suffix in ['.cycs.fasta', '.cycs.paths_w_cov.txt']:
++            with open(os.path.join(args.out, stem + suffix), 'w'):
++                pass
++        contract['execution_state'] = 'skipped_no_graph_edges'
++        print('Recycler: no graph edges; no candidate cycles; reconstruction skipped')
++    else:
++        # A failing Recycler remains a failing task, including unexpected errors.
++        contract['max_k_default_adapter'] = configure_k_defaults(contract['max_k'])
++        executable = find_executable('recycle.py')
++        if executable is None:
++            raise ValueError('recycle.py is not available')
++        sys.argv = [executable, '-g', args.graph, '-k', str(contract['max_k']),
++                    '-b', args.bam, '-o', args.out]
++        runpy.run_path(executable, run_name='__main__')
++        contract['execution_state'] = 'recycler_completed'
++    with open(args.contract, 'w') as stream:
++        json.dump(contract, stream, indent=2, sort_keys=True)
++        stream.write('\n')
++    return 0
++
++
++if __name__ == '__main__':
++    sys.exit(main())
+--- a/tests/nextflow/abricate_selection.nf
++++ b/tests/nextflow/abricate_selection.nf
+@@ -5,5 +5,5 @@
+     ch_plasmids = params.empty_plasmids ? Channel.empty() : Channel.fromList(['S.2','S1'].collect { id ->
+         tuple([id:id],file("${root}/${id}.fasta",checkIfExists:true))
+     })
+-    PLASMID_DOWNSTREAM(ch_plasmids,Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty())
++    PLASMID_DOWNSTREAM(ch_plasmids,Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty())
+ }
+--- /dev/null
++++ b/tests/nextflow/recycler_native.nf
+@@ -0,0 +1,18 @@
++// Native contract regression using original SPADES/downstream/Recycler modules.
++// Small SPAdes bundled fixtures; not a biological performance benchmark.
++nextflow.enable.dsl = 2
++include { SPADES } from '../../modules/nf-core/spades/main'
++include { PLASMID_DOWNSTREAM } from '../../subworkflows/plasmid_downstream'
++
++workflow {
++    def root = file(params.fixture_dir)
++    ch_reads = Channel.fromList([
++        tuple([id:'K33'], file("${root}/test_dataset/ecoli_1K_1.fq.gz",checkIfExists:true),
++                         file("${root}/test_dataset/ecoli_1K_2.fq.gz",checkIfExists:true)),
++        tuple([id:'K55'], file("${root}/test_dataset_plasmid/pl1.fq.gz",checkIfExists:true),
++                         file("${root}/test_dataset_plasmid/pl2.fq.gz",checkIfExists:true))
++    ])
++    SPADES(ch_reads.map { meta, r1, r2 -> tuple(meta, [r1,r2], [], []) }, [], [])
++    PLASMID_DOWNSTREAM(Channel.empty(), SPADES.out.fastg, Channel.empty(),
++        Channel.empty(), ch_reads, SPADES.out.recycler_graph)
++}
+--- /dev/null
++++ b/tests/nextflow/recycler_contract.nf
+@@ -0,0 +1,22 @@
++// Controlled graph/metadata fixtures; native original preparation and consumer.
++nextflow.enable.dsl = 2
++include { RECYCLER_INPUTS } from '../../modules/binning/recycler_inputs'
++include { RECYCLER } from '../../modules/binning/recycler'
++workflow {
++    def root = file(params.fixture_dir)
++    def ids = params.ids.split(',') as List
++    if (params.direct_bam) {
++        RECYCLER(Channel.fromList(ids.collect { id -> tuple([id:id],
++            file("${root}/${id}.fastg",checkIfExists:true),
++            file("${root}/${id}.provenance.json",checkIfExists:true),
++            file("${root}/${id}.bam",checkIfExists:true),
++            file("${root}/${params.index_name ?: id + '.bam.bai'}",checkIfExists:true)) }))
++    } else {
++        RECYCLER_INPUTS(Channel.fromList(ids.collect { id -> tuple([id:id],
++            file("${root}/${id}.fastg",checkIfExists:true),
++            file("${root}/${id}.provenance.json",checkIfExists:true),
++            file("${root}/${id}_1.fq",checkIfExists:true),
++            file("${root}/${id}_2.fq",checkIfExists:true)) }))
++        RECYCLER(RECYCLER_INPUTS.out.bam)
++    }
++}
+--- a/tests/nf-test/workflows/recycler_real.nf
++++ b/tests/nf-test/workflows/recycler_real.nf
+@@ -1,39 +1,19 @@
+-// Real metaSPAdes assembly graph + real illumina BAM feeding RECYCLER.
+-// Data: pinned nf-core/test-datasets minigut assembly and illumina pair
+-// (AUTOPLASM_TEST_DATA). Scaffolding: SPADES (--meta, w2spades profile)
+-// builds the fastg graph; bowtie2 aligns the same reads to the real minigut
+-// assembly for a genuine BAM. RECYCLER now takes tuple(meta, graph, bam).
++// Same-run metaSPAdes FASTG/k provenance + original minigut Illumina pairs.
++// This fixture certifies the execution/input contract, not biological recall.
+ nextflow.enable.dsl = 2
+ 
+ include { MINIGUT_FASTG } from './spades_minigut_fastg'
++include { RECYCLER_INPUTS } from '../../../modules/binning/recycler_inputs'
+ include { RECYCLER } from '../../../modules/binning/recycler'
+-
+-process ALIGN_FOR_RECYCLER {
+-    label 'process_low'
+-    container 'community.wave.seqera.io/library/bowtie2_htslib_samtools_pigz:edeb13799090a2a6'
+-
+-    input:
+-    tuple val(meta), path(ref), path(r1), path(r2)
+-
+-    output:
+-    tuple val(meta), path("${meta.id}.bam"), emit: bam
+-
+-    script:
+-    """
+-    bowtie2-build --quiet ${ref} ref_idx
+-    bowtie2 --quiet -x ref_idx -1 ${r1} -2 ${r2} -p ${task.cpus} \\
+-        | samtools sort -@ ${task.cpus} -o ${meta.id}.bam
+-    samtools index ${meta.id}.bam
+-    """
+-}
+ 
+ workflow {
+     def root = params.test_data
+-    def assembly = file("${root}/minigut.fasta", checkIfExists: true)
+     def r1 = file("${root}/test_data/test_minigut_R1.fastq.gz", checkIfExists: true)
+     def r2 = file("${root}/test_data/test_minigut_R2.fastq.gz", checkIfExists: true)
+ 
+-    MINIGUT_FASTG(Channel.of([[id: 'minigut'], r1, r2]))
+-    ALIGN_FOR_RECYCLER(Channel.of([[id: 'minigut'], assembly, r1, r2]))
+-    RECYCLER(MINIGUT_FASTG.out.fastg.join(ALIGN_FOR_RECYCLER.out.bam))
++    ch_reads = Channel.of([[id: 'minigut'], r1, r2])
++    MINIGUT_FASTG(ch_reads)
++    RECYCLER_INPUTS(MINIGUT_FASTG.out.recycler_graph.join(ch_reads,
++        failOnDuplicate: true, failOnMismatch: true))
++    RECYCLER(RECYCLER_INPUTS.out.bam)
+ }
+--- a/tests/nf-test/workflows/spades_minigut_fastg.nf
++++ b/tests/nf-test/workflows/spades_minigut_fastg.nf
+@@ -16,5 +16,6 @@
+ 
+     emit:
+     fastg   = SPADES.out.fastg    // tuple(val(meta), path(fastg))
++    recycler_graph = SPADES.out.recycler_graph // tuple(meta, FASTG, actual-k provenance)
+     contigs = SPADES.out.contigs  // tuple(val(meta), path(fa.gz))
+ }
+--- a/tests/nf-test/nodes-binning-recycler.nf.test
++++ b/tests/nf-test/nodes-binning-recycler.nf.test
+@@ -1,9 +1,8 @@
+ // P3 real-data node test: RECYCLER (binning domain).
+ // Real metaSPAdes fastg graph of the minigut illumina pair (SPADES --meta
+-// via w2spades profile) + real bowtie2 BAM of the same reads against the
+-// real minigut assembly (scaffolding workflow). RECYCLER takes
+-// tuple(meta, graph, bam) since the wrong `-k contigs` argument was removed.
+-// Backend: podman (spades/recycler biocontainers, bowtie2_samtools wave image).
++// via w2spades profile) + graph-node BWA BAM/BAI of the same original pairs.
++// Graph SHA and actual k provenance must agree before reconstruction.
++// This fixture allows zero cycles and does not certify biological recall.
+ nextflow_pipeline {
+     name 'P3 real node: RECYCLER on a real metaSPAdes fastg graph and real illumina BAM'
+     script 'tests/nf-test/workflows/recycler_real.nf'
+@@ -23,11 +22,26 @@
+             assert workflow.trace.failed().isEmpty()
+             def tasks = workflow.trace.succeeded().collect { it.name }
+             assert tasks.any { it.startsWith('MINIGUT_FASTG:SPADES') }
+-            assert tasks.any { it.startsWith('ALIGN_FOR_RECYCLER') }
+-            assert tasks.any { it.startsWith('RECYCLER') }
+-            def outFiles = getAllFilesFromDir(params.outdir,
+-                include: ['05_plasmid_binning/recycler/minigut.recycler_out/**'])
+-            assert outFiles.size() >= 1
++            assert tasks.any { it.startsWith('RECYCLER_INPUTS:RECYCLER_REFERENCE') }
++            assert tasks.any { it.startsWith('RECYCLER_INPUTS:RECYCLER_ALIGN') }
++            assert tasks.any { it.startsWith('RECYCLER (') || it == 'RECYCLER' }
++            def base = new File(params.outdir, '05_plasmid_binning/recycler/minigut.recycler_out')
++            def contract = new groovy.json.JsonSlurper().parse(new File(base, 'input_contract.json'))
++            def provenance = new groovy.json.JsonSlurper().parse(new File(base, 'graph_provenance.json'))
++            assert contract.graph_references > 0
++            assert contract.max_k == provenance.max_k
++            assert contract.max_k > 0 && contract.max_k % 2 == 1
++            assert contract.sha256.graph == provenance.graph_sha256
++            assert contract.sha256.index ==~ /[0-9a-f]{64}/
++            def cycleName = provenance.graph_file.replaceAll(/\.fastg$/, '.cycs.fasta')
++            def pathsName = provenance.graph_file.replaceAll(/\.fastg$/, '.cycs.paths_w_cov.txt')
++            assert contract.execution_state in ['recycler_completed', 'skipped_no_graph_edges']
++            if (contract.execution_state == 'skipped_no_graph_edges') {
++                assert contract.graph_edges == 0
++                assert new File(base, cycleName).length() == 0
++            }
++            assert new File(base, cycleName).exists()
++            assert new File(base, pathsName).exists()
+         }
+     }
+ }
+--- a/tests/nf-test/validation.nf.test
++++ b/tests/nf-test/validation.nf.test
+@@ -99,6 +99,31 @@
+         }
+     }
+ 
++    [
++        ['Recycler with MEGAHIT', [platform:'illumina', short_read_assembler:'megahit']],
++        ['Recycler with OPERA-MS', [platform:'hybrid', hybrid_assembler:'opera_ms']],
++        ['Recycler with assembly input', [platform:'assembly']],
++        ['Recycler with ONT', [platform:'ont']],
++        ['Recycler with HiFi', [platform:'pacbio_hifi']]
++    ].each { caseName, overrides ->
++        test(caseName) {
++            when {
++                params {
++                    samplesheet = new File('tests/nf-test/fixtures/duplicate.tsv').absolutePath
++                    outdir = "$outputDir"
++                    plasmid_binning_tools = ['recycler']
++                    overrides.each { key, value -> delegate.setProperty(key, value) }
++                }
++            }
++            then {
++                assert workflow.failed
++                assert workflow.stderr.join('\n').contains('Recycler requires illumina with --short_read_assembler metaspades or hybrid with --hybrid_assembler hybridspades')
++                assert workflow.trace.succeeded().isEmpty()
++                assert workflow.trace.failed().isEmpty()
++            }
++        }
++    }
++
+     // Selection errors must win over later samplesheet/database guards.
+     [
+         ['unknown polishing_tools', [polishing_tools: ['__unknown_tool__']], "--polishing_tools has unknown tool '__unknown_tool__'"],
+--- a/tests/test_recycler_graph_reference.py
++++ b/tests/test_recycler_graph_reference.py
+@@ -4,18 +4,27 @@
+ import sys
+ import tempfile
+ import unittest
++import json
++import hashlib
+ 
+ SCRIPT = Path(__file__).resolve().parents[1] / 'bin/recycler_graph_reference.py'
+ 
+ 
+ class GraphReferenceTests(unittest.TestCase):
+-    def run_case(self, graph, expected=None, diagnostic=None):
++    def run_case(self, graph, expected=None, diagnostic=None, provenance=None):
+         with tempfile.TemporaryDirectory() as tmp:
+             source = Path(tmp) / 'graph.fastg'
+             output = Path(tmp) / 'nodes.fasta'
+             source.write_text(graph)
+-            result = subprocess.run([sys.executable, str(SCRIPT), '--graph', str(source),
+-                                     '--out', str(output)], capture_output=True, text=True)
++            command = [sys.executable, str(SCRIPT), '--graph', str(source), '--out', str(output)]
++            if provenance is not None:
++                record = {'schema': 1, 'producer': 'spades', 'version': '4.1.0',
++                          'max_k': 33, 'graph_sha256': hashlib.sha256(source.read_bytes()).hexdigest()}
++                record.update(provenance)
++                meta = Path(tmp) / 'provenance.json'
++                meta.write_text(json.dumps(record))
++                command += ['--provenance', str(meta)]
++            result = subprocess.run(command, capture_output=True, text=True)
+             if diagnostic:
+                 self.assertEqual(result.returncode, 2, result.stderr)
+                 self.assertIn(diagnostic, result.stderr)
+@@ -44,6 +53,23 @@
+     def test_empty_node_rejected_before_output(self):
+         self.run_case('>EDGE_1;\n', diagnostic='empty sequence')
+ 
++    def test_matching_provenance(self):
++        self.run_case('>EDGE_1;\nAACG\n', '>EDGE_1\nAACG\n', provenance={})
++
++    def test_wrong_graph_provenance(self):
++        self.run_case('>EDGE_1;\nAACG\n', diagnostic='SHA256 mismatch',
++                      provenance={'graph_sha256': '0' * 64})
++
++    def test_wrong_k_type_or_value(self):
++        for value in [True, 33.0, '33', 0, 32]:
++            with self.subTest(value=value):
++                self.run_case('>EDGE_1;\nAACG\n', diagnostic='invalid graph maximum k',
++                              provenance={'max_k': value})
++
++    def test_unreviewed_producer_version(self):
++        self.run_case('>EDGE_1;\nAACG\n', diagnostic='unsupported graph provenance',
++                      provenance={'version': 'unreviewed'})
++
+ 
+ if __name__ == '__main__':
+     unittest.main()
+--- /dev/null
++++ b/tests/test_spades_graph_provenance.py
+@@ -0,0 +1,79 @@
++"""Final-copy provenance expectations independent of a directory-name maximum."""
++from pathlib import Path
++import importlib.util
++import tempfile
++import unittest
++
++SCRIPT = Path(__file__).resolve().parents[1] / 'bin/spades_graph_provenance.py'
++spec = importlib.util.spec_from_file_location('spades_graph_provenance', SCRIPT)
++module = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(module)
++
++
++class ProvenanceTests(unittest.TestCase):
++    def setUp(self):
++        self.tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.tmp.cleanup)
++        self.root = Path(self.tmp.name)
++        self.source = self.root / 'K33/assembly_graph.fastg'
++        self.source.parent.mkdir()
++        self.source.write_text('>EDGE_1;\nACGT\n')
++        self.config = self.root / 'K33/configs/config.info'
++        self.config.parent.mkdir()
++        self.config.write_text('K 33\nmain_iteration true\n')
++        self.target = self.root / 'assembly_graph.fastg'
++        self.target.write_bytes(self.source.read_bytes())
++        self.export = self.root / 'sample.assembly_graph.fastg'
++        self.export.write_bytes(self.source.read_bytes())
++        self.log = self.root / 'spades.log'
++        self.log.write_text('===== K33 finished.\n===== Copy files finished.\n'
++                            '======= SPAdes pipeline finished.\n')
++        self.plan = [{'short_name': 'copy_files', 'args': [
++            '/spades/copy_files.py', str(self.source), str(self.target)]}]
++
++    def collect(self):
++        return module.collect(self.root, self.export, self.log, self.plan)
++
++    def test_actual_copy_ignores_unrelated_higher_directory(self):
++        (self.root / 'K127').mkdir()
++        self.assertEqual(self.collect()['max_k'], 33)
++        self.assertEqual(self.collect()['copy_source'], 'K33/assembly_graph.fastg')
++
++    def test_graph_mismatch_rejected(self):
++        self.export.write_text('>EDGE_1;\nTGCA\n')
++        with self.assertRaisesRegex(ValueError, 'bytes mismatch'):
++            self.collect()
++
++    def test_config_k_mismatch_rejected(self):
++        self.config.write_text('K 55\nmain_iteration true\n')
++        with self.assertRaisesRegex(ValueError, 'K/config mismatch'):
++            self.collect()
++
++    def test_non_main_iteration_rejected(self):
++        self.config.write_text('K 33\nmain_iteration false\n')
++        with self.assertRaisesRegex(ValueError, 'not the main iteration'):
++            self.collect()
++
++    def test_incomplete_assembly_rejected(self):
++        self.log.write_text('===== K33 finished.\n')
++        with self.assertRaisesRegex(ValueError, 'completion marker'):
++            self.collect()
++
++    def test_duplicate_copy_stage_rejected(self):
++        self.plan *= 2
++        with self.assertRaisesRegex(ValueError, 'one final copy_files'):
++            self.collect()
++
++    def test_foreign_source_rejected(self):
++        self.plan[0]['args'][1] = str(self.root / 'foreign/K33/assembly_graph.fastg')
++        with self.assertRaisesRegex(ValueError, 'not this assembly K directory'):
++            self.collect()
++
++    def test_duplicate_final_graph_copy_rejected(self):
++        self.plan[0]['args'] += [str(self.source), str(self.target)]
++        with self.assertRaisesRegex(ValueError, 'one final FASTG copy'):
++            self.collect()
++
++
++if __name__ == '__main__':
++    unittest.main()

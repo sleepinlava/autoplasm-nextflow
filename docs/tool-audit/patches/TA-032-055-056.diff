@@ -1,0 +1,629 @@
+--- a/README.md
++++ b/README.md
+@@ -289,8 +289,10 @@
+   同时选择多个分箱器必须在 `--mag_tools` 中显式加入 `das_tool`，否则入口报错；
+   选择 DAS Tool 时，汇总全部已选分箱器的可用结果并导出 FASTA。
+   CheckM2、GTDB-Tk 与序列宿主关联接收同一套最终 bins；质量/分类工具及 DAS Tool
+-  不能在没有分箱器时单独启用。CONCOCT 压缩输入、SemiBin 合法无 bins、GTDB-Tk
+-  文件扩展名等独立问题仍在审查中，尚不能把接线修复视为完整 MAG 链认证。
++  不能在没有分箱器时单独启用。CONCOCT 已适配 plain/gzip，并修正重叠切片的 BED
++  坐标步长；切片参数保持不变，空成员表不伪造 FASTA。旧默认重叠路径的覆盖度和
++  bins 可能受错误坐标影响，应在新目录重算。SemiBin 合法无 bins、GTDB-Tk 文件
++  扩展名等独立问题仍在审查中，完整 MAG 链尚未认证。
+ - 差异丰度"内部效应量法"为 Welch t 检验 + Hedges' g + BH 校正，默认按
+   `--min-prevalence 0.1` 过滤低流行度 contig；它不是 MaAsLin2 或 ANCOM-BC 的
+   实现，也未建模配对 / 批次。DESeq2 当前为 `~ group`。
+--- a/tests/nf-test/README.md
++++ b/tests/nf-test/README.md
+@@ -294,7 +294,8 @@
+ 
+ ```bash
+ python3 tests/run_mag_routing.py --work-dir <新目录> \
+-  --das-prefix <DAS_Tool1.1.7前缀> --bgzip-prefix <含bgzip的前缀>
++  --das-prefix <DAS_Tool1.1.7前缀> --bgzip-prefix <含bgzip的前缀> \
++  --concoct-prefix <CONCOCT1.1.0前缀>
+ ```
+ 
+ 这是原 MAG_HOST、真实 gzip/上游 FASTA 转表辅助程序、真实 R 宿主关联的接线验证。
+@@ -317,3 +318,31 @@
+ 测试阈值0.9，不改变生产默认。上游在此情形主动停止，测试必须确认失败传播、
+ 正确诊断和没有部分发布文件。可选 `--old-config` 用于保留前态无 FASTA 反例。
+ 这些入口不等于 nf-test 框架/镜像认证，也不验证分箱器、CheckM2、GTDB 模型或科学准确率。
++
++# CONCOCT 压缩输入、BED坐标与空提取（独立原生验证）
++
++使用固定CONCOCT1.1.0（生产py39构建）与setuptools70环境。输入文件见
++`tests/concoct-sample.lock.json`，需要其固定官方composition.fa；不会重生成期望DNA。
++
++```bash
++python3 tests/run_concoct_io.py --work-dir <新目录> \
++  --fixture <锁定的composition.fa> --prefix <CONCOCT1.1.0前缀>
++python3 tests/run_concoct_mag.py --work-dir <另一新目录> \
++  --fixture <锁定的composition.fa> --prefix <CONCOCT1.1.0前缀>
++```
++
++第一组17场景调用真实cut/extract helper及原包装器，检查plain/gzip/GZ、含空格路径、
++切片DNA不变、BED边界与原DNA逐条对应、非重叠/末段合并、空成员表、损坏gzip、
++未知contig、错表头及未审查source拒绝。失败诊断从实际任务stderr检查，避免只在
++Nextflow显示的命令文本里搜到关键字而误判。
++
++第二组在原MAG_HOST执行真实索引/切片/覆盖度/分箱/合并/提取六节点，每样本一次。
++两个样本使用相同固定真实DNA的plain/gzip版本和明确构造的合法映射BAM；使用生产
++默认参数，包括chunk1999、overlap1900、clusters400、seed1、iterations500。
++只修正原helper的BED坐标步长，不改切片策略。bin检查证明成员/原DNA一致与可复现，
++不证明生物学分箱准确率；BAM不是实际测序/比对效果基准。
++
++MAG路由入口现在需要`--concoct-prefix`，实际cut/merge/extract辅助脚本由该前缀提供，
++不使用fake cut helper绕过生产source校验；核心分箱器/质量/分类observer范围仍显式区分。
++新增empty-concoct检查验证空成员经真实merge/extract成功后，质量/分类不运行且原R
++关联输出为空。所有独立原生入口均非nf-test框架/镜像或五平台P4认证。
+--- /dev/null
++++ b/bin/run_concoct_cut_checked.py
+@@ -0,0 +1,42 @@
++#!/usr/bin/env python3
++"""Run reviewed CONCOCT1.1.0 cut helper with correct overlapping BED stride.
++
++The original source/CLI/sequence slicing stays unchanged. Only the BED
++coordinate expression is corrected to the actual chunk_size-overlap stride.
++Refuse an unreviewed executable rather than patching another implementation.
++"""
++import hashlib
++from pathlib import Path
++import shutil
++import sys
++
++SOURCE_BLOB = 'c4e7f4dbff1ca0ff763ac9d7feda28e8c10c11c3'
++ORIGINAL = 'chunk_size*i, chunk_size*i+len(split_seq)'
++CORRECTED = '(chunk_size-overlap)*i, (chunk_size-overlap)*i+len(split_seq)'
++
++
++def checked_source(path):
++    data = Path(path).read_bytes()
++    blob = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
++    if blob != SOURCE_BLOB:
++        raise ValueError('CONCOCT cut helper source differs from reviewed1.1.0: ' + blob)
++    source = data.decode('utf-8')
++    if source.count(ORIGINAL) != 1:
++        raise ValueError('Reviewed CONCOCT BED coordinate expression is not unique')
++    return source.replace(ORIGINAL, CORRECTED)
++
++
++def main():
++    executable = shutil.which('cut_up_fasta.py')
++    if executable is None:
++        raise ValueError('cut_up_fasta.py is not on PATH')
++    source = checked_source(executable)
++    sys.argv[0] = executable
++    exec(compile(source, executable, 'exec'), {'__name__': '__main__', '__file__': executable})
++
++
++if __name__ == '__main__':
++    try:
++        main()
++    except ValueError as error:
++        raise SystemExit('CONCOCT cut interface: ' + str(error))
+--- a/modules/nf-core/concoct/cutupfasta/main.nf
++++ b/modules/nf-core/concoct/cutupfasta/main.nf
+@@ -23,15 +23,25 @@
+     def args = task.ext.args ?: ''
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     def bedfile = bed ? "-b ${prefix}.bed" : ""
++    def compressed = fasta.name.toLowerCase().endsWith('.gz')
++    def input_fasta = compressed ? '.concoct_input/assembly.fna' : fasta
++    def checked_cut = file("${moduleDir}/../../../../bin/run_concoct_cut_checked.py").text
+     if ("${fasta}" == "${prefix}.fasta") {
+         error("Input and output names are the same, set prefix in module configuration to disambiguate!")
+     }
+     """
+-    cut_up_fasta.py \\
+-        ${fasta} \\
++    if ${compressed}; then
++        mkdir -p .concoct_input
++        gzip -cd -- ${fasta} > .concoct_input/assembly.fna
++    fi
++
++    python - \\
++        ${input_fasta} \\
+         ${args} \\
+         ${bedfile} \\
+-        > ${prefix}.fasta
++        > ${prefix}.fasta <<'CONCOCT_CUT_PY'
++${checked_cut}
++CONCOCT_CUT_PY
+ 
+     """
+ 
+--- a/modules/nf-core/concoct/extractfastabins/main.nf
++++ b/modules/nf-core/concoct/extractfastabins/main.nf
+@@ -11,7 +11,7 @@
+     tuple val(meta), path(original_fasta), path(csv)
+ 
+     output:
+-    tuple val(meta), path("${prefix}/*.fa.gz"), emit: fasta
++    tuple val(meta), path("${prefix}/*.fa.gz"), emit: fasta, optional: true
+     tuple val("${task.process}"), val('concoct'), eval("concoct --version 2>&1 | sed -n 's/concoct //p'"), topic: versions, emit: versions_concoct
+ 
+     when:
+@@ -20,16 +20,24 @@
+     script:
+     def args = task.ext.args ?: ''
+     prefix = task.ext.prefix ?: "${meta.id}"
++    def compressed = original_fasta.name.toLowerCase().endsWith('.gz')
++    def input_fasta = compressed ? '.concoct_input/assembly.fna' : original_fasta
+     """
+     mkdir ${prefix}
+ 
++    if ${compressed}; then
++        mkdir -p .concoct_input
++        gzip -cd -- ${original_fasta} > .concoct_input/assembly.fna
++    fi
++
+     extract_fasta_bins.py \\
+         ${args} \\
+-        ${original_fasta} \\
++        ${input_fasta} \\
+         ${csv} \\
+         --output_path ${prefix}
+ 
+     ## Add prefix to each file to disambiguate one sample's 1.fa, 2.fa from sample2
++    shopt -s nullglob
+     for i in ${prefix}/*.fa; do
+         mv \${i} \${i/\\///${prefix}_}
+         gzip \${i/\\///${prefix}_}
+--- a/tests/run_mag_routing.py
++++ b/tests/run_mag_routing.py
+@@ -32,7 +32,7 @@
+     return records
+ 
+ 
+-def run(base, das_prefix, bgzip_prefix, cases, mag_host=None):
++def run(base, das_prefix, bgzip_prefix, concoct_prefix, cases, mag_host=None):
+     fixtures = base / 'fixtures'
+     fixtures.mkdir()
+     records = []
+@@ -57,6 +57,11 @@
+         path = observer_bin / tool
+         shutil.copyfile(ROOT / 'tests/mag_interface_observer.py', path)
+         path.chmod(0o755)
++    # Fixed real CONCOCT I/O helpers, including the reviewed source for the
++    # production BED-stride adapter. No fake helper bypasses its source check.
++    for tool in ['cut_up_fasta.py', 'merge_cutup_clustering.py', 'extract_fasta_bins.py']:
++        shutil.copyfile(concoct_prefix / 'bin' / tool, observer_bin / tool)
++        (observer_bin / tool).chmod(0o755)
+     shutil.copyfile(das_prefix / 'bin/Fasta_to_Contig2Bin.sh', observer_bin / 'Fasta_to_Contig2Bin.sh')
+     (observer_bin / 'Fasta_to_Contig2Bin.sh').chmod(0o755)
+     selections = [('disabled', [], {}), ('metabat2', [' metabat2 '], {}), ('concoct', ['concoct'], {}), ('semibin', ['semibin'], {}), ('single-das', ['semibin', 'das_tool'], {})]
+@@ -65,6 +70,7 @@
+     selections += [('all', ['metabat2', 'concoct', 'semibin', 'das_tool'], {}),
+                    ('duplicate-selector', ['metabat2', 'metabat2'], {}),
+                    ('empty-metabat', ['metabat2'], {'MAG_EMPTY_METABAT': 'S1'}),
++                   ('empty-concoct', ['concoct'], {'MAG_EMPTY_CONCOCT': 'S1'}),
+                    ('empty-component', ['metabat2', 'semibin', 'das_tool'], {'MAG_EMPTY_METABAT': 'S1'}),
+                    ('tool-failure', ['semibin'], {'MAG_FAIL_SEMIBIN': '1'})]
+     workflow = ROOT / 'tests/nextflow/mag_selection.nf'
+@@ -91,7 +97,8 @@
+         command = [shutil.which('nextflow') or 'nextflow', '-C', str(config), 'run', str(workflow), '-params-file', str(p / 'params.json'), '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
+         env = os.environ.copy()
+         env.update(extra_env)
+-        env['PATH'] = str(observer_bin) + ':' + str(ROOT / 'bin') + ':' + str(bgzip_prefix / 'bin') + ':' + env['PATH']
++        env['MAG_NATIVE_PYTHON'] = str(concoct_prefix / 'bin/python')
++        env['PATH'] = str(observer_bin) + ':' + str(ROOT / 'bin') + ':' + str(concoct_prefix / 'bin') + ':' + str(bgzip_prefix / 'bin') + ':' + env['PATH']
+         # Avoid a dependency prefix's Rscript: linking is the installed native R.
+         rscript = observer_bin / 'Rscript'
+         rscript.write_text('#!/bin/sh\nexec /usr/bin/Rscript "$@"\n')
+@@ -108,6 +115,8 @@
+             if checks['success']:
+                 for sid, seqs in sequences.items():
+                     available = selected - ({'metabat2'} if sid in extra_env.get('MAG_EMPTY_METABAT', '').split(',') else set())
++                    if sid in extra_env.get('MAG_EMPTY_CONCOCT', '').split(','):
++                        available -= {'concoct'}
+                     expected_bins = {}
+                     if 'das_tool' in selected and available & {'metabat2', 'concoct', 'semibin'}:
+                         letters = set()
+@@ -138,7 +147,7 @@
+                         inputs = [json.loads(q.read_text()) for q in (p / 'work').rglob('observer-DAS-inputs.json') if json.loads(q.read_text())['sample'] == sid]
+                         checks[sid + '_all_available_binners'] = len(inputs) == bool(expected_bins) and (not inputs or set(inputs[0]['tables']) == {sid + '.' + b + '.tsv' for b in available & {'metabat2', 'concoct', 'semibin'}})
+                 consumer_count = sum('CHECKM2' in t['name'] or 'GTDBTK' in t['name'] for t in tasks)
+-                expected_count = 0 if not binners else (2 if name == 'empty-metabat' else 4)
++                expected_count = 0 if not binners else (2 if name in ['empty-metabat', 'empty-concoct'] else 4)
+                 checks['no_dropped_or_duplicate_consumer_tasks'] = consumer_count == expected_count
+         runs.append({'case': name, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
+         print(name, checks, flush=True)
+@@ -156,8 +165,9 @@
+     parser.add_argument('--work-dir', required=True, type=Path)
+     parser.add_argument('--das-prefix', required=True, type=Path)
+     parser.add_argument('--bgzip-prefix', required=True, type=Path)
++    parser.add_argument('--concoct-prefix', required=True, type=Path)
+     parser.add_argument('--cases', default='')
+     parser.add_argument('--mag-host', type=Path, help='Optional frozen original module, with include paths resolved')
+     args = parser.parse_args()
+     args.work_dir.mkdir(parents=True, exist_ok=True)
+-    raise SystemExit(0 if run(args.work_dir.resolve(), args.das_prefix.resolve(), args.bgzip_prefix.resolve(), args.cases.split(',') if args.cases else [], args.mag_host.resolve() if args.mag_host else None) else 1)
++    raise SystemExit(0 if run(args.work_dir.resolve(), args.das_prefix.resolve(), args.bgzip_prefix.resolve(), args.concoct_prefix.resolve(), args.cases.split(',') if args.cases else [], args.mag_host.resolve() if args.mag_host else None) else 1)
+--- a/tests/mag_interface_observer.py
++++ b/tests/mag_interface_observer.py
+@@ -12,6 +12,7 @@
+ from pathlib import Path
+ import sys
+ import time
++import re
+ 
+ tool = Path(sys.argv[0]).name
+ args = sys.argv[1:]
+@@ -79,19 +80,22 @@
+     Path(arg('-b')).write_text(json.dumps(seqs))
+     print(''.join('>' + k + '\n' + v + '\n' for k, v in seqs.items()), end='')
+ elif tool == 'concoct_coverage_table.py':
+-    seqs = json.loads(Path(args[0]).read_text())
+-    sid = next(iter(seqs)).rsplit('_', 1)[0]
++    rows = [line.split('\t') for line in Path(args[0]).read_text().splitlines()]
++    sid = rows[0][0].rsplit('_', 1)[0]
++    assert all(row[0].rsplit('_', 1)[0] == sid and 0 <= int(row[1]) < int(row[2]) for row in rows)
+     assert json.loads(Path(args[1]).read_text())['id'] == sid
+     assert Path(args[1] + '.bai').exists()
+     print(sid)
+ elif tool == 'concoct':
+     seqs = read_fasta(arg('--composition_file'))
+-    sid = next(iter(seqs)).rsplit('_', 1)[0]
++    originals = {cid: re.sub(r'\.concoct_part_\d+$', '', cid) for cid in seqs}
++    sid = next(iter(originals.values())).rsplit('_', 1)[0]
+     assert Path(arg('--coverage_file')).read_text().strip() == sid
+     prefix = arg('-b')
+     for suffix in ['_args.txt', '_log.txt', '_original_data_gt1000.csv', '_PCA_components_data_gt1000.csv', '_PCA_transformed_data_gt1000.csv']:
+         Path(prefix + suffix).write_text('INTERFACE_OBSERVER\n')
+-    Path(prefix + '_clustering_gt1000.csv').write_text('contig_id,cluster_id\n' + sid + '_B,1\n' + sid + '_C,2\n')
++    rows = '' if sid in os.environ.get('MAG_EMPTY_CONCOCT', '').split(',') else ''.join(cid + ',' + ('1' if original.endswith('_B') else '2') + '\n' for cid, original in originals.items() if original.endswith(('_B', '_C')))
++    Path(prefix + '_clustering_gt1000.csv').write_text('contig_id,cluster_id\n' + rows)
+ elif tool == 'merge_cutup_clustering.py':
+     print(Path(args[-1]).read_text(), end='')
+ elif tool == 'extract_fasta_bins.py':
+@@ -143,7 +147,10 @@
+         (out / name).write_text('INTERFACE_OBSERVER_ONLY\n')
+ elif tool == 'python':
+     # Only the SemiBin CUDA version eval; no real torch/model execution.
+-    assert args == ['-c', "import torch; print(torch.version.cuda or 'no CUDA available')"]
+-    print('INTERFACE_OBSERVER_NO_CUDA')
++    if args == ['-c', "import torch; print(torch.version.cuda or 'no CUDA available')"]:
++        print('INTERFACE_OBSERVER_NO_CUDA')
++    else:
++        executable = os.environ['MAG_NATIVE_PYTHON']
++        os.execv(executable, [executable] + args)
+ else:
+     raise SystemExit('Unsupported MAG observer: ' + tool)
+--- /dev/null
++++ b/tests/nextflow/concoct_io.nf
+@@ -0,0 +1,21 @@
++nextflow.enable.dsl=2
++
++include { CONCOCT_CUTUPFASTA } from '../../modules/nf-core/concoct/cutupfasta/main'
++include { CONCOCT_EXTRACTFASTABINS as CONCOCT } from '../../modules/nf-core/concoct/extractfastabins/main'
++
++workflow {
++    if (params.mode == 'cut') {
++        inputs = Channel.fromList(params.records).map { row ->
++            tuple([id: row.id], file(row.fasta, checkIfExists: true))
++        }
++        CONCOCT_CUTUPFASTA(inputs, params.bed)
++    } else if (params.mode == 'extract') {
++        inputs = Channel.fromList(params.records).map { row ->
++            tuple([id: row.id], file(row.fasta, checkIfExists: true), file(row.csv, checkIfExists: true))
++        }
++        CONCOCT(inputs)
++        CONCOCT.out.fasta.view { meta, bins -> "EXTRACTED_BINS=${meta.id}:${bins}" }
++    } else {
++        error('Unknown CONCOCT I/O test mode')
++    }
++}
+--- /dev/null
++++ b/tests/nextflow/concoct_mag.nf
+@@ -0,0 +1,14 @@
++nextflow.enable.dsl=2
++
++include { MAG_HOST } from '../../subworkflows/mag_host'
++
++workflow {
++    assemblies = Channel.fromList(params.records).map { row ->
++        tuple([id: row.id, group: row.group], file(row.fasta, checkIfExists: true))
++    }
++    bams = Channel.fromList(params.records.reverse()).map { row ->
++        tuple([id: row.id, group: row.group], file(row.bam, checkIfExists: true))
++    }
++    MAG_HOST(assemblies, bams, Channel.empty())
++    MAG_HOST.out.mag_bins.view { meta, bins -> "FINAL_BINS=${meta.id}:${meta.group}:${bins}" }
++}
+--- /dev/null
++++ b/tests/run_concoct_io.py
+@@ -0,0 +1,169 @@
++#!/usr/bin/env python3
++"""Native fixed CONCOCT helpers in actual wrappers; independent DNA/BED checks.
++
++The official composition fixture is fixed by Git blob. Controlled membership
++is a file-format oracle, not a claimed biological clustering truth.
++"""
++import argparse
++import csv
++import gzip
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import random
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++COMPOSITION_BLOB = '47a32497a05a4a64bdcb0d6ceaa2f2c40b71e7ee'
++
++
++def fasta(path):
++    sequences = {}
++    with (gzip.open(path, 'rt') if path.suffix.lower() == '.gz' else path.open()) as stream:
++        for line in stream:
++            if line.startswith('>'):
++                cid = line[1:].split()[0]
++                assert cid not in sequences
++                sequences[cid] = ''
++            else:
++                sequences[cid] += line.strip()
++    return sequences
++
++
++def run(base, fixture, prefix, old_dir, cases):
++    data = fixture.read_bytes()
++    assert hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() == COMPOSITION_BLOB
++    original = fasta(fixture)
++    f = base / 'fixtures'
++    f.mkdir()
++    plain = f / 'assembly sample.fna'
++    shutil.copyfile(fixture, plain)
++    for name in ['assembly sample.fna.gz', 'assembly sample.fna.GZ']:
++        with gzip.open(f / name, 'wb') as stream:
++            stream.write(data)
++    compressed = f / 'assembly sample.fna.gz'
++    upper = f / 'assembly sample.fna.GZ'
++    broken = f / 'corrupt.fna.gz'
++    broken.write_bytes(b'\x1f\x8bEXPLICITLY_CORRUPT_GZIP')
++    membership = f / 'membership.csv'
++    ids = list(original)
++    # Deliberately two bins and omitted contigs. The oracle is specified before
++    # calling the extractor, and verifies IDs/DNA instead of snapshot names.
++    assigned = {cid: str(index % 2) for index, cid in enumerate(ids[:7])}
++    membership.write_text('contig_id,cluster_id\n' + ''.join(cid + ',' + bid + '\n' for cid, bid in assigned.items()))
++    empty = f / 'empty.csv'
++    empty.write_text('contig_id,cluster_id\n')
++    bad = f / 'unknown.csv'
++    bad.write_text('contig_id,cluster_id\n__unknown_contig__,0\n')
++    wrong = f / 'bad-header.csv'
++    wrong.write_text('wrong,header\n' + ids[0] + ',0\n')
++    rng = random.Random(1320)
++    controlled = f / 'controlled.fna'
++    controlled.write_text('>known\n' + ''.join(rng.choices('ACGT', k=2400)) + '\n')
++    all_files = list(f.iterdir())
++    initial_hashes = {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in all_files}
++    workflow = ROOT / 'tests/nextflow/concoct_io.nf'
++    foreign_bin = base / 'foreign-source-bin'
++    foreign_bin.mkdir()
++    foreign = foreign_bin / 'cut_up_fasta.py'
++    foreign.write_text("#!/usr/bin/env python\nraise SystemExit('UNREVIEWED_SOURCE_EXECUTED')\n")
++    foreign.chmod(0o755)
++    if old_dir:
++        workflow = base / 'old-probe.nf'
++        text = (ROOT / 'tests/nextflow/concoct_io.nf').read_text()
++        for part in ['cutupfasta', 'extractfastabins']:
++            text = text.replace("'../../modules/nf-core/concoct/" + part + "/main'", repr(str(old_dir / part / 'main')))
++        workflow.write_text(text)
++    definitions = [
++        ('cut-real-plain', 'cut', plain, None, '', True, None),
++        ('cut-real-gzip', 'cut', compressed, None, '', True, None),
++        ('cut-real-upper', 'cut', upper, None, '', True, None),
++        ('cut-default-overlap', 'cut', controlled, None, '', True, None),
++        ('cut-nonoverlap-merge', 'cut', controlled, None, '-c 500 -o 0 --merge_last', True, None),
++        ('cut-no-bed', 'cut', controlled, None, '', False, None),
++        ('cut-corrupt-gzip', 'cut', broken, None, '', True, 'gzip'),
++        ('cut-invalid-step', 'cut', controlled, None, '-c 100 -o 100', True, 'AssertionError'),
++        ('cut-source-mismatch', 'cut', controlled, None, '', True, 'source differs from reviewed1.1.0'),
++        ('extract-real-plain', 'extract', plain, membership, '', False, None),
++        ('extract-real-gzip', 'extract', compressed, membership, '', False, None),
++        ('extract-real-upper', 'extract', upper, membership, '', False, None),
++        ('extract-empty-plain', 'extract', plain, empty, '', False, None),
++        ('extract-empty-gzip', 'extract', compressed, empty, '', False, None),
++        ('extract-unknown', 'extract', compressed, bad, '', False, 'KeyError'),
++        ('extract-bad-header', 'extract', plain, wrong, '', False, "Header line was not"),
++        ('extract-corrupt-gzip', 'extract', broken, membership, '', False, 'gzip')
++    ]
++    runs = []
++    for name, mode, assembly, table, args, bed, error in definitions:
++        if cases and name not in cases:
++            continue
++        p = base / name
++        p.mkdir()
++        config = p / 'config'
++        config.write_text("includeConfig '" + str(ROOT / 'conf/nfcore_mag.config') + "'\n"
++                          "params.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=1\n"
++                          "process.memory='512 MB'\nprocess.maxForks=1\nconda.enabled=false\n"
++                          "docker.enabled=false\nsingularity.enabled=false\n"
++                          "process { withName: 'CONCOCT_CUTUPFASTA' { ext.args='" + args + "' } }\n")
++        params = {'mode': mode, 'bed': bed, 'records': [{'id': 'sample', 'fasta': str(assembly), 'csv': str(table) if table else None}], 'outdir': str(p / 'out')}
++        (p / 'params.json').write_text(json.dumps(params))
++        command = [str(ROOT / 'results/tool-audit/runtime/bin/nextflow'), '-C', str(config), 'run', str(workflow), '-params-file', str(p / 'params.json'), '-work-dir', str(p / 'work'), '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
++        env = os.environ.copy()
++        env['PATH'] = str(prefix / 'bin') + ':' + env['PATH']
++        if name == 'cut-source-mismatch':
++            env['PATH'] = str(foreign_bin) + ':' + env['PATH']
++        result = subprocess.run(command, env=env, capture_output=True, text=True)
++        (p / 'stdout.log').write_text(result.stdout)
++        (p / 'stderr.log').write_text(result.stderr)
++        tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []
++        checks = {}
++        out = p / 'out/07_host_prediction/mag/concoct'
++        if error:
++            task_errors = '\n'.join(q.read_text() for q in (p / 'work').rglob('.command.err'))
++            checks = {'failed': result.returncode != 0, 'diagnostic_from_task_stderr': ('gzip:' if error == 'gzip' else error) in task_errors, 'one_failed_task': len(tasks) == 1 and tasks[0]['status'] == 'FAILED', 'no_partial_published_files': not [q for q in out.rglob('*') if q.is_file()]}
++        else:
++            checks = {'success': result.returncode == 0, 'one_completed_task': len(tasks) == 1 and tasks[0]['status'] == 'COMPLETED'}
++            if checks['success'] and mode == 'cut':
++                parts = fasta(out / 'cutup_fasta/sample.fasta')
++                source = fasta(assembly)
++                bed_path = out / 'cutup_fasta/sample.bed'
++                checks['bed_presence'] = bed_path.exists() == bed
++                # Actual upstream legacy helper is the unchanged-DNA control.
++                baseline = subprocess.run([str(prefix / 'bin/cut_up_fasta.py'), str(plain if assembly in [plain, compressed, upper] else assembly)] + args.split(), env=env, capture_output=True, text=True)
++                assert baseline.returncode == 0
++                checks['sliced_DNA_unchanged'] = (out / 'cutup_fasta/sample.fasta').read_text() == baseline.stdout
++                if bed:
++                    rows = list(csv.reader(bed_path.open(), delimiter='\t'))
++                    checks['one_interval_per_part'] = len(rows) == len(parts) and {r[3] for r in rows} == set(parts)
++                    checks['BED_bounds_and_exact_DNA'] = all(r[0] in source and 0 <= int(r[1]) < int(r[2]) <= len(source[r[0]]) and source[r[0]][int(r[1]):int(r[2])] == parts[r[3]] for r in rows)
++                    if name == 'cut-default-overlap':
++                        checks['known_stride_99_and_last_boundary'] = len(rows) == 25 and rows[1][1:3] == ['99', '2098'] and rows[-1][1:3] == ['2376', '2400']
++                    elif name == 'cut-nonoverlap-merge':
++                        checks['independent_500bp_nonoverlap_merge'] = [(int(r[1]), int(r[2])) for r in rows] == [(0, 500), (500, 1000), (1000, 1500), (1500, 2400)]
++            elif checks['success']:
++                bins = list((out / 'bins').rglob('*.fa.gz'))
++                expected = {} if 'empty' in name else {'sample_' + bid + '.fa.gz': {cid: original[cid] for cid, cluster in assigned.items() if cluster == bid} for bid in ['0', '1']}
++                checks['exact_expected_bins_IDs_DNA'] = {q.name: fasta(q) for q in bins} == expected
++                checks['no_fake_empty_FASTA'] = bool('EXTRACTED_BINS=' in result.stdout) == bool(expected)
++        checks['all_inputs_unchanged'] = initial_hashes == {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in all_files}
++        runs.append({'case': name, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
++        print(name, checks, flush=True)
++        sources = ['bin/run_concoct_cut_checked.py', 'modules/nf-core/concoct/cutupfasta/main.nf', 'modules/nf-core/concoct/extractfastabins/main.nf', 'tests/nextflow/concoct_io.nf', 'tests/run_concoct_io.py']
++        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in sources}, 'module_override': str(old_dir) if old_dir else None, 'limitations': ['actual native CONCOCT1.1.0 helpers in original/fixed wrappers; exact upstream source checked', 'official real DNA plus explicitly controlled membership/negative inputs; not clustering accuracy or native full MAG/image/nf-test framework certification', 'BED checked directly against original DNA; actual legacy helper checks unchanged sliced DNA; no altered scoring/cut defaults']}
++        (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    return receipt['pass']
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True, type=Path)
++    parser.add_argument('--fixture', required=True, type=Path)
++    parser.add_argument('--prefix', required=True, type=Path)
++    parser.add_argument('--old-dir', type=Path)
++    parser.add_argument('--cases', default='')
++    args = parser.parse_args()
++    args.work_dir.mkdir(parents=True, exist_ok=True)
++    raise SystemExit(0 if run(args.work_dir.resolve(), args.fixture.resolve(), args.prefix.resolve(), args.old_dir.resolve() if args.old_dir else None, args.cases.split(',') if args.cases else []) else 1)
+--- /dev/null
++++ b/tests/run_concoct_mag.py
+@@ -0,0 +1,95 @@
++#!/usr/bin/env python3
++"""Native complete CONCOCT MAG branch on fixed real DNA and controlled BAM.
++
++The BAM is a deliberately constructed valid mapped-fragment fixture, not an
++aligner performance test or wet-lab input. All binning/coverage helpers are
++real1.1.0, and the production cut/clustering defaults are unchanged.
++"""
++import argparse
++import csv
++import gzip
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++
++from run_concoct_io import COMPOSITION_BLOB, ROOT, fasta
++
++
++def run(base, fixture, prefix):
++    data = fixture.read_bytes()
++    assert hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() == COMPOSITION_BLOB
++    original = fasta(fixture)
++    env = os.environ.copy()
++    env['PATH'] = str(prefix / 'bin') + ':' + env['PATH']
++    inputs = base / 'fixtures'
++    inputs.mkdir()
++    plain = inputs / 'official composition.fna'
++    plain.write_bytes(data)
++    compressed = inputs / 'official composition.fna.gz'
++    with gzip.open(compressed, 'wb') as stream:
++        stream.write(data)
++    sam = inputs / 'controlled.sam'
++    with sam.open('w') as stream:
++        stream.write('@HD\tVN:1.6\tSO:unsorted\n')
++        for cid, dna in original.items():
++            stream.write('@SQ\tSN:' + cid + '\tLN:' + str(len(dna)) + '\n')
++        for index, (cid, dna) in enumerate(original.items()):
++            for start in range(0, len(dna) - 99, 200):
++                for repeat in range(1 + index % 4):
++                    stream.write('\t'.join([cid + '_' + str(start) + '_' + str(repeat), '0', cid, str(start + 1), '60', '100M', '*', '0', '0', dna[start:start + 100], 'I' * 100]) + '\n')
++    bam = inputs / 'controlled.bam'
++    command = [str(prefix / 'bin/samtools'), 'sort', '-O', 'BAM', '-o', str(bam), str(sam)]
++    result = subprocess.run(command, env=env, capture_output=True, text=True)
++    (base / 'prepare-bam.stderr.log').write_text(result.stderr)
++    assert result.returncode == 0
++    inputs_sha = {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in inputs.iterdir()}
++    config = base / 'config'
++    config.write_text("includeConfig '" + str(ROOT / 'conf/nfcore_mag.config') + "'\n"
++                      "params.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=1\n"
++                      "process.memory='2 GB'\nprocess.maxForks=1\nconda.enabled=false\n"
++                      "docker.enabled=false\nsingularity.enabled=false\n")
++    records = [{'id': sid, 'group': group, 'fasta': str(assembly), 'bam': str(bam)} for sid, group, assembly in [('S1', 'G1', plain), ('S.2', 'G2', compressed)]]
++    params = {'records': records, 'mag_tools': ['concoct'], 'outdir': str(base / 'out')}
++    (base / 'params.json').write_text(json.dumps(params))
++    command = [str(ROOT / 'results/tool-audit/runtime/bin/nextflow'), '-C', str(config), 'run', str(ROOT / 'tests/nextflow/concoct_mag.nf'), '-params-file', str(base / 'params.json'), '-work-dir', str(base / 'work'), '-with-trace', str(base / 'trace.tsv'), '-ansi-log', 'false']
++    result = subprocess.run(command, env=env, capture_output=True, text=True)
++    (base / 'stdout.log').write_text(result.stdout)
++    (base / 'stderr.log').write_text(result.stderr)
++    tasks = list(csv.DictReader((base / 'trace.tsv').open(), delimiter='\t')) if (base / 'trace.tsv').exists() else []
++    expected_nodes = ['SAMTOOLS_INDEX', 'CONCOCT_CUTUPFASTA', 'CONCOCT_CONCOCTCOVERAGETABLE', 'CONCOCT_CONCOCT', 'CONCOCT_MERGECUTUPCLUSTERING', 'CONCOCT']
++    checks = {'success': result.returncode == 0, 'twelve_native_completed_tasks': len(tasks) == 12 and all(t['status'] == 'COMPLETED' and t['exit'] == '0' for t in tasks), 'each_native_node_once_per_sample': all(sum(t['name'].split(':')[-1].split(' (')[0] == name for t in tasks) == 2 for name in expected_nodes), 'all_inputs_unchanged': inputs_sha == {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in inputs.iterdir()}}
++    if checks['success']:
++        out = base / 'out/07_host_prediction/mag/concoct'
++        all_bins = {}
++        for sid, group in [('S1', 'G1'), ('S.2', 'G2')]:
++            checks[sid + '_one_meta_tuple'] = result.stdout.count('FINAL_BINS=' + sid + ':' + group + ':') == 1
++            merged = list(csv.DictReader((out / (sid + '.csv')).open()))
++            expected = {}
++            for row in merged:
++                expected.setdefault(sid + '_' + row['cluster_id'] + '.fa.gz', {})[row['contig_id']] = original[row['contig_id']]
++            bins = {q.name: fasta(q) for q in (out / 'bins' / sid).glob('*.fa.gz')}
++            checks[sid + '_nonempty_final_bins'] = bool(bins)
++            checks[sid + '_all_bin_IDs_DNA_equal_membership_and_original'] = bins == expected
++            checks[sid + '_no_contig_duplicated_across_bins'] = len([cid for members in bins.values() for cid in members]) == len({cid for members in bins.values() for cid in members})
++            parts = fasta(out / 'cutup_fasta' / (sid + '.fasta'))
++            rows = list(csv.reader((out / 'cutup_fasta' / (sid + '.bed')).open(), delimiter='\t'))
++            checks[sid + '_coverage_BED_maps_exact_part_DNA'] = len(rows) == len(parts) and all(0 <= int(row[1]) < int(row[2]) <= len(original[row[0]]) and original[row[0]][int(row[1]):int(row[2])] == parts[row[3]] for row in rows)
++            all_bins[sid] = {frozenset(members) for members in bins.values()}
++        checks['plain_gzip_same_cluster_memberships'] = all_bins['S1'] == all_bins['S.2']
++    sources = ['bin/run_concoct_cut_checked.py', 'modules/nf-core/concoct/cutupfasta/main.nf', 'modules/nf-core/concoct/extractfastabins/main.nf', 'subworkflows/mag_host.nf', 'tests/nextflow/concoct_mag.nf', 'tests/run_concoct_mag.py']
++    receipt = {'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks, 'pass': all(checks.values()), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in sources}, 'limitations': ['actual native SAMtools1.24 and CONCOCT1.1.0 full original MAG branch; same real official DNA in plain/gzip; explicitly controlled valid BAM', 'cluster membership checks format/reference consistency and reproducibility, not independent biological binning accuracy', 'no quality/taxonomy/database, image/nf-test framework or complete platform/P4 certification']}
++    (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    print(checks, flush=True)
++    return receipt['pass']
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', required=True, type=Path)
++    parser.add_argument('--fixture', required=True, type=Path)
++    parser.add_argument('--prefix', required=True, type=Path)
++    args = parser.parse_args()
++    args.work_dir.mkdir(parents=True, exist_ok=True)
++    raise SystemExit(0 if run(args.work_dir.resolve(), args.fixture.resolve(), args.prefix.resolve()) else 1)
+--- /dev/null
++++ b/tests/concoct-sample.lock.json
+@@ -0,0 +1,23 @@
++{
++  "repository": "BinPro/CONCOCT",
++  "ref": "1.1.0",
++  "files": [
++    {
++      "name": "composition.fa",
++      "url": "https://raw.githubusercontent.com/BinPro/CONCOCT/1.1.0/tests/test_data/composition.fa",
++      "git_blob": "47a32497a05a4a64bdcb0d6ceaa2f2c40b71e7ee",
++      "sha256": "f0f2826334f4f055cfc2cc6b3899776ed30255825fe9c3d0514ab73af8539b2f",
++      "size": 1053769
++    },
++    {
++      "name": "coverage",
++      "url": "https://raw.githubusercontent.com/BinPro/CONCOCT/1.1.0/tests/test_data/coverage",
++      "git_blob": "6966af6e3e933b26d6bc55950953767650cc0d10",
++      "sha256": "cda1a0875537380043ca6bc5cfb72eee5fe358ca8ca76d8c5eaed5d24e06c087",
++      "size": 78716
++    }
++  ],
++  "limitations": [
++    "real official DNA/coverage fixture; native MAG tests construct controlled valid BAM and do not claim independent biological binning accuracy"
++  ]
++}
