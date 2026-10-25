@@ -1,4 +1,5 @@
 process RGI_MAIN {
+    cache 'deep'
     tag "${meta.id}"
     label 'process_medium'
 
@@ -11,6 +12,8 @@ process RGI_MAIN {
     tuple val(meta), path(fasta)
     path card
     path wildcard
+    // Explicit regular files: helper changes participate in deep caching.
+    path(autoplasm_helper_0, stageAs: 'validate_rgi_card.py')
 
     output:
     tuple val(meta), path("${prefix}.json"), emit: json
@@ -32,6 +35,7 @@ process RGI_MAIN {
     // This customizes the command: rgi main
     prefix = task.ext.prefix ?: "${meta.id}"
     def load_wildcard = ""
+    // Local patch: load/main use one task-local CARD; version comes from JSON.
 
     if (wildcard) {
         load_wildcard = """ \\
@@ -46,7 +50,8 @@ process RGI_MAIN {
 
     """
     export MPLCONFIGDIR=\$PWD
-    DB_VERSION=\$(ls ${card}/card_database_*_all.fasta | sed "s/${card}\\/card_database_v\\([0-9].*[0-9]\\).*/\\1/")
+    DB_VERSION=\$(python3 validate_rgi_card.py --card ${card}
+    )
 
     rgi \\
         load \\
@@ -57,9 +62,12 @@ process RGI_MAIN {
         --card_annotation_all_models ${card}/card_database_v\$DB_VERSION\\_all.fasta \\
         ${load_wildcard}
 
+    python3 validate_rgi_card.py --card ${card} --loaded localDB
+
     rgi \\
         main \\
         ${args2} \\
+        --local \\
         --threads ${task.cpus} \\
         --output_file ${prefix} \\
         --input_sequence ${fasta}

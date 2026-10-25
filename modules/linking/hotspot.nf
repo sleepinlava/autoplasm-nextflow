@@ -1,5 +1,5 @@
 /*
- * HOTSPOT Transformer host prediction (optional high-confidence host-linking
+ * HOTSPOT Transformer host prediction (optional host-linking
  * module; Ji et al. 2023, Bioinformatics 39(5):btad283;
  * https://github.com/Orin-beep/HOTSPOT). HOTSPOT is not packaged for
  * bioconda, so this module expects a cloned HOTSPOT repository
@@ -11,48 +11,33 @@
 process LINK_HOTSPOT {
     tag "${meta.id}"
     label 'process_medium'
-    conda "${projectDir}/envs/hotspot.yml"
+    cache 'deep'
+    conda "${moduleDir}/../../envs/hotspot-linux-64.lock"
 
     publishDir "${params.outdir}/07_host_prediction/linking/hotspot", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(plasmid_contigs)
+    tuple val(meta), path(plasmid_contigs, stageAs: 'plasmid_input.fasta')
+    path hotspot_program, stageAs: 'hotspot_program/*'
+    path hotspot_database, stageAs: 'hotspot_database/*'
+    tuple path(hotspot_models, stageAs: 'hotspot_models'), path(hotspot_model_dependencies, stageAs: 'hotspot_model_dependencies/*')
+    // Explicit regular files: helper changes participate in deep caching.
+    tuple path(autoplasm_helper_0, stageAs: 'convert_hotspot_lineage.py'), path(autoplasm_helper_1, stageAs: 'hotspot_runtime.py')
 
     output:
     tuple val(meta), path("${meta.id}.hotspot_links.tsv"), emit: links
     tuple val(meta), path("${meta.id}.host_lineage.tsv"), emit: lineage
+    tuple val(meta), path("${meta.id}.hotspot_conversion.json"), emit: conversion
+    tuple val(meta), path("${meta.id}.hotspot_runtime.json"), emit: runtime
 
     script:
     """
-    python3 ${params.hotspot_home}/preprocessing.py \\
-        --fasta ${plasmid_contigs} \\
-        --database ${params.hotspot_db} \\
-        --model_path ${params.hotspot_models} \\
-        --midfolder hotspot_tmp \\
-        --threads ${task.cpus}
-    python3 ${params.hotspot_home}/hotspot.py \\
-        --model_path ${params.hotspot_models} \\
-        --midfolder hotspot_tmp \\
-        --out hotspot_results \\
-        --device cpu \\
-        --threads ${task.cpus}
-    awk 'BEGIN { FS = OFS = "\\t" }
-         NR == 1 {
-           print "plasmid_id", "host_id", "sample_id", "evidence_type", "score", "supporting_data"
-           next
-         }
-         {
-           host = ""; lineage = ""
-           for (i = 2; i <= 7; i++) {
-             if (\$i != "-" && \$i != "")
-               lineage = (lineage == "" ? \$i : lineage ">" \$i)
-           }
-           for (i = 7; i >= 2; i--) {
-             if (\$i != "-" && \$i != "") { host = \$i; break }
-           }
-           if (host != "")
-             print \$1, host, "${meta.id}", "hotspot", "", "method=hotspot;lineage=" lineage
-         }' hotspot_results/host_lineage.tsv > ${meta.id}.hotspot_links.tsv
+    python3 hotspot_runtime.py --source-dir hotspot_program --database hotspot_database --models hotspot_models \\
+        --fasta "${plasmid_contigs}" --threads ${task.cpus} \\
+        --runtime-record "${meta.id}.hotspot_runtime.json"
+    python3 convert_hotspot_lineage.py --lineage hotspot_results/host_lineage.tsv --sample-id "${meta.id}" \\
+        --fasta "${plasmid_contigs}" --output "${meta.id}.hotspot_links.tsv" \\
+        --manifest "${meta.id}.hotspot_conversion.json"
     cp hotspot_results/host_lineage.tsv ${meta.id}.host_lineage.tsv
     """
 }

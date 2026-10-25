@@ -1,18 +1,21 @@
 name: autoplasm-hotspot
 channels:
+  - pytorch
   - conda-forge
   - bioconda
-  - pytorch
 dependencies:
-  - python>=3.10
-  - pytorch>=1.8
+  # Fixed official dependency releases, using the same PyTorch release's CPU build.
+  # Full Linux64 archive identities: hotspot-linux-64.lock.
+  - python=3.10.14
+  - pytorch::pytorch=1.12.1=py3.10_cpu_0
   - cpuonly
-  - numpy
-  - pandas
-  - biopython
-  - bidict
-  - treelib
-  - diamond
-  - prodigal
-  - blast=2.13
-  - hmmer
+  - numpy=1.21.6
+  - pandas=1.3.5
+  - biopython=1.81
+  - bidict=0.22.1
+  - treelib=1.6.1
+  - diamond=2.1.4
+  - prodigal=2.6.3
+  - blast=2.13.0
+  - hmmer=3.3.2
+  - mkl=2021.4.0
