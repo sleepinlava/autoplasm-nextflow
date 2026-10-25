@@ -40,6 +40,9 @@ process MINIMAP2_ALIGN {
     def query = bam_input ? "-" : reads
     def target = reference ?: (bam_input ? error("Error: minimap2/align BAM input mode requires reference") : reads)
     """
+    # Local audit patch: do not accept a valid downstream BAM if an upstream
+    # mapper/reset/FASTQ command failed after writing some output.
+    set -o pipefail
     $samtools_reset_fastq \\
     minimap2 \\
         ${args} \\

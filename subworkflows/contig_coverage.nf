@@ -1,3 +1,4 @@
+include { reportEvidence; reportSamples } from '../lib/report_events'
 /*
  * Contig coverage subworkflow (contig_coverage): map reads to
  * the assembly and estimate coverage with CoverM. Short-read samples use
@@ -30,17 +31,23 @@ workflow CONTIG_COVERAGE {
     long_preset    // val: minimap2 preset ('map-ont' or 'map-hifi')
 
     main:
+    ch_report_events = Channel.empty()
     // ---- short-read chain: bowtie2 index build + align (sorted BAM) ----
     ch_short_in = ch_assembly.join(ch_short_reads)
         .map { meta, fasta, r1, r2 -> tuple(meta + [suffix: '.short'], fasta, r1, r2) }
     BOWTIE2_BUILD_COVERAGE(ch_short_in.map { meta, fasta, _r1, _r2 -> tuple(meta, fasta) })
+    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_BUILD_COVERAGE.out], '02_assembly', 'BOWTIE2_BUILD_COVERAGE'))
+    // The asynchronous index must join its reads/reference before fan-out.
+    ch_short_matched = ch_short_in.join(BOWTIE2_BUILD_COVERAGE.out.index,
+        failOnDuplicate: true, failOnMismatch: true)
     BOWTIE2_ALIGN_COVERAGE(
-        ch_short_in.map { meta, _fasta, r1, r2 -> tuple(meta, [r1, r2]) },
-        BOWTIE2_BUILD_COVERAGE.out.index,
-        ch_short_in.map { meta, fasta, _r1, _r2 -> tuple(meta, fasta) },
+        ch_short_matched.map { meta, _fasta, r1, r2, _index -> tuple(meta, [r1, r2]) },
+        ch_short_matched.map { meta, _fasta, _r1, _r2, index -> tuple(meta, index) },
+        ch_short_matched.map { meta, fasta, _r1, _r2, _index -> tuple(meta, fasta) },
         false, // save_unaligned
         true   // sort_bam
     )
+    ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_ALIGN_COVERAGE.out], '02_assembly', 'BOWTIE2_ALIGN_COVERAGE'))
     ch_short_bam = BOWTIE2_ALIGN_COVERAGE.out.bam
         .map { meta, bam -> tuple(stripChainMeta(meta), bam) }
 
@@ -55,6 +62,7 @@ workflow CONTIG_COVERAGE {
         false, // cigar_paf_format
         false  // cigar_bam
     )
+    ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_COVERAGE.out], '02_assembly', 'MINIMAP2_ALIGN_COVERAGE'))
     ch_long_bam = MINIMAP2_ALIGN_COVERAGE.out.bam
         .map { meta, bam -> tuple(stripChainMeta(meta), bam) }
 
@@ -65,10 +73,13 @@ workflow CONTIG_COVERAGE {
             tuple(meta, bams, []) // no BAM indexes to merge
         }
     ch_bam = SAMTOOLS_MERGE(ch_per_sample, [[], [], [], []], '').bam
+    ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_MERGE.out], '02_assembly', 'SAMTOOLS_MERGE'))
 
     ch_table = COVERM_CONTIG(ch_bam, [[], []], true, false, false).coverage
+    ch_report_events = ch_report_events.mix(reportEvidence([channels: COVERM_CONTIG.out], '02_assembly', 'COVERM_CONTIG'))
 
     emit:
+    report_events = ch_report_events
     bam      = ch_bam
     long_bam = ch_long_bam
     table    = ch_table

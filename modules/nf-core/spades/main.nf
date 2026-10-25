@@ -1,4 +1,5 @@
 process SPADES {
+    cache 'deep'
     tag "$meta.id"
     label 'process_high'
 
@@ -11,6 +12,8 @@ process SPADES {
     tuple val(meta), path(illumina), path(pacbio), path(nanopore)
     path yml
     path hmm
+    // Explicit regular files: helper changes participate in deep caching.
+    path(autoplasm_helper_0, stageAs: '.spades_graph_provenance.py')
 
     output:
     tuple val(meta), path('*.scaffolds.fa.gz')    , optional:true, emit: scaffolds
@@ -19,9 +22,14 @@ process SPADES {
     tuple val(meta), path('*.gene_clusters.fa.gz'), optional:true, emit: gene_clusters
     tuple val(meta), path('*.assembly.gfa.gz')    , optional:true, emit: gfa
     // Local patch (refactor/nf-core-modules): also export SPAdes'
-    // assembly_graph.fastg. The pipeline's SCAPP/Recycler plasmid binning
+    // assembly_graph.fastg. The pipeline's Recycler plasmid binning
     // consumes the FASTG graph (upstream only exports the GFA sibling).
     tuple val(meta), path('*.assembly_graph.fastg'), optional:true, emit: fastg
+    // Local interface: graph and k provenance come from this same successful task.
+    tuple val(meta), path('*.assembly_graph.fastg'), path('*.graph_provenance.json'), optional:true, emit: recycler_graph
+    // gplas consumes GFA segments, not assembled contigs or FASTG records.
+    tuple val(meta), path('*.gplas.gfa'), optional:true, emit: gplas_graph
+    tuple val(meta), path('*.plasmaag_spades', type: 'dir'), optional:true, emit: plasmaag_assembly
     tuple val(meta), path('*.warnings.log')         , optional:true, emit: warnings
     tuple val(meta), path('*.spades.log')         , emit: log
     tuple val("${task.process}"), val('spades'), eval("spades.py --version 2>&1 | sed -n 's/^.*SPAdes genome assembler v//p'"), topic: versions, emit: versions_spades
@@ -38,6 +46,8 @@ process SPADES {
     def nanopore_reads = nanopore ? "--nanopore $nanopore" : ""
     def custom_hmms = hmm ? "--custom-hmms $hmm" : ""
     def reads = yml ? "--dataset $yml" : "$illumina_reads $pacbio_reads $nanopore_reads"
+    def export_plasmaag = task.ext.plasmaag ?: false
+    // The provenance helper is an explicit deeply hashed file input.
     """
     spades.py \\
         $args \\
@@ -48,6 +58,10 @@ process SPADES {
         -o ./
     mv spades.log ${prefix}.spades.log
 
+    if ${export_plasmaag}; then
+        mkdir ${prefix}.plasmaag_spades
+        cp contigs.fasta contigs.paths assembly_graph_after_simplification.gfa ${prefix}.plasmaag_spades/
+    fi
     if [ -f scaffolds.fasta ]; then
         mv scaffolds.fasta ${prefix}.scaffolds.fa
         gzip -n ${prefix}.scaffolds.fa
@@ -65,9 +79,16 @@ process SPADES {
         gzip -n ${prefix}.assembly.gfa
     fi
 
-    # Local patch (refactor/nf-core-modules): keep the FASTG graph for SCAPP.
+    # Local patch (refactor/nf-core-modules): keep the FASTG graph for Recycler and graph consumers.
     if [ -f assembly_graph.fastg ]; then
         cp assembly_graph.fastg ${prefix}.assembly_graph.fastg
+        python3 .spades_graph_provenance.py --assembly-dir . \\
+            --graph ${prefix}.assembly_graph.fastg --log ${prefix}.spades.log \\
+            --out ${prefix}.graph_provenance.json
+    fi
+
+    if [ -f assembly_graph_after_simplification.gfa ]; then
+        cp assembly_graph_after_simplification.gfa ${prefix}.gplas.gfa
     fi
 
     if [ -f gene_clusters.fasta ]; then
@@ -89,6 +110,8 @@ process SPADES {
     echo "" | gzip > ${prefix}.gene_clusters.fa.gz
     echo "" | gzip > ${prefix}.assembly.gfa.gz
     touch ${prefix}.assembly_graph.fastg
+    touch ${prefix}.gplas.gfa
+    echo '{"stub":true}' > ${prefix}.graph_provenance.json
     touch ${prefix}.spades.log
     touch ${prefix}.warnings.log
     """

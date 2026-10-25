@@ -13,11 +13,8 @@ process FASTP {
     val   save_trimmed_fail
     val   save_merged
 
-    // Local patch (refactor/nf-core-modules): paired clean reads keep the
-    // legacy names <prefix>_R1.clean.fastq.gz / <prefix>_R2.clean.fastq.gz
-    // (upstream hard-codes <prefix>_R{1,2}.fastp.fastq.gz). The pipeline's
-    // downstream consumers and the mock e2e assert the '.clean.fastq.gz'
-    // suffix, so the paired branch below is renamed accordingly.
+    // Local output contract: all passing-read branches use .clean.fastq.gz,
+    // including single-end/interleaved input and their stubs.
     output:
     tuple val(meta), path('*.clean.fastq.gz') , optional:true, emit: reads
     tuple val(meta), path('*.json')           , emit: json
@@ -35,7 +32,7 @@ process FASTP {
     def prefix = task.ext.prefix ?: "${meta.id}"
     def adapter_list = adapter_fasta ? "--adapter_fasta ${adapter_fasta}" : ""
     def fail_fastq = save_trimmed_fail && meta.single_end ? "--failed_out ${prefix}.fail.fastq.gz" : save_trimmed_fail && !meta.single_end ? "--failed_out ${prefix}.paired.fail.fastq.gz --unpaired1 ${prefix}_R1.fail.fastq.gz --unpaired2 ${prefix}_R2.fail.fastq.gz" : ''
-    def out_fq1 = discard_trimmed_pass ?: ( meta.single_end ? "--out1 ${prefix}.fastp.fastq.gz" : "--out1 ${prefix}_R1.clean.fastq.gz" )
+    def out_fq1 = discard_trimmed_pass ?: ( meta.single_end ? "--out1 ${prefix}.clean.fastq.gz" : "--out1 ${prefix}_R1.clean.fastq.gz" )
     def out_fq2 = discard_trimmed_pass ?: "--out2 ${prefix}_R2.clean.fastq.gz"
     // fastp (1.3.6) --thread excludes its reader threads (and gzip if interleaved); keep >= 2 so workers do the gz compression
     def is_interleaved = task.ext.args?.contains('--interleaved_in')
@@ -56,7 +53,7 @@ process FASTP {
             $fail_fastq \\
             $args \\
             2>| >(tee ${prefix}.fastp.log >&2) \\
-        | gzip -c > ${prefix}.fastp.fastq.gz
+        | gzip -c > ${prefix}.clean.fastq.gz
         """
     } else if (meta.single_end) {
         """
@@ -98,7 +95,7 @@ process FASTP {
     stub:
     def prefix              = task.ext.prefix ?: "${meta.id}"
     def is_single_output    = task.ext.args?.contains('--interleaved_in') || meta.single_end
-    def touch_reads         = (discard_trimmed_pass) ? "" : (is_single_output) ? "echo '' | gzip > ${prefix}.fastp.fastq.gz" : "echo '' | gzip > ${prefix}_R1.clean.fastq.gz ; echo '' | gzip > ${prefix}_R2.clean.fastq.gz"
+    def touch_reads         = (discard_trimmed_pass) ? "" : (is_single_output) ? "echo '' | gzip > ${prefix}.clean.fastq.gz" : "echo '' | gzip > ${prefix}_R1.clean.fastq.gz ; echo '' | gzip > ${prefix}_R2.clean.fastq.gz"
     def touch_merged        = (!is_single_output && save_merged) ? "echo '' | gzip >  ${prefix}.merged.fastq.gz" : ""
     def touch_fail_fastq    = (!save_trimmed_fail) ? "" : meta.single_end ? "echo '' | gzip > ${prefix}.fail.fastq.gz" : "echo '' | gzip > ${prefix}.paired.fail.fastq.gz ; echo '' | gzip > ${prefix}_R1.fail.fastq.gz ; echo '' | gzip > ${prefix}_R2.fail.fastq.gz"
     """

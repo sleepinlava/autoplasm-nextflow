@@ -3,4 +3,4 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - recycler>=0.62
+  - recycler=0.7
