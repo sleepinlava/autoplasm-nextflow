@@ -1,6 +1,35 @@
+# Fixed RasmussenLab/PlasMAAG a6b39ac6e8e38ccc8419fc7b4a3f304b0f511803.
+# Full Snakefiles/scripts are separately supplied by --plasmaag_source.
 name: autoplasm-plasmaag
 channels:
   - conda-forge
   - bioconda
 dependencies:
-  - plasmaag>=0.1
+  - python=3.11.2
+  - pip
+  - git
+  - c-compiler
+  - snakemake=8.27.1
+  - conda=24.11.3
+  - samtools=1.18
+  - blast=2.15.0
+  - networkx=3.4.2
+  - pysam=0.22.1
+  - biopython=1.85
+  - numpy=2.2.1
+  - pandas=2.2.3
+  - scikit-learn=1.6.0
+  - loguru=0.7.3
+  - pyhmmer=0.10.15
+  - psutil=5.9.8
+  - rich-click=1.8.3
+  - click=8.1.8
+  - cython=3.0.12
+  - setuptools=84.2.1
+  - setuptools-scm>=8
+  - pip:
+      - torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl#sha256=6746dbcbeb526eb61330b76b41ff1b4eb848951103a892eeb080dfa2b264667b
+      - pyrodigal==3.6.3
+      - pycoverm==0.6.2
+      - dadaptation==3.2
+      - PlasMAAG @ git+https://github.com/RasmussenLab/PlasMAAG.git@a6b39ac6e8e38ccc8419fc7b4a3f304b0f511803
