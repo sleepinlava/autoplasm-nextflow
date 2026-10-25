@@ -5,24 +5,31 @@
 process PLATON {
     tag { meta.id }
     label 'process_medium'
-    conda "${projectDir}/envs/platon.yml"
-    // 版本对齐 envs/platon.yml 的 platon>=1.7 pin
+    cache 'deep'
+    conda "${moduleDir}/../../envs/platon-linux-64.lock"
     container 'quay.io/biocontainers/platon:1.7--pyhdfd78af_0'
 
     publishDir "${params.outdir}/04_plasmid_detection/platon", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(assembly)
-    path platon_db
+    tuple val(meta), path(assembly, stageAs: 'assembly_input/*')
+    tuple path(platon_db, stageAs: 'platon_database'), path(platon_database_files, stageAs: 'platon_database_dependencies/*')
+    // Explicit regular files: helper changes participate in deep caching.
+    path(autoplasm_helper_0, stageAs: 'platon_checked.py')
 
     output:
     tuple val(meta), path("${meta.id}.platon.tsv"), emit: predictions
-    tuple val(meta), path("${meta.id}.plasmid.fasta"), emit: plasmid_fasta, optional: true
+    tuple val(meta), path("${meta.id}.plasmid.fasta"), emit: plasmid_fasta
+    tuple val(meta), path("${meta.id}.json"), emit: details
+    tuple val(meta), path("${meta.id}.platon_state.json"), emit: state
+    tuple val(meta), path("${meta.id}.platon_runtime.json"), emit: runtime
 
     script:
+    def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
     """
-    platon --threads ${task.cpus} --output . --prefix ${meta.id} --meta \\
-        --db ${platon_db} ${assembly}
-    mv ${meta.id}.tsv ${meta.id}.platon.tsv
+    python3 platon_checked.py --assembly ${quote.call(assembly)} --database platon_database \\
+        --prefix ${quote.call(meta.id)} --record ${quote.call(meta.id + '.platon_runtime.json')} \\
+        --threads ${task.cpus}
+    mv ${quote.call(meta.id + '.tsv')} ${quote.call(meta.id + '.platon.tsv')}
     """
 }

@@ -1,6 +1,17 @@
 name: autoplasm-plasme
 channels:
+  - pytorch
   - conda-forge
   - bioconda
 dependencies:
-  - plasme>=1.1
+  # Core versions from the fixed upstream plasme.yaml, CPU build.
+  - python=3.9.15
+  - pytorch=1.11.0=py3.9_cpu_0
+  - cpuonly
+  - numpy=1.23.4
+  - pandas=1.5.2
+  - biopython=1.80
+  - diamond=2.0.15
+  - blast=2.13.0
+  - prodigal=2.6.3
+  - mkl=2021.4.0

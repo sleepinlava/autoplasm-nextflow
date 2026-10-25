@@ -3,45 +3,42 @@
  * optional, enabled via params.plasmid_detection_tools).
  */
 process PLASME {
+    cache 'deep'
     tag { meta.id }
     label 'process_medium'
-    conda "${projectDir}/envs/plasme.yml"
-    // PLASMe 无 bioconda 包（envs pin 亦无法解析），container 用 python 运行时兜底
-    container 'quay.io/biocontainers/python:3.11'
+    conda "${moduleDir}/../../envs/plasme.yml"
+    container "${params.plasme_container ?: 'autoplasm-plasme:1.1'}"
+    containerOptions workflow.containerEngine == 'podman' ? '--userns=keep-id --user $(id -u):$(id -g)' :
+        workflow.containerEngine == 'docker' ? '--user $(id -u):$(id -g)' : ''
 
     publishDir "${params.outdir}/04_plasmid_detection/plasme", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(assembly)
-    path plasme_db
+    path(plasme_db, stageAs: 'plasme_database')
+    path(plasme_source, stageAs: 'plasme_source')
+    // Explicit regular files: helper changes participate in deep caching.
+    tuple path(autoplasm_helper_0, stageAs: 'normalize_plasme_outputs.py'), path(autoplasm_helper_1, stageAs: 'plasme_runtime.py')
 
     output:
     tuple val(meta), path("${meta.id}.plasme.tsv"), emit: predictions
 
+    tuple val(meta), path("${meta.id}.plasme.fasta"), emit: plasmid_fasta
+    tuple val(meta), path("${meta.id}.plasme_report.csv"), emit: report
+    tuple val(meta), path("${meta.id}.plasme_runtime.json"), emit: runtime
+
     script:
+    def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+    def input_fasta = 'plasme_input.fasta'
+    def prepare = assembly.name.toLowerCase().endsWith('.gz') ? "gzip -cd -- ${shellQuote.call(assembly)} > ${input_fasta}" : "ln -s -- ${shellQuote.call(assembly)} ${input_fasta}"
     """
-    PLASMe.py ${assembly} ${meta.id}.plasme -d ${plasme_db} -t ${task.cpus}
-    # PLASMe writes <prefix>_plasmid.fasta plus a probability report; normalize
-    # the prediction table to <sample>.plasme.tsv for the consensus step.
-    if [ -f ${meta.id}.plasme.csv ]; then
-        mv ${meta.id}.plasme.csv ${meta.id}.plasme.tsv
-    elif ls ${meta.id}.plasme*.tsv > /dev/null 2>&1; then
-        mv \$(ls ${meta.id}.plasme*.tsv | head -1) ${meta.id}.plasme.tsv
-    else
-        # Fall back to deriving calls from the plasmid FASTA
-        python3 - <<'PYEOF'
-    import re
-    ids = []
-    try:
-        with open("${meta.id}.plasme_plasmid.fasta") as fh:
-            ids = [l[1:].split()[0] for l in fh if l.startswith(">")]
-    except FileNotFoundError:
-        pass
-    with open("${meta.id}.plasme.tsv", "w") as out:
-        out.write("contig_id\\tplasmid_score\\tclassification\\n")
-        for i in ids:
-            out.write(f"{i}\\t1.0\\tplasmid\\n")
-    PYEOF
-    fi
+    ${prepare}
+    python3 plasme_runtime.py run --source-dir ${plasme_source} \\
+        --assembly ${input_fasta} --database ${plasme_db} --output ${meta.id}.plasme \\
+        --threads ${task.cpus} --runtime-record ${meta.id}.plasme_runtime.json
+    python3 normalize_plasme_outputs.py --assembly ${shellQuote.call(input_fasta)} \\
+        --plasmids ${meta.id}.plasme --report ${meta.id}.plasme_report.csv \\
+        --output ${meta.id}.plasme.tsv
+    mv ${meta.id}.plasme ${meta.id}.plasme.fasta
     """
 }

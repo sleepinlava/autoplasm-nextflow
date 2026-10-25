@@ -1,0 +1,7 @@
+**
+!containers/
+!containers/plasme/
+!containers/plasme/Dockerfile
+!containers/plasme/conda-linux-64.lock
+!bin/
+!bin/plasme_runtime.py
