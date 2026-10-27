@@ -27,11 +27,22 @@ input:
           - edam: "http://edamontology.org/format_1929" # FASTA
           - edam: "http://edamontology.org/format_1936" # GenBank
           - edam: "http://edamontology.org/format_2204" # EMBL format
+    - runtime_identity:
+        type: map
+        description: Pre-cache native runtime/resource identity from ABRICATE_RESOURCE_PROBE
+    - runtime_receipt:
+        type: file
+        description: Identity JSON verified again before scientific execution
+        pattern: "abricate_runtime_identity.json"
   - databasedir:
       type: directory
       description: Optional location of local copy of database files, possibly
         with custom databases set up with `abricate --setupdb`
       pattern: "*/"
+  - resource_helper:
+      type: file
+      description: Fixed1.0.1 native parser/resource resolver and checked pipeline runner
+      pattern: "abricate_runtime_resources.pl"
 output:
   report:
     - - meta:

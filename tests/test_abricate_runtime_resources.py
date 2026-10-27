@@ -8,10 +8,11 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-PREFIX = Path(os.environ['ABRICATE_NATIVE_PREFIX']).resolve()
+PREFIX = Path(os.environ.get('ABRICATE_NATIVE_PREFIX', ROOT / 'results/tool-audit/runtime/abricate-1.0.1')).resolve()
 HELPER = ROOT / 'bin/abricate_runtime_resources.pl'
 
 
+@unittest.skipUnless((PREFIX / 'bin/abricate').is_file(), 'ABRICATE_NATIVE_PREFIX requires the fixed native1.0.1 installation')
 class Resources(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

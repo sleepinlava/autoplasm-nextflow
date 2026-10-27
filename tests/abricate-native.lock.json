@@ -1475,5 +1475,14 @@
       "sha256": "9ef1ff93df358cf3b1f5c0563e88e6ce8574d631b107b153ab0f47012e0a7ee7",
       "md5": "2cdd3d5c4d79b0f7573ea7544ebe0c57"
     }
-  ]
+  ],
+  "original_nfcore_framework_input": {
+    "upstream_commit": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
+    "url": "https://raw.githubusercontent.com/nf-core/test-datasets/618f1541382c4ad49eff566dadf13d5ccbd0ebb4/data/genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz",
+    "path": "genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz",
+    "sha256": "983b00ab06545493d620ae8f3e2ae960a45e41b7e9072c57206e259747a43f57",
+    "bytes": 1564005,
+    "decoded_bytes": 5314727,
+    "decoded_sha256": "ac1c10d2b6aa4bfcbe1dacb57addbc8ac72d5666af33dc100ca4a7c8f0c22448"
+  }
 }
