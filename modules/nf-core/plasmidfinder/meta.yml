@@ -26,6 +26,17 @@ input:
         description: Input FASTA or FASTQ formatted genome sequences
         pattern: "*.{fastq.gz,fq.gz,fastq.gz,fna.gz,fa.gz}"
         ontologies: []
+    - runtime_identity:
+        type: map
+        description: Native pre-cache database/code/argv identity
+    - runtime_receipt:
+        type: file
+        description: JSON verified before actual native execution
+        pattern: "plasmidfinder_runtime_identity.json"
+  - resource_helper:
+      type: file
+      description: Fixed2.1.6 native parser resource resolver and verified argv runner
+      pattern: "plasmidfinder_runtime_resources.py"
 output:
   json:
     - - meta:

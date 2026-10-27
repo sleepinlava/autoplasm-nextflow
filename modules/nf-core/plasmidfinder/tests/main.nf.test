@@ -1,65 +1,57 @@
-
-nextflow_process {
-
-    name "Test Process PLASMIDFINDER"
-    script "../main.nf"
-    process "PLASMIDFINDER"
-
+nextflow_workflow {
+    name "PlasmidFinder native resources with bacterial input only"
+    script "./main.nf"
+    workflow "PLASMIDFINDER_RUNTIME_TEST"
+    config "./nextflow.config"
     tag "modules"
     tag "modules_nfcore"
     tag "plasmidfinder"
 
-    test("test-plasmidfinder") {
-
+    // User excludes viral elements. Use the complete original fixed bacterial
+    // genome; retain the original native zero-hit TSV oracle and five outputs.
+    test("bacteroides_fragilis - native negative") {
         when {
-            process {
+            workflow {
                 """
-                input[0] = [
-                    [ id:'test', single_end:false ], // meta map
-				    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
-                ]
-
+                input[0] = Channel.value([
+                    [id:'test',single_end:false],
+                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz',checkIfExists:true)
+                ])
                 """
             }
         }
-
         then {
-            assertAll(
-                { assert process.success },
-                { assert snapshot(
-					file(process.out.json[0][1]).name, // unstable
-					file(process.out.txt[0][1]).readLines()[3..7],
-					process.out.tsv,
-					file(process.out.genome_seq[0][1]).name, // empty
-					file(process.out.plasmid_seq[0][1]).name, // empty
-					process.out.findAll { key, val -> key.startsWith('versions') }
-					).match()
-				}
-            )
+            assert workflow.success
+            assert workflow.out.tsv.size()==1
+            def report=new File(workflow.out.tsv.get(0).get(1).toString())
+            assert java.security.MessageDigest.getInstance('MD5').digest(report.bytes).encodeHex().toString()=='c457f4c5f1eacaa47e8466c01c4a1e7c'
+            assert report.readLines().findAll { it.trim() }.size()==1
+            assert new File(workflow.out.genome_seq.get(0).get(1).toString()).length()==0
+            assert new File(workflow.out.plasmid_seq.get(0).get(1).toString()).length()==0
+            assert new File(workflow.out.json.get(0).get(1).toString()).length()>0
+            assert new File(workflow.out.txt.get(0).get(1).toString()).length()>0
+            assert workflow.out.versions_plasmidfinder.get(0).get(2)=='2.1.6'
         }
     }
-
-    test("test-plasmidfinder-stub") {
+    test("bacteroides_fragilis - stub interface") {
         options "-stub"
-
         when {
-            process {
+            workflow {
                 """
-                input[0] = [
-                    [ id:'test', single_end:false ], // meta map
-				    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
-                ]
-
+                input[0] = Channel.value([
+                    [id:'test',single_end:false],
+                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz',checkIfExists:true)
+                ])
                 """
             }
         }
-
         then {
-            assertAll(
-                { assert process.success },
-                { assert snapshot(process.out).match() }
-            )
+            assert workflow.success
+            for (key in ['json','txt','tsv','genome_seq','plasmid_seq']) {
+                assert workflow.out[key].size()==1
+                assert new File(workflow.out[key].get(0).get(1).toString()).length()==0
+            }
+            assert workflow.out.versions_plasmidfinder.get(0).get(2)=='2.1.6'
         }
     }
-
 }

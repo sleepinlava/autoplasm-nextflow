@@ -1,3 +1,4 @@
+include { plasmidfinderResourceRecord } from '../lib/plasmidfinder_runtime'
 include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
 include { abricateResourceRecord } from '../lib/abricate_runtime'
 include { integronfinderResourceRecord } from '../lib/integronfinder_runtime'
@@ -17,7 +18,7 @@ include { selectedTools } from '../lib/tool_selection'
  * publishDir replication for the nf-core modules live in
  * conf/nfcore_downstream.config.
  */
-include { PLASMIDFINDER } from '../modules/nf-core/plasmidfinder'
+include { PLASMIDFINDER; PLASMIDFINDER_RESOURCE_PROBE } from '../modules/nf-core/plasmidfinder'
 include { MOBSUITE_TYPER as MOB_TYPER } from '../modules/nf-core/mobsuite/typer'
 include { COPLA } from '../modules/typing/copla'
 include { MACSYFINDER_DOWNLOAD } from '../modules/nf-core/macsyfinder/download'
@@ -72,7 +73,11 @@ workflow PLASMID_DOWNSTREAM {
     // ---------------- typing (06) ----------------
     if (selectedTools(params.typing_tools).contains('plasmidfinder')) {
         // nf-core module: bundled PlasmidFinder db (params.plasmidfinder_db no longer used)
-        PLASMIDFINDER(ch_plasmids)
+        ch_plasmidfinder_helper = Channel.value(file("${moduleDir}/../bin/plasmidfinder_runtime_resources.py",checkIfExists:true))
+        PLASMIDFINDER_RESOURCE_PROBE(ch_plasmids,ch_plasmidfinder_helper)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMIDFINDER_RESOURCE_PROBE.out], '06_plasmid_typing', 'PLASMIDFINDER_RESOURCE_PROBE'))
+        ch_plasmidfinder_identity = PLASMIDFINDER_RESOURCE_PROBE.out.identity.map { meta,receipt -> plasmidfinderResourceRecord(meta,receipt) }
+        PLASMIDFINDER(ch_plasmids.join(ch_plasmidfinder_identity,failOnDuplicate:true,failOnMismatch:true),ch_plasmidfinder_helper)
         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMIDFINDER.out], '06_plasmid_typing', 'PLASMIDFINDER'))
     }
     if (selectedTools(params.typing_tools).contains('mob_typer')) {

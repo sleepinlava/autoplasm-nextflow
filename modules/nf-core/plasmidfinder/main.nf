@@ -1,4 +1,7 @@
+include { plasmidfinderRuntime; plasmidfinderRequireRuntime; plasmidfinderRuntimeBase64; plasmidfinderQuote } from '../../../lib/plasmidfinder_runtime'
+
 process PLASMIDFINDER {
+    cache 'deep'
     tag "$meta.id"
     label 'process_low'
 
@@ -9,7 +12,8 @@ process PLASMIDFINDER {
         'quay.io/biocontainers/plasmidfinder:2.1.6--py310hdfd78af_1' }"
 
     input:
-    tuple val(meta), path(fasta)
+    tuple val(meta), path(fasta), val(runtime_identity), path(runtime_receipt)
+    path(resource_helper, stageAs: 'plasmidfinder_runtime_resources.py')
 
     output:
     tuple val(meta), path("*.json")                 , emit: json
@@ -28,17 +32,14 @@ process PLASMIDFINDER {
     def prefix = task.ext.prefix ?: "${meta.id}"
     def is_compressed = fasta.getName().endsWith(".gz") ? true : false
     def fasta_name = fasta.getName().replace(".gz", "")
+    def runtime = plasmidfinderRuntime(task,workflow.containerEngine,meta)
+    plasmidfinderRequireRuntime(runtime_identity,runtime)
+    def encoded = plasmidfinderRuntimeBase64(runtime)
     """
-    # Decompress input FASTA if needed
     if [ "$is_compressed" == "true" ]; then
-        gzip -c -d $fasta > $fasta_name
+        gzip -c -d ${plasmidfinderQuote(fasta)} > ${plasmidfinderQuote(fasta_name)}
     fi
-
-    plasmidfinder.py \\
-        $args \\
-        -i $fasta_name \\
-        -o ./ \\
-        -x
+    python3 plasmidfinder_runtime_resources.py --runtime-base64 '${encoded}' --verify ${plasmidfinderQuote(runtime_receipt)} --execute -- ${args} -i ${plasmidfinderQuote(fasta_name)} -o ./ -x
 
     # Rename hard-coded outputs with prefix to avoid name collisions
     mv data.json ${prefix}.json
@@ -50,6 +51,7 @@ process PLASMIDFINDER {
     """
 
     stub:
+    plasmidfinderRequireRuntime(runtime_identity,plasmidfinderRuntime(task,workflow.containerEngine,meta))
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
     touch ${prefix}.json
@@ -57,5 +59,44 @@ process PLASMIDFINDER {
     touch ${prefix}.tsv
     touch ${prefix}-hit_in_genome_seq.fsa
     touch ${prefix}-plasmid_seqs.fsa
+    """
+}
+
+process PLASMIDFINDER_RESOURCE_PROBE {
+    cache false
+    tag "${meta.id}"
+    label 'process_low'
+
+    conda "${moduleDir}/environment.yml"
+    container "${ workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container ?
+        'https://depot.galaxyproject.org/singularity/plasmidfinder:2.1.6--py310hdfd78af_1':
+        'quay.io/biocontainers/plasmidfinder:2.1.6--py310hdfd78af_1' }"
+
+    input:
+    tuple val(meta), path(fasta)
+    path(resource_helper, stageAs: 'plasmidfinder_runtime_resources.py')
+
+    output:
+    tuple val(meta), path('plasmidfinder_runtime_identity.json'), emit: identity
+
+    when:
+    task.ext.when == null || task.ext.when
+
+    script:
+    def args = task.ext.args ?: ''
+    def compressed = fasta.getName().endsWith('.gz')
+    def name = fasta.getName().replace('.gz','')
+    def encoded = plasmidfinderRuntimeBase64(plasmidfinderRuntime(task,workflow.containerEngine,meta))
+    """
+    if [ '${compressed}' == 'true' ]; then
+        gzip -c -d ${plasmidfinderQuote(fasta)} > ${plasmidfinderQuote(name)}
+    fi
+    python3 plasmidfinder_runtime_resources.py --runtime-base64 '${encoded}' --output plasmidfinder_runtime_identity.json -- ${args} -i ${plasmidfinderQuote(name)} -o ./ -x
+    """
+
+    stub:
+    def encoded = plasmidfinderRuntimeBase64([schema_version:1,stub:true,runtime:plasmidfinderRuntime(task,workflow.containerEngine,meta)])
+    """
+    printf '%s' '${encoded}' | base64 -d > plasmidfinder_runtime_identity.json
     """
 }

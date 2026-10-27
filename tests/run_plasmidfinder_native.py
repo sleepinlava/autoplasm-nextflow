@@ -2,7 +2,7 @@
 """Fixed 2.1.6 native regression using the complete original upstream positive fixture.
 
 Uses the production module and shared downstream configuration. This bounded
-regression does not establish resource-aware cache identity or OCI readiness.
+regression does not establish mutation-aware cache identity or OCI readiness.
 """
 import argparse
 import csv
@@ -41,6 +41,7 @@ def run(base, prefix, upstream):
     sources = ['modules/nf-core/plasmidfinder/main.nf',
                'modules/nf-core/plasmidfinder/environment.yml',
                'conf/nfcore_downstream.config', 'tests/mock_e2e/mock_tool.py',
+               'lib/plasmidfinder_runtime.nf', 'bin/plasmidfinder_runtime_resources.py',
                'tests/nextflow/plasmidfinder_native.nf', 'tests/run_plasmidfinder_native.py']
     before = {p: sha(ROOT / p) for p in sources}
     assert 'conda-forge::python=3.10' in (ROOT / sources[1]).read_text()
@@ -64,7 +65,7 @@ def run(base, prefix, upstream):
                       "trace.fields='task_id,hash,name,status,exit,workdir'\n")
     legacy = base / 'legacy.config'
     legacy.write_text("includeConfig '" + str(config) + "'\n"
-                      "process { withName: 'PLASMIDFINDER' { ext.args='--legacy' } }\n")
+                      "process { withName: 'PLASMIDFINDER|PLASMIDFINDER_RESOURCE_PROBE' { ext.args='--legacy' } }\n")
     runs = []
     suffixes = ['.json', '.txt', '.tsv', '-hit_in_genome_seq.fsa', '-plasmid_seqs.fsa']
     def execute(name, fasta, expected, resume=None, stub=False, selected_config=config):
@@ -84,9 +85,16 @@ def run(base, prefix, upstream):
         record = dict(case=name, command=cmd, exit_code=proc.returncode, tasks=tasks)
         runs.append(record)
         (base / 'progress.json').write_text(json.dumps(runs, indent=2) + '\n')
-        assert len(tasks) == 1 and tasks[0]['status'] == expected, record
+        if expected == 'FAILED':
+            assert len(tasks) == 1 and tasks[0]['name'].startswith('PLASMIDFINDER_RESOURCE_PROBE') and tasks[0]['status'] == 'FAILED', record
+            consumer = tasks[0]
+        else:
+            assert len(tasks) == 2, record
+            probe = next(t for t in tasks if t['name'].startswith('PLASMIDFINDER_RESOURCE_PROBE'))
+            consumer = next(t for t in tasks if t['name'].startswith('PLASMIDFINDER ('))
+            assert probe['status'] == 'COMPLETED' and consumer['status'] == expected, record
         assert (proc.returncode == 0) == (expected != 'FAILED'), record
-        work = Path(tasks[0]['workdir'])
+        work = Path(consumer['workdir'])
         shell = (work / '.command.sh').read_text()
         if expected == 'FAILED':
             assert 'unrecognized arguments: --legacy' in (work / '.command.log').read_text()
@@ -114,7 +122,7 @@ def run(base, prefix, upstream):
                               all_nine_default_database_results_checked=True,
                               output_sha256={s: sha(p) for s, p in outputs.items()})
         print(name, expected, flush=True)
-        return tasks[0]
+        return consumer
     execute('legacy-cli', fixture, 'FAILED', selected_config=legacy)
     cold = execute('cold', fixture, 'COMPLETED')
     session = run_session_uuid('plasmidfinder_cold', base)
