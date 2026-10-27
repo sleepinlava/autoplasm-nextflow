@@ -1,0 +1,25 @@
+{
+  "tool": "MOB-suite recon",
+  "version": "3.1.9",
+  "source_commit": "eb86064884338c9ec19c19b4043aaa7ea1c9361b",
+  "files_sha256": {
+    "mob_suite/mob_recon.py": "567143cd1477c1ed59fb833ddbd5db3167ba4ba55d48d4ae902fe377fbf64eb0",
+    "mob_suite/utils.py": "ff0cdff8f7e2d9f3b5df93f87c65eba10d6b8a4c278165cd9a8c5c090e6640ed",
+    "mob_suite/constants.py": "7aab451815d7e9032e530c425537dae632b6e3afcef6d9d1f87eaf528b1c2ea4",
+    "mob_suite/mob_init.py": "9da81b0f28f492736bfd8b4500759a9f6e17d4c338445b249934ba0cb5ae736e",
+    "mob_suite/version.py": "7b5a277fcf50193d0e24216acc47917ec1adb193cdbcd6c2301ba32bb428207c",
+    "mob_suite/config.json": "bb92211b7839fec435bdf3d16ba21e359741351dd74afa4be665b0e1b4e742d3",
+    "tag.json": "7264d702d404f5207bcfaf9cd035c4f670730f17d6cd6cc6483d15552ec4927c"
+  },
+  "source_urls": {
+    "mob_suite/mob_recon.py": "https://raw.githubusercontent.com/phac-nml/mob-suite/eb86064884338c9ec19c19b4043aaa7ea1c9361b/mob_suite/mob_recon.py",
+    "mob_suite/utils.py": "https://raw.githubusercontent.com/phac-nml/mob-suite/eb86064884338c9ec19c19b4043aaa7ea1c9361b/mob_suite/utils.py",
+    "mob_suite/constants.py": "https://raw.githubusercontent.com/phac-nml/mob-suite/eb86064884338c9ec19c19b4043aaa7ea1c9361b/mob_suite/constants.py",
+    "mob_suite/mob_init.py": "https://raw.githubusercontent.com/phac-nml/mob-suite/eb86064884338c9ec19c19b4043aaa7ea1c9361b/mob_suite/mob_init.py",
+    "mob_suite/version.py": "https://raw.githubusercontent.com/phac-nml/mob-suite/eb86064884338c9ec19c19b4043aaa7ea1c9361b/mob_suite/version.py",
+    "mob_suite/config.json": "https://raw.githubusercontent.com/phac-nml/mob-suite/eb86064884338c9ec19c19b4043aaa7ea1c9361b/mob_suite/config.json",
+    "tag.json": "https://api.github.com/repos/phac-nml/mob-suite/git/ref/tags/3.1.9"
+  },
+  "tag_commit_bytes_match": true,
+  "scope": "Six software source/config files and tag JSON only, immutable commit equals tag bytes; no native package or DB/model/sequence data. Original parser/path-selection source slices executed with explicit verify_init observer, not scientific code."
+}

@@ -158,7 +158,8 @@ workflow PLASMID_DOWNSTREAM {
         ch_report_events = ch_report_events.mix(reportEvidence([channels: INTEGRONFINDER.out], '08_annotation', 'INTEGRONFINDER'))
     }
     if (selectedTools(params.annotation_optional_tools).contains('mob_suite')) {
-        // nf-core module: no db input (uses mob_suite 3.1.9 bundled db)
+        // Uses the environment DB; native3.1.9 may auto-initialize/download if unprepared.
+        // Resource preflight/native validation remain pending; do not launch unprepared.
         MOB_SUITE_ANNOT(ch_plasmids)
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_SUITE_ANNOT.out], '08_annotation', 'MOB_SUITE_ANNOT'))
     }
@@ -179,7 +180,8 @@ workflow PLASMID_DOWNSTREAM {
 
     // ---------------- plasmid binning (05) ----------------
     if (selectedTools(params.plasmid_binning_tools).contains('mob_suite') || selectedTools(params.plasmid_binning_tools).contains('mob_recon')) {
-        // nf-core module: no db input (uses mob_suite 3.1.9 bundled db)
+        // Uses the environment DB; native3.1.9 may auto-initialize/download if unprepared.
+        // Resource preflight/native validation remain pending; do not launch unprepared.
         MOB_RECON(ch_plasmids)
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_RECON.out], '05_plasmid_binning', 'MOB_RECON'))
     }
