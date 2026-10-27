@@ -29,6 +29,21 @@ input:
         ontologies:
           - edam: "http://edamontology.org/data_2977"
           - edam: "http://edamontology.org/format_1929"
+    - runtime_identity:
+        type: map
+        description: Native pre-cache models/argv/approved topology identity
+    - runtime_receipt:
+        type: file
+        description: JSON verified before execution
+        pattern: "integronfinder_runtime_identity.json"
+  - resource_helper:
+      type: file
+      description: Fixed2.0.5 native runtime resolver and verified argv runner
+      pattern: "integronfinder_runtime_resources.py"
+  - topology_helper:
+      type: file
+      description: Approved unknown-linear/explicit topology policy
+      pattern: "integronfinder_topology.py"
 output:
   gbk:
     - - meta:
@@ -85,7 +100,7 @@ output:
       - integronfinder:
           type: string
           description: The name of the tool
-      - integron_finder --version 2>&1 | sed '1!d;s/^integron_finder version //;s/ .*//':
+      - integron_finder --version 2>&1 | sed -n 's/^integron_finder version //p' | cut -d ' ' -f1 | grep -Fx '2.0.5':
           type: eval
           description: The expression to obtain the version of the tool
 topics:
@@ -96,7 +111,7 @@ topics:
       - integronfinder:
           type: string
           description: The name of the tool
-      - integron_finder --version 2>&1 | sed '1!d;s/^integron_finder version //;s/ .*//':
+      - integron_finder --version 2>&1 | sed -n 's/^integron_finder version //p' | cut -d ' ' -f1 | grep -Fx '2.0.5':
           type: eval
           description: The expression to obtain the version of the tool
 authors:

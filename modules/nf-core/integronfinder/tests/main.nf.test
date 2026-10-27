@@ -1,63 +1,56 @@
-nextflow_process {
-
-    name "Test Process INTEGRONFINDER"
-    script "../main.nf"
-    process "INTEGRONFINDER"
-
+nextflow_workflow {
+    name "Test IntegronFinder native resources and unknown-linear policy"
+    script "./main.nf"
+    workflow "INTEGRONFINDER_RUNTIME_TEST"
+    config "./nextflow.config"
     tag "modules"
     tag "modules_nfcore"
     tag "integronfinder"
 
     test("IntegronFinder - escherichia_coli - genome_fa_gz") {
-
         when {
-            process {
+            workflow {
                 """
-                input[0] = [
-                    [ id:'test', single_end:false ], // meta map
-                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/escherichia_coli/genome/genome.fa.gz', checkIfExists: true)
-                ]
+                input[0] = Channel.value([
+                    [id:'test',single_end:false],
+                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/escherichia_coli/genome/genome.fa.gz',checkIfExists:true)
+                ])
                 """
             }
         }
-
         then {
-            assertAll(
-                { assert process.success },
-                { assert path(process.out.out[0][1]).readLines().get(56).contains("command used: integron_finder") },
-                { assert snapshot(
-                        process.out.gbk ? path(process.out.gbk[0][1]).text : "no_gbk",
-                        path(process.out.summary[0][1]).readLines()[1..-1], // Remove first line due to hash presence in conda
-                        path(process.out.integrons[0][1]).readLines()[1..-1],
-                        process.out.findAll { key, val -> key.startsWith('versions') }
-                    ).match() }
-            )
+            assert workflow.success
+            def actualSummary = new File(workflow.out.summary.get(0).get(1).toString()).readLines().findAll { !it.startsWith('#') }
+            def originalSummary = new File(workflow.out.original_summary.get(0).toString()).readLines().findAll { !it.startsWith('#') }
+            def actualIntegrons = new File(workflow.out.integrons.get(0).get(1).toString()).readLines().findAll { !it.startsWith('#') }
+            def originalIntegrons = new File(workflow.out.original_integrons.get(0).toString()).readLines().findAll { !it.startsWith('#') }
+            assert actualSummary == originalSummary
+            assert actualIntegrons == originalIntegrons
+            assert actualSummary.size() > 1
+            def fields = actualSummary.first().split('\t') as List
+            def topologyColumn = fields.indexOf('topology')
+            assert topologyColumn >= 0
+            assert actualSummary.drop(1).every { it.split('\t')[topologyColumn] == 'lin' }
+            assert workflow.out.versions_integronfinder.get(0).get(2) == '2.0.5'
         }
-
     }
-
     test("IntegronFinder - escherichia_coli - genome_fa_gz - stub") {
-
         options "-stub"
-
         when {
-            process {
+            workflow {
                 """
-                input[0] = [
-                    [ id:'test', single_end:false ], // meta map
-                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/escherichia_coli/genome/genome.fa.gz', checkIfExists: true)
-                ]
+                input[0] = Channel.value([
+                    [id:'test',single_end:false],
+                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/escherichia_coli/genome/genome.fa.gz',checkIfExists:true)
+                ])
                 """
             }
         }
-
         then {
-            assertAll(
-                { assert process.success },
-                { assert snapshot(sanitizeOutput(process.out)).match() }
-            )
+            assert workflow.success
+            assert new File(workflow.out.summary.get(0).get(1).toString()).length() == 0
+            assert new File(workflow.out.integrons.get(0).get(1).toString()).length() == 0
+            assert workflow.out.versions_integronfinder.get(0).get(2) == '2.0.5'
         }
-
     }
-
 }

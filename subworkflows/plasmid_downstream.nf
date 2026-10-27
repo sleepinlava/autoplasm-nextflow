@@ -1,5 +1,6 @@
 include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
 include { abricateResourceRecord } from '../lib/abricate_runtime'
+include { integronfinderResourceRecord } from '../lib/integronfinder_runtime'
 include { isescanResourceRecord } from '../lib/isescan_runtime'
 include { reportEvidence; reportSamples } from '../lib/report_events'
 include { selectedTools } from '../lib/tool_selection'
@@ -26,7 +27,7 @@ include { BAKTA_BAKTA as BAKTA } from '../modules/nf-core/bakta/bakta'
 include { AMRFINDERPLUS_RUN as AMRFINDERPLUS } from '../modules/nf-core/amrfinderplus/run'
 include { ABRICATE_RUN as ABRICATE; ABRICATE_RESOURCE_PROBE } from '../modules/nf-core/abricate/run'
 include { ISESCAN; ISESCAN_RESOURCE_PROBE } from '../modules/annotation/isescan'
-include { INTEGRONFINDER } from '../modules/nf-core/integronfinder'
+include { INTEGRONFINDER; INTEGRONFINDER_RESOURCE_PROBE } from '../modules/nf-core/integronfinder'
 include { PRODIGAL } from '../modules/nf-core/prodigal'
 include { PROTEIN_INPUTS } from '../modules/annotation/protein_inputs'
 include { MOBSUITE_RECON as MOB_SUITE_ANNOT } from '../modules/nf-core/mobsuite/recon'
@@ -143,7 +144,12 @@ workflow PLASMID_DOWNSTREAM {
         ch_report_events = ch_report_events.mix(reportEvidence([channels: ISESCAN.out], '08_annotation', 'ISESCAN'))
     }
     if (selectedTools(params.annotation_tools).contains('integronfinder')) {
-        INTEGRONFINDER(ch_plasmids)
+        ch_integronfinder_resource_helper = Channel.value(file("${moduleDir}/../bin/integronfinder_runtime_resources.py",checkIfExists:true))
+        ch_integronfinder_topology_helper = Channel.value(file("${moduleDir}/../bin/integronfinder_topology.py",checkIfExists:true))
+        INTEGRONFINDER_RESOURCE_PROBE(ch_plasmids,ch_integronfinder_resource_helper,ch_integronfinder_topology_helper)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: INTEGRONFINDER_RESOURCE_PROBE.out], '08_annotation', 'INTEGRONFINDER_RESOURCE_PROBE'))
+        ch_integronfinder_identity = INTEGRONFINDER_RESOURCE_PROBE.out.identity.map { meta, receipt -> integronfinderResourceRecord(meta,receipt) }
+        INTEGRONFINDER(ch_plasmids.join(ch_integronfinder_identity,failOnDuplicate:true,failOnMismatch:true),ch_integronfinder_resource_helper,ch_integronfinder_topology_helper)
         ch_report_events = ch_report_events.mix(reportEvidence([channels: INTEGRONFINDER.out], '08_annotation', 'INTEGRONFINDER'))
     }
     if (selectedTools(params.annotation_optional_tools).contains('mob_suite')) {

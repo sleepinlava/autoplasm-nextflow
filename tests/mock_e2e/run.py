@@ -101,7 +101,7 @@ def validate_assembly(base, empty):
         counts[name] = counts.get(name, 0) + 1
     expected = {name: 6 for name in ['QUAST', 'GENOMAD', 'PLASMID_CONSENSUS', 'PLASMID_STRUCTURE']}
     if not empty:
-        expected.update({name: 6 for name in ['PLASMIDFINDER', 'MOB_TYPER', 'BAKTA', 'AMRFINDERPLUS', 'ISESCAN', 'ISESCAN_RESOURCE_PROBE', 'INTEGRONFINDER']})
+        expected.update({name: 6 for name in ['PLASMIDFINDER', 'MOB_TYPER', 'BAKTA', 'AMRFINDERPLUS', 'ISESCAN', 'ISESCAN_RESOURCE_PROBE', 'INTEGRONFINDER', 'INTEGRONFINDER_RESOURCE_PROBE']})
         expected.update(PLASMID_CATALOG_PREPARE=1, MMSEQS2=1)
     expected['REPORT'] = 1
     assert counts == expected, (counts, expected)
@@ -222,7 +222,7 @@ def validate(base, empty, platform='illumina', assembler='opera_ms', long_input=
         expected['DORADO_BASECALL'] = 6 if long_input == 'pod5' else 2
     if not empty:
         expected.update({name: 6 for name in ['PLASMIDFINDER', 'MOB_TYPER', 'BAKTA',
-            'AMRFINDERPLUS', 'ISESCAN', 'ISESCAN_RESOURCE_PROBE', 'INTEGRONFINDER']})
+            'AMRFINDERPLUS', 'ISESCAN', 'ISESCAN_RESOURCE_PROBE', 'INTEGRONFINDER', 'INTEGRONFINDER_RESOURCE_PROBE']})
         if platform in ['illumina', 'hybrid']:
             expected.update(BOWTIE2_BUILD_ABUNDANCE=6, BOWTIE2_ALIGN_ABUNDANCE=6,
                             COVERM_ABUNDANCE=6)
