@@ -151,6 +151,7 @@ section_names <- c("00_basecalling", "01_qc", "02_assembly", "03_assembly_qc", "
 records <- manifest$records
 required_kinds <- c("plasmid_fasta", "consensus", "structure")
 inputs <- list()
+runtime_commands <- list()
 for (record in records) {
   if (!is.character(record$kind) || length(record$kind) != 1L ||
       !is.character(record$producer) || length(record$producer) != 1L ||
@@ -165,6 +166,30 @@ for (record in records) {
     key <- paste(record$sample_id, record$kind, sep = "/")
     if (!is.null(inputs[[key]])) die(paste0("Duplicate report input: ", key))
     inputs[[key]] <- files
+  } else if (identical(record$kind, "runtime_command")) {
+    scalar_text <- function(value) is.character(value) && length(value) == 1L && !is.na(value) && nzchar(value)
+    if (!scalar_text(record$sample_id) || !record$sample_id %in% expected ||
+        !scalar_text(record$analysis_sample_id) || !scalar_text(record$task_process) ||
+        !scalar_text(record$script_sha256) || !grepl("^[0-9a-f]{64}$", record$script_sha256) ||
+        !is.list(record$runtime_probe) || !scalar_text(record$runtime_probe$command) ||
+        !scalar_text(record$runtime_probe$stdout)) die("Invalid runtime command identity/probe")
+    files <- unlist(record$files, use.names = FALSE)
+    if (length(files) != 1L || !file.exists(files) || dir.exists(files))
+      die("Missing declared task command file")
+    if (!requireNamespace("digest", quietly = TRUE)) die("Runtime command records require the digest package")
+    size <- file.info(files)$size
+    if (!is.finite(size) || size < 1) die("Empty declared task command file")
+    command <- readChar(files, nchars = size, useBytes = TRUE)
+    command_sha256 <- digest::digest(file = files, algo = "sha256", serialize = FALSE)
+    if (!identical(command_sha256, record$script_sha256)) die("Originating task command checksum mismatch")
+    key <- paste(record$task_process, record$sample_id, record$analysis_sample_id, sep = "/")
+    if (!is.null(runtime_commands[[key]])) die("Duplicate runtime command identity")
+    runtime_commands[[key]] <- list(
+      producer = record$producer, task_process = record$task_process,
+      sample_id = record$sample_id, analysis_sample_id = record$analysis_sample_id,
+      script_sha256 = command_sha256,
+      script = command, runtime_probe = record$runtime_probe,
+      origin = "Declared originating task artifact; resume may reuse that task's outputs")
   } else if (!record$kind %in% c("evidence", "provided_input")) {
     die("Unknown report event kind")
   }
@@ -254,6 +279,12 @@ methods <- paste0("# Methods\n\n",
   if (length(versions)) paste(unique(vapply(versions, function(record) {
     paste0("- ", record$producer, "/", record$output, ": ", jsonlite::toJSON(record$evidence, auto_unbox = TRUE))
   }, character(1))), collapse = "\n") else "- No version evidence recorded.",
+  "\n\nRecorded originating task commands and runtime probes (full scripts in report_data.json):\n\n",
+  if (length(runtime_commands)) paste(vapply(runtime_commands, function(record) {
+    paste0("- ", record$task_process, " / ", record$sample_id, " (analysis ID ", record$analysis_sample_id,
+           "): SHA256 ", record$script_sha256, "; ", record$runtime_probe$command, " => ", record$runtime_probe$stdout)
+  }, character(1)), collapse = "\n") else "- No explicit task command records received.",
+  "\nThese records describe their originating tasks; resume can reuse those outputs.\n",
   "\n\nRequested settings (configuration, not evidence that a tool ran):\n\n```json\n",
   jsonlite::toJSON(settings, auto_unbox = TRUE, pretty = TRUE), "\n```\n\n",
   "Complete runtime CLI arguments and database/model identities are not recorded for every producer. ",
@@ -288,6 +319,7 @@ report_data <- list(
                         stringsAsFactors = FALSE),
   input_manifest_md5 = unname(tools::md5sum(opts$manifest)),
   samplesheet_md5 = unname(tools::md5sum(opts$samplesheet)),
+  runtime_commands = unname(runtime_commands),
   methods = sub("^# Methods\n\n", "", methods)
 )
 # Absolute path: rmarkdown knits the template in its own directory context.
@@ -325,7 +357,7 @@ if (!rendered) {
     "<!DOCTYPE html><html><head><meta charset='utf-8'>",
     sprintf("<title>AutoPlasm report — %s</title>", html_escape(project_name)),
     "<style>body{font-family:sans-serif;max-width:60em;margin:2em auto}</style>",
-    sprintf("</head><body><pre>%s</pre></body></html>\n", html_escape(md)))
+    sprintf("</head><body><pre>%s</pre></body></html>\n", html_escape(paste(md, methods, sep = "\n\n"))))
   write_char(html, file.path(opts[["out-prefix"]], "report.html"))
 }
 

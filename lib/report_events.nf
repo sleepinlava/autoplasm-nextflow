@@ -12,6 +12,16 @@ def reportValue(value) {
 def reportEvidence(recordedOutputs, section, producer) {
     def outputs = recordedOutputs.channels
     def streams = outputs.getNames().collect { outputName ->
+        if (outputName == 'task_provenance') {
+            return outputs.getProperty(outputName).map { process, meta, command, probe, stdout, checksum ->
+                def original = meta.gplas_original_meta ?: meta
+                tuple([section: section, producer: producer, kind: 'runtime_command',
+                       task_process: process.toString(), sample_id: original.id.toString(),
+                       analysis_sample_id: meta.id.toString(),
+                       script_sha256: checksum.toString().tokenize()[0],
+                       runtime_probe: [command: probe.toString(), stdout: stdout.toString()]], [command])
+            }
+        }
         outputs.getProperty(outputName).map { value ->
             tuple([section: section, producer: producer, kind: 'evidence', output: outputName,
                    evidence: reportValue(value)], [])

@@ -7,6 +7,7 @@ dependencies:
   - r-data.table
   - r-vegan
   - r-jsonlite
+  - r-digest
   - r-rmarkdown
   - pandoc
   - bioconductor-biostrings

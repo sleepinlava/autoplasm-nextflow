@@ -1,5 +1,6 @@
 /* Current-run files are path inputs. publishDir is only an output sink. */
 process REPORT {
+    cache 'deep'
     tag 'report'
     label 'process_single'
     conda "${moduleDir}/../../envs/r_analysis.yml"

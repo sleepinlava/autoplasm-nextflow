@@ -20,11 +20,15 @@ process PLASMID_CONSENSUS {
     tuple val(meta), path("${meta.id}.plasmid_contigs.fasta"), emit: contigs
     tuple val(meta), path("${meta.id}.plasmid_predictions.tsv"), emit: predictions
     tuple val(meta), path("${meta.id}.plasmid_consensus.tsv"), emit: consensus
+    tuple val("${task.process}"), val(meta), path("${meta.id}.PLASMID_CONSENSUS.task_command.sh"),
+          val('Rscript --version'), eval('Rscript --version'),
+          eval("sha256sum '${meta.id}.PLASMID_CONSENSUS.task_command.sh'"), emit: task_provenance
 
     script:
     def extras_args = extras ? (extras in List ? extras.collect { it.toString() } : [extras.toString()]).collect { "--extra ${it}" }.join(' ') : ''
     def domain_args = meta.analysis_entity == 'gplas_graph_node' ? '--include-all-contigs true' : ''
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLASMID_CONSENSUS.task_command.sh'
     plasmid_consensus.R \\
         --assembly ${assembly} \\
         --genomad-summary ${genomad_summary} \\

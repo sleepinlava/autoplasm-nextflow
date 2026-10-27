@@ -1,4 +1,5 @@
 import json
+import hashlib
 import subprocess
 import tempfile
 import unittest
@@ -172,6 +173,48 @@ class GenerateReportTests(unittest.TestCase):
         for sid in ['001', '1', 'NA']:
             self.sample(sid, 1, 0, 'genomad')
         self.assertEqual([r['sample_id'] for r in self.run_report()['samples']], ['001', '1', 'NA'])
+
+    def command_record(self):
+        self.sample('001', 0, 0, 'genomad')
+        command = self.root / 'command.sh'
+        command.write_text('#!/bin/bash -ue\nprintf "controlled input\\n"\n')
+        record = {'section': '04_plasmid_detection', 'producer': 'CONTROL', 'kind': 'runtime_command',
+                  'sample_id': '001', 'analysis_sample_id': 'graph_node_001',
+                  'task_process': 'GRAPH:CONTROL', 'files': [str(command)],
+                  'script_sha256': hashlib.sha256(command.read_bytes()).hexdigest(),
+                  'runtime_probe': {'command': 'controlled version probe', 'stdout': 'explicit test value'}}
+        self.records.append(record)
+        return command, record
+
+    def test_runtime_script_bytes_and_original_sample_identity_are_preserved(self):
+        command, record = self.command_record()
+        data = self.run_report()
+        result, = data['runtime_commands']
+        self.assertEqual(result['script'], command.read_text())
+        self.assertEqual(result['script_sha256'], hashlib.sha256(command.read_bytes()).hexdigest())
+        self.assertEqual((result['sample_id'], result['analysis_sample_id']), ('001', 'graph_node_001'))
+        self.assertEqual(result['runtime_probe'], record['runtime_probe'])
+        self.assertIn('resume', result['origin'])
+        self.assertIn('not recorded for every producer', data['methods'])
+        self.assertIn(result['script_sha256'], (self.output/'report.html').read_text())
+        self.assertIn(record['runtime_probe']['stdout'], (self.output/'report.html').read_text())
+
+    def test_changed_command_bytes_are_not_attributed_to_the_originating_task(self):
+        command, record = self.command_record()
+        command.write_text(command.read_text().replace('controlled', 'unverified'))
+        self.assert_rejected('Originating task command checksum mismatch')
+
+    def test_missing_command_and_incomplete_probe_are_not_silently_omitted(self):
+        command, record = self.command_record()
+        command.unlink()
+        self.assert_rejected('Missing declared task command file')
+        record['runtime_probe']['stdout'] = ''
+        self.assert_rejected('Invalid runtime command identity/probe')
+
+    def test_duplicate_runtime_command_identity_is_rejected(self):
+        self.command_record()
+        self.records.append(self.records[-1].copy())
+        self.assert_rejected('Duplicate runtime command identity')
 
 
 if __name__ == "__main__":

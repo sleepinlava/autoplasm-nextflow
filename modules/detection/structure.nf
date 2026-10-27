@@ -18,9 +18,13 @@ process PLASMID_STRUCTURE {
 
     output:
     tuple val(meta), path("${meta.id}.plasmid_structure.tsv"), emit: structure
+    tuple val("${task.process}"), val(meta), path("${meta.id}.PLASMID_STRUCTURE.task_command.sh"),
+          val('Rscript --version'), eval('Rscript --version'),
+          eval("sha256sum '${meta.id}.PLASMID_STRUCTURE.task_command.sh'"), emit: task_provenance
 
     script:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLASMID_STRUCTURE.task_command.sh'
     plasmid_structure.R \\
         --contigs ${plasmid_contigs} \\
         --sample-id ${meta.id} \\
