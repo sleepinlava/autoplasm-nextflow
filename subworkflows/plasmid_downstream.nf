@@ -1,4 +1,5 @@
 include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
+include { isescanResourceRecord } from '../lib/isescan_runtime'
 include { reportEvidence; reportSamples } from '../lib/report_events'
 include { selectedTools } from '../lib/tool_selection'
 
@@ -23,7 +24,7 @@ include { MACSYFINDER_SEARCH as MACSYFINDER } from '../modules/nf-core/macsyfind
 include { BAKTA_BAKTA as BAKTA } from '../modules/nf-core/bakta/bakta'
 include { AMRFINDERPLUS_RUN as AMRFINDERPLUS } from '../modules/nf-core/amrfinderplus/run'
 include { ABRICATE_RUN as ABRICATE } from '../modules/nf-core/abricate/run'
-include { ISESCAN } from '../modules/annotation/isescan'
+include { ISESCAN; ISESCAN_RESOURCE_PROBE } from '../modules/annotation/isescan'
 include { INTEGRONFINDER } from '../modules/nf-core/integronfinder'
 include { PRODIGAL } from '../modules/nf-core/prodigal'
 include { PROTEIN_INPUTS } from '../modules/annotation/protein_inputs'
@@ -129,7 +130,11 @@ workflow PLASMID_DOWNSTREAM {
         ch_report_events = ch_report_events.mix(reportEvidence([channels: ABRICATE.out], '08_annotation', 'ABRICATE'))
     }
     if (selectedTools(params.annotation_tools).contains('isescan')) {
-        ISESCAN(ch_plasmids)
+        ch_isescan_resource_helper = Channel.value(file("${moduleDir}/../bin/isescan_runtime_resources.py", checkIfExists: true))
+        ISESCAN_RESOURCE_PROBE(ch_plasmids, ch_isescan_resource_helper)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: ISESCAN_RESOURCE_PROBE.out], '08_annotation', 'ISESCAN_RESOURCE_PROBE'))
+        ch_isescan_identity = ISESCAN_RESOURCE_PROBE.out.identity.map { meta, receipt -> isescanResourceRecord(meta, receipt) }
+        ISESCAN(ch_plasmids.join(ch_isescan_identity, failOnDuplicate: true, failOnMismatch: true), ch_isescan_resource_helper)
         ch_report_events = ch_report_events.mix(reportEvidence([channels: ISESCAN.out], '08_annotation', 'ISESCAN'))
     }
     if (selectedTools(params.annotation_tools).contains('integronfinder')) {

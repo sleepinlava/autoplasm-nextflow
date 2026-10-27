@@ -1,0 +1,7 @@
+name: autoplasm-isescan
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bioconda::isescan=1.7.3
+  - bioconda::fraggenescan=1.32
