@@ -396,8 +396,9 @@ elif tool == 'coverm':
             rows.append(f'{name}\t{mean:.17g}\t{tpm:.17g}\t{rpkm:.17g}' + (f'\t{count}' if counted else ''))
         write(output, '\n'.join(rows) + '\n')
 elif tool == 'plasmidfinder.py':
-    # nf-core plasmidfinder: `plasmidfinder.py --legacy -i <fasta> -o ./ -x`;
+    # nf-core plasmidfinder 2.1.6: `plasmidfinder.py -i <fasta> -o ./ -x`;
     # the module renames the five hard-coded products with the task prefix.
+    assert '--legacy' not in args, 'Fixed PlasmidFinder 2.1.6 rejects --legacy'
     fasta(arg('-i'))
     outdir = Path(arg('-o'))
     write(outdir / 'data.json', '{"mock": true}\n')

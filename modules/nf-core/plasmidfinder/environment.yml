@@ -4,4 +4,6 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
+  # 2.1.6 imports distutils.spawn; retain the Python minor used by its py310 image.
+  - conda-forge::python=3.10
   - bioconda::plasmidfinder=2.1.6
