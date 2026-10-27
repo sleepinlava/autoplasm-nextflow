@@ -1,4 +1,5 @@
 include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
+include { abricateResourceRecord } from '../lib/abricate_runtime'
 include { isescanResourceRecord } from '../lib/isescan_runtime'
 include { reportEvidence; reportSamples } from '../lib/report_events'
 include { selectedTools } from '../lib/tool_selection'
@@ -23,7 +24,7 @@ include { MACSYFINDER_SEARCH as CONJSCAN } from '../modules/nf-core/macsyfinder/
 include { MACSYFINDER_SEARCH as MACSYFINDER } from '../modules/nf-core/macsyfinder/search'
 include { BAKTA_BAKTA as BAKTA } from '../modules/nf-core/bakta/bakta'
 include { AMRFINDERPLUS_RUN as AMRFINDERPLUS } from '../modules/nf-core/amrfinderplus/run'
-include { ABRICATE_RUN as ABRICATE } from '../modules/nf-core/abricate/run'
+include { ABRICATE_RUN as ABRICATE; ABRICATE_RESOURCE_PROBE } from '../modules/nf-core/abricate/run'
 include { ISESCAN; ISESCAN_RESOURCE_PROBE } from '../modules/annotation/isescan'
 include { INTEGRONFINDER } from '../modules/nf-core/integronfinder'
 include { PRODIGAL } from '../modules/nf-core/prodigal'
@@ -126,7 +127,11 @@ workflow PLASMID_DOWNSTREAM {
     }
     if (selectedTools(params.annotation_tools).contains('abricate') || selectedTools(params.annotation_optional_tools).contains('abricate')) {
         // optional --datadir left empty; --db selected via ext.args
-        ABRICATE(ch_plasmids, [])
+        ch_abricate_resource_helper = Channel.value(file("${moduleDir}/../bin/abricate_runtime_resources.pl", checkIfExists: true))
+        ABRICATE_RESOURCE_PROBE(ch_plasmids, [], ch_abricate_resource_helper)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: ABRICATE_RESOURCE_PROBE.out], '08_annotation', 'ABRICATE_RESOURCE_PROBE'))
+        ch_abricate_identity = ABRICATE_RESOURCE_PROBE.out.identity.map { meta, receipt -> abricateResourceRecord(meta, receipt) }
+        ABRICATE(ch_plasmids.join(ch_abricate_identity, failOnDuplicate: true, failOnMismatch: true), [], ch_abricate_resource_helper)
         ch_report_events = ch_report_events.mix(reportEvidence([channels: ABRICATE.out], '08_annotation', 'ABRICATE'))
     }
     if (selectedTools(params.annotation_tools).contains('isescan')) {
