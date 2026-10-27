@@ -27,12 +27,15 @@ input:
         pattern: "*.{fa,fas,fna,fasta}"
         ontologies:
           - edam: http://edamontology.org/format_1929
-  - db:
-      type: file
-      description: |
-        Path to the Bakta database directory. Must have amrfinderplus database directory already installed within it (in a directory called 'amrfinderplus-db/').
-      ontologies:
-        - edam: http://edamontology.org/data_1049
+  - - db:
+        type: file
+        description: |
+          Path to the Bakta database directory. Must have amrfinderplus database directory already installed within it (in a directory called 'amrfinderplus-db/').
+        ontologies:
+          - edam: http://edamontology.org/data_1049
+    - db_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
   - proteins:
       type: file
       description: FASTA/GenBank file of trusted proteins to first annotate from (optional)

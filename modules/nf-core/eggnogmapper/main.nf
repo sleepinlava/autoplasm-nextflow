@@ -1,4 +1,5 @@
 process EGGNOGMAPPER {
+    cache 'deep'
     tag "$meta.id"
     label 'process_high'
 
@@ -9,8 +10,8 @@ process EGGNOGMAPPER {
 
     input:
     tuple val(meta), path(fasta)
-    tuple val(search_mode), path(db)
-    path(eggnog_data_dir)
+    tuple val(search_mode), path(db), val(db_identity)
+    tuple path(eggnog_data_dir), val(eggnog_data_identity)
 
     output:
     tuple val(meta), path("*.emapper.annotations")   , emit: annotations

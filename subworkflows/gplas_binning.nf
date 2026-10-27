@@ -10,6 +10,11 @@ workflow GPLAS_BINNING {
     ch_graph    // same-task SPAdes GFA segments, including KC counts
 
     main:
+    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../lib/ResourceIdentity.groovy"))
+    def resource = { location ->
+        def directory = file(location, checkIfExists: true)
+        tuple(directory, ResourceIdentity.capture(directory))
+    }
     ch_events = Channel.empty()
     ch_bins = Channel.empty()
     ch_states = Channel.empty()
@@ -44,8 +49,7 @@ workflow GPLAS_BINNING {
             .join(GPLAS_NODE_DETECTION.out.consensus, failOnDuplicate: true, failOnMismatch: true)
             .join(ch_assessment, failOnDuplicate: true, failOnMismatch: true), Channel.value(file("${moduleDir}/../bin/gplas_inputs.py", checkIfExists: true)))
         GPLAS2(GPLAS2_PREDICTIONS.out.ready,
-            Channel.value(tuple(file(params.gplas_source, checkIfExists: true),
-                files("${params.gplas_source}/**", type: 'file', hidden: true))), Channel.value(file("${moduleDir}/../bin/gplas_checked.py", checkIfExists: true)))
+            Channel.value(resource.call(params.gplas_source)), Channel.value(file("${moduleDir}/../bin/gplas_checked.py", checkIfExists: true)))
         ch_bins = GPLAS2.out.bins.map { meta, bins -> tuple(meta.gplas_original_meta, bins) }
         ch_states = GPLAS2_NODES.out.state.mix(GPLAS2_PREDICTIONS.out.state)
             .map { meta, state -> tuple(meta.gplas_original_meta, state) }

@@ -68,7 +68,9 @@ def run(base, fixture, prefix, proteins, old_module, cases):
     workflow = ROOT / 'tests/nextflow/dastool_custom_db.nf'
     if old_module:
         before = base / 'before-probe.nf'
-        before.write_text(workflow.read_text().replace("'../../modules/nf-core/dastool/dastool/main'", repr(str(old_module.with_suffix('')))))
+        before.write_text(workflow.read_text().replace("'../../modules/nf-core/dastool/dastool/main'", repr(str(old_module.with_suffix(''))))
+            .replace("'../../lib/resource_inputs'",repr(str(ROOT/'lib/resource_inputs')))
+            .replace('Channel.value(resourceInput(params.db_dir ?: null))','params.db_dir ? file(params.db_dir,checkIfExists:true) : []'))
     definitions = [('custom-space', space, None, None), ('custom-named-db', named_db, proteins, None), ('default-db', None, None, None),
                    ('missing-file', missing, proteins, 'DAS Tool custom database is missing or empty: arc.scg.lookup'),
                    ('empty-file', empty, proteins, 'DAS Tool custom database is missing or empty: bac.scg.faa'),

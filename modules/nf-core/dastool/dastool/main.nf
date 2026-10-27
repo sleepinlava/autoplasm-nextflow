@@ -1,4 +1,5 @@
 process DASTOOL_DASTOOL {
+    cache 'deep'
     tag "${meta.id}"
     label 'process_medium'
 
@@ -9,7 +10,7 @@ process DASTOOL_DASTOOL {
 
     input:
     tuple val(meta), path(contigs), path(bins, arity: '1..*'), path(proteins)
-    path db_directory, stageAs: 'dastool_db'
+    tuple path(db_directory, stageAs: 'dastool_db'), val(db_identity)
 
     output:
     tuple val(meta), path("*.log")                                      , emit: log

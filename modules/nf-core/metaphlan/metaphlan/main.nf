@@ -1,4 +1,5 @@
 process METAPHLAN_METAPHLAN {
+    cache 'deep'
     tag "${meta.id}"
     label 'process_medium'
 
@@ -9,7 +10,7 @@ process METAPHLAN_METAPHLAN {
 
     input:
     tuple val(meta), path(input)
-    path db_metaphlan_latest
+    tuple path(db_metaphlan_latest), val(db_identity)
     val save_samfile
 
     output:

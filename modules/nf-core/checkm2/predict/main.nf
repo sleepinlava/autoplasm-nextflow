@@ -1,4 +1,5 @@
 process CHECKM2_PREDICT {
+    cache 'deep'
     tag "${meta.id}"
     label 'process_medium'
 
@@ -9,7 +10,7 @@ process CHECKM2_PREDICT {
 
     input:
     tuple val(meta), path(fasta, stageAs: "input_bins/*")
-    tuple val(dbmeta), path(db)
+    tuple val(dbmeta), path(db), val(db_identity)
 
     output:
     tuple val(meta), path("${prefix}")                   , emit: checkm2_output

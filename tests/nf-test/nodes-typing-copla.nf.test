@@ -12,12 +12,13 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
                 input[5] = file("${new File('bin/run_copla_candidates.py').absolutePath}", checkIfExists: true)
                 input[0] = [[id:'Lab26'], file("${System.getenv('AUTOPLASM_COPLA_DATA')}/Lab26.fna.gz",checkIfExists:true)]
                 input[1] = file("${System.getenv('AUTOPLASM_COPLA_GRAPH')}",checkIfExists:true)
                 input[2] = file("${System.getenv('AUTOPLASM_COPLA_REFLIST')}",checkIfExists:true)
-                input[3] = file("${System.getenv('AUTOPLASM_COPLA_INSTALLATION')}",checkIfExists:true)
-                input[4] = file("${System.getenv('AUTOPLASM_COPLA_MACSYFINDER')}",checkIfExists:true)
+                input[3] = [file("${System.getenv('AUTOPLASM_COPLA_INSTALLATION')}",checkIfExists:true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_COPLA_INSTALLATION')}",checkIfExists:true))]
+                input[4] = [file("${System.getenv('AUTOPLASM_COPLA_MACSYFINDER')}",checkIfExists:true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_COPLA_MACSYFINDER')}",checkIfExists:true))]
                 """
             }
         }

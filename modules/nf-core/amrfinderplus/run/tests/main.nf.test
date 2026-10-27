@@ -26,11 +26,18 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                def resource = { value ->
+                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+                    def root = file(value, checkIfExists: true)
+                    tuple(root, ResourceIdentity.capture(root))
+                }
+
                 input[0] = [
                     [ id:'test' ],
                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/haemophilus_influenzae/genome/genome.fna.gz', checkIfExists: true)
                 ]
-                input[1] = AMRFINDERPLUS_UPDATE.out.db
+                input[1] = AMRFINDERPLUS_UPDATE.out.db.map { resource.call(it) }
                 """
             }
         }
@@ -50,11 +57,18 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                def resource = { value ->
+                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+                    def root = file(value, checkIfExists: true)
+                    tuple(root, ResourceIdentity.capture(root))
+                }
+
                 input[0] = [
                     [ id:'test' ],
                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/haemophilus_influenzae/genome/genome.fna.gz', checkIfExists: true)
                 ]
-                input[1] = AMRFINDERPLUS_UPDATE.out.db
+                input[1] = AMRFINDERPLUS_UPDATE.out.db.map { resource.call(it) }
                 """
             }
         }

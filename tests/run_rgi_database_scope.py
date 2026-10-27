@@ -67,7 +67,7 @@ def run_checks(base, fixture, prefix, module, cases):
                    '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
         env = os.environ.copy()
         env['PATH'] = str(prefix / 'bin') + ':' + env['PATH']
-        result = subprocess.run(command, env=env, capture_output=True, text=True)
+        result = subprocess.run(command, env=env, capture_output=True, text=True, cwd=base)
         (p / 'stdout.log').write_text(result.stdout)
         (p / 'stderr.log').write_text(result.stderr)
         tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []

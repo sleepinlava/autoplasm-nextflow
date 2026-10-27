@@ -10,7 +10,7 @@ process GTDBTK_CLASSIFYWF {
 
     input:
     tuple val(meta)   , path("bins/*")
-    tuple val(db_name), path(db)
+    tuple val(db_name), path(db), val(db_identity)
     val use_pplacer_scratch_dir
     // Explicit regular files: helper changes participate in deep caching.
     path(autoplasm_helper_0, stageAs: 'normalize_gtdb_bins.py')

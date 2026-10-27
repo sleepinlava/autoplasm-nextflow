@@ -1,0 +1,122 @@
+{
+  "upstream_commit": "258991a5bc0f483c958040a55d339e1f447429ac",
+  "submodules": [
+    {
+      "path": "anvio/data/interactive/lib/JavaScript-MD5",
+      "commit": "9756d82db70b0f678bc6cd055e7aa08f5c1a0390",
+      "url": "https://codeload.github.com/blueimp/JavaScript-MD5/tar.gz/9756d82db70b0f678bc6cd055e7aa08f5c1a0390",
+      "archive_sha256": "e85d9b983921dcc3b9927aa498a63d7034162d594a58329ebb31d45c2c7e82be",
+      "files": 16,
+      "digest": "ed23a37172d63601928e6ca2a4e38cb79b905b455d40106896cb14298a06e15a",
+      "bytes": 142216
+    },
+    {
+      "path": "anvio/data/interactive/lib/bootstrap",
+      "commit": "16b48259a62f576e52c903c476bd42b90ab22482",
+      "url": "https://codeload.github.com/twbs/bootstrap/tar.gz/16b48259a62f576e52c903c476bd42b90ab22482",
+      "archive_sha256": "b04a955a9321965179206aebd4042d79632221664005d4564faad6f63cce6594",
+      "files": 361,
+      "digest": "5490896d35904851c6e3f5f040ff7ef88e09a664c1e9e6ca1f4704b4830e50c4",
+      "bytes": 3203512
+    },
+    {
+      "path": "anvio/data/interactive/lib/bootstrap-markdown",
+      "commit": "0320bec0bdb3fa49754d8fc26bfe2159c5fbe4d2",
+      "url": "https://codeload.github.com/toopay/bootstrap-markdown/tar.gz/0320bec0bdb3fa49754d8fc26bfe2159c5fbe4d2",
+      "archive_sha256": "15c115dc3910c388a032b835823ae4308c6aebc968de4f5b0a309d9e8721baea",
+      "files": 32,
+      "digest": "14150e5032cc01ae771b1eb8d8c7a146cb4a3677ee21f3f5ef765cc53277231c",
+      "bytes": 23133
+    },
+    {
+      "path": "anvio/data/interactive/lib/bootstrap-sortable",
+      "commit": "159505ae6ad99aefd727e8ffd9dc31cad58905b7",
+      "url": "https://codeload.github.com/drvic10k/bootstrap-sortable/tar.gz/159505ae6ad99aefd727e8ffd9dc31cad58905b7",
+      "archive_sha256": "a85d283d5101129f3985b8f8bbe75d98ba9b50cb76769d02298e692c5b7f225a",
+      "files": 6,
+      "digest": "ce51d07097129b25136d4ca36f9a63577d53bdb7b61f01a44e0121f46eeb6d72",
+      "bytes": 16212
+    },
+    {
+      "path": "anvio/data/interactive/lib/bootstrap-waitingfor",
+      "commit": "6ea63523247fe772bca0e633dc51a62e9dfbc9ce",
+      "url": "https://codeload.github.com/ehpc/bootstrap-waitingfor/tar.gz/6ea63523247fe772bca0e633dc51a62e9dfbc9ce",
+      "archive_sha256": "548899460475e416875eb2e488b9691319e8561455c0eaa4cadd660779bfee32",
+      "files": 14,
+      "digest": "1304a4f3e65c7df9c7e014a46b06ec73b4b864de219309a05145f76496ad0668",
+      "bytes": 8248
+    },
+    {
+      "path": "anvio/data/interactive/lib/d3.js",
+      "commit": "b48420930f3848b1498c034387fac2588903d7cf",
+      "url": "https://codeload.github.com/mbostock/d3/tar.gz/b48420930f3848b1498c034387fac2588903d7cf",
+      "archive_sha256": "e38ff0bc5a756411e725a8641de5c48fbdae85a7f795aaa3a530d228b2d6d525",
+      "files": 546,
+      "digest": "ce0d46a9eb17cb07d48bb6f1d93b23889bccae9f5c51b45b3f8d170fc686b3bb",
+      "bytes": 3025051
+    },
+    {
+      "path": "anvio/data/interactive/lib/jquery",
+      "commit": "1472290917f17af05e98007136096784f9051fab",
+      "url": "https://codeload.github.com/jquery/jquery/tar.gz/1472290917f17af05e98007136096784f9051fab",
+      "archive_sha256": "e5a8afb7663174746784e65091b3642ddc3a8422966fdcc4041b7c0d4a6ddb31",
+      "files": 226,
+      "digest": "fd9c2189760b96519bc6cb53cc53943c49f62f73db214bff889a85cd3f642752",
+      "bytes": 698526
+    },
+    {
+      "path": "anvio/data/interactive/lib/jquery-ui",
+      "commit": "d6713024e16de90ea71dc0544ba34e1df01b4d8a",
+      "url": "https://codeload.github.com/jquery/jquery-ui/tar.gz/d6713024e16de90ea71dc0544ba34e1df01b4d8a",
+      "archive_sha256": "a5070b085c98217bbeda8dc0e5cd9973e836f73f43f7923db3b05d7e86ce990b",
+      "files": 663,
+      "digest": "609f745769431803ee0258063671c536cd203fffd598185ac57d9fdf646978a4",
+      "bytes": 2540421
+    },
+    {
+      "path": "anvio/data/interactive/lib/marked",
+      "commit": "8f9d0b72f5606ed32057049f387161dd41c36ade",
+      "url": "https://codeload.github.com/chjj/marked/tar.gz/8f9d0b72f5606ed32057049f387161dd41c36ade",
+      "archive_sha256": "ddc574e45e9cc58f1d43418280dd0f48db58bd9b562ca286b9e6d6edf9b6362e",
+      "files": 228,
+      "digest": "dec4c0040f626e0e0a18f997b8c17c03e89fdb7123d7582294f71cac03d08aa3",
+      "bytes": 77189
+    },
+    {
+      "path": "anvio/data/interactive/lib/randomColor",
+      "commit": "455f347ecde2f61f9d32d9d1dbe4f6f28e54fc9e",
+      "url": "https://codeload.github.com/davidmerfield/randomColor/tar.gz/455f347ecde2f61f9d32d9d1dbe4f6f28e54fc9e",
+      "archive_sha256": "ad686d40caf7101246221780eb24409ef76e01dc150ab7bd972972d441b0f98e",
+      "files": 11,
+      "digest": "d4b7eb0ed07bf2adbc7f7d7cf20377b81042cbd8e46a8a81ff6e81a86ba1572b",
+      "bytes": 14519
+    },
+    {
+      "path": "anvio/data/interactive/lib/toastr",
+      "commit": "b957ae9f38e6856346a0200e83281b08ca717a7d",
+      "url": "https://codeload.github.com/CodeSeven/toastr/tar.gz/b957ae9f38e6856346a0200e83281b08ca717a7d",
+      "archive_sha256": "b989290941d5907a2f5132e344fc7a7bb9897f4a670057669783a20a64f0eba8",
+      "files": 74,
+      "digest": "dfc5bdda96e1105e55fe8c5a319bb0190a091f59ab7f69275fc69734332dd13c",
+      "bytes": 215106
+    },
+    {
+      "path": "anvio/data/static/content/bootstrap-sortable",
+      "commit": "64e1a43425d3b87605f2bf365d681056a14cd30a",
+      "url": "https://codeload.github.com/drvic10k/bootstrap-sortable/tar.gz/64e1a43425d3b87605f2bf365d681056a14cd30a",
+      "archive_sha256": "b7b359cf9296dbc9c5d4cb8639d44e9b7b8f31fe5ec1da047a557db39bf8a7f5",
+      "files": 6,
+      "digest": "7c652716eec427110c8afdcd3dec66025a34b4c181d5b461d3d30e563aaf5f3f",
+      "bytes": 16220
+    },
+    {
+      "path": "anvio/data/static/content/chartsjs",
+      "commit": "cc57b9e58192e28e061eec93ec5e646ba9cfd99b",
+      "url": "https://codeload.github.com/nnnick/Chart.js/tar.gz/cc57b9e58192e28e061eec93ec5e646ba9cfd99b",
+      "archive_sha256": "bb600d0c5e8d794d766baa8b15b1ef65870e1ea8bbaedd5665df72140e9280f1",
+      "files": 33,
+      "digest": "cb697fcf716471cfb023d1480169090e25fe15a54be92e5f9556a8088d8fae42",
+      "bytes": 80744
+    }
+  ]
+}

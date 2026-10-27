@@ -1,4 +1,5 @@
 process MACSYFINDER_SEARCH {
+    cache 'deep'
     tag "$meta.id"
     label 'process_medium'
 
@@ -9,7 +10,7 @@ process MACSYFINDER_SEARCH {
 
     input:
     tuple val(meta), path(proteins), path(topology)
-    path models
+    tuple path(models), val(models_identity)
     val model_names
 
     output:

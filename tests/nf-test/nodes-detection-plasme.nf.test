@@ -13,10 +13,11 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
                 input[3] = [file("${new File('bin/normalize_plasme_outputs.py').absolutePath}", checkIfExists: true), file("${new File('bin/plasme_runtime.py').absolutePath}", checkIfExists: true)]
                 input[0] = [[id: 'pUTI89'], file("${System.getenv('AUTOPLASM_PLASME_INPUTS')}/pUTI89.fna", checkIfExists: true)]
-                input[1] = file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true)
-                input[2] = file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true)
+                input[1] = [file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true))]
+                input[2] = [file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true))]
                 """
             }
         }
@@ -51,10 +52,11 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
                 input[3] = [file("${new File('bin/normalize_plasme_outputs.py').absolutePath}", checkIfExists: true), file("${new File('bin/plasme_runtime.py').absolutePath}", checkIfExists: true)]
                 input[0] = [[id: 'pUTI89'], file("${System.getenv('AUTOPLASM_PLASME_INPUTS')}/pUTI89.fna.gz", checkIfExists: true)]
-                input[1] = file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true)
-                input[2] = file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true)
+                input[1] = [file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true))]
+                input[2] = [file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true))]
                 """
             }
         }

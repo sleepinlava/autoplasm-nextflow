@@ -16,8 +16,15 @@ nextflow_process {
             }
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                def resource = { value ->
+                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+                    def root = file(value, checkIfExists: true)
+                    tuple(root, ResourceIdentity.capture(root))
+                }
+
                 input[0] = [ [id: 'test'], [file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz', checkIfExists: true)] ]
-                input[1] = [ [id: 'checkm2_small_db'], file(params.modules_testdata_base_path + 'delete_me/binette_checkm2/binette_checkm2_small_db.dmnd', checkIfExists: true) ]
+                input[1] = ([ [id: 'checkm2_small_db'], file(params.modules_testdata_base_path + 'delete_me/binette_checkm2/binette_checkm2_small_db.dmnd', checkIfExists: true) ]).with { value -> resource.call(value[1]).with { r -> tuple(value[0], r[0], r[1]) } }
                 """
             }
         }
@@ -40,8 +47,15 @@ nextflow_process {
             }
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                def resource = { value ->
+                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+                    def root = file(value, checkIfExists: true)
+                    tuple(root, ResourceIdentity.capture(root))
+                }
+
                 input[0] = [ [id: 'test'], [file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz', checkIfExists: true)] ]
-                input[1] = [ [id: 'checkm2_small_db'], file(params.modules_testdata_base_path + 'delete_me/binette_checkm2/binette_checkm2_small_db.dmnd', checkIfExists: true) ]
+                input[1] = ([ [id: 'checkm2_small_db'], file(params.modules_testdata_base_path + 'delete_me/binette_checkm2/binette_checkm2_small_db.dmnd', checkIfExists: true) ]).with { value -> resource.call(value[1]).with { r -> tuple(value[0], r[0], r[1]) } }
                 """
             }
         }

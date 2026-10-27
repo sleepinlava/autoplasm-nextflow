@@ -524,7 +524,7 @@ DESeq2 部署版本补验使用 `tests/run_deseq2_model.py --deseq-prefix <locke
 
 ### PlasX完整自动注释验证（2026-10-24）
 
-`nodes-detection-plasx.nf.test`实际运行生产两阶段：逐样本anvi’o7.1 COG2014/Pfam32及完整十组de novo家族，再用原模型评分。设置`AUTOPLASM_PLASX_ROOT`指向完整资源目录，包含primary/、anvio-primary-complete/、COG_2014/、Pfam_v32/、profiles/及原始系数文件；原始数据和模型锁在`tests/plasx-native.lock.json`，两阶段分别使用351包和63包Linux64显式锁。可用`tests/prepare_plasx_resources.py --outdir <新资源目录> --anvio-prefix <351包环境> --cache <已有下载缓存>`重建全部公共资源；准备会运行原生索引程序，需要足够磁盘及进程通信权限。重建器返回的生产参数使用`sources/anvio`、`sources/plasx`及`model/`；本P3资源根目录采用上述审计布局，重建后需为同一完整资源设置对应目录/文件别名，不能省略资源。
+`nodes-detection-plasx.nf.test`实际运行生产两阶段：逐样本anvi’o7.1 COG2014/Pfam32及完整十组de novo家族，再用原模型评分。设置`AUTOPLASM_PLASX_ROOT`指向完整资源目录，包含primary/、anvio-primary-complete/、COG_2014/、Pfam_v32/、profiles/及原始系数文件；原始数据和模型锁在`tests/plasx-native.lock.json`，两阶段分别使用351包和63包Linux64显式锁。可用`tests/prepare_plasx_resources.py prepare --outdir <新资源目录> --anvio-prefix <351包环境> --cache <已有下载缓存>`重建全部公共资源；准备会运行原生索引程序，需要足够磁盘及进程通信权限。重建器返回的生产参数使用`sources/anvio`、`sources/plasx`及`model/`；本P3资源根目录采用上述审计布局，重建后需为同一完整资源设置对应目录/文件别名，不能省略资源。
 
 必须使用提供生产配置的原生或Conda overlay，不再使用无依赖的Python容器冒充PlasX。P3断言同时检查两任务、三类注释、原生运行记录、样本状态域及标准库独立计数/logistic算术；不把本次自动输出更新成“独立生物真值”快照。`tests/run_plasx_native.py --workflow <有execution.json的冷运行目录> --source <官方源码> --model <原模型> --output <新核验目录>`可单独核对既有执行，`--prefix <原生环境>`另执行未修改官方predict对照；`--products`只验证产物，不能代替执行证据。整个组装0基因目前原生明确失败，排除支持；无COG/Pfam命中及未评分contig另行核验。
 
@@ -535,3 +535,12 @@ DESeq2 部署版本补验使用 `tests/run_deseq2_model.py --deseq-prefix <locke
 `prerequisites/`保存8类测试专用helper，按各consumer在`modules.json`中的固定commit获取；24个代码/环境/metadata文件、原MIT许可和完整来源见`source-lock.json`。10个vendored suite的14处setup引用现在指向此目录，生产工具版本和模块登记保持不变。更新consumer后须同步核对这些来源。
 
 `docs/tool-audit/scripts/check_vendored_prerequisites.py`检查literal路径、源文件Git blob和consumer版本。实际nf-test `--dryRun`只执行发现：它打印的PASSED不能算已执行测试。真实归档I/O另由`tests/run_upstream_prerequisites.py`对固定FASTA、匹配版本的工具prefix、meta和CRC错误传播检查；这不认证其他需要模型/数据库的P1用例。原HiFi下载模块使用master数据库，实际运行前需另外固定其数据身份。完整范围见`docs/tool-audit/contracts/vendored-prerequisites.md`。
+
+
+### TA-091 目录资源续接（2026-10-26，候选）
+
+当前目录资源输入使用缓存查找前的紧凑内容/布局身份，不再将目录 glob 列表逐文件 staging。`tests/run_resource_identity.py` 检查实际 Groovy 实现与独立 Python oracle；`tests/run_resource_consumers.py --work-dir <新目录>` 分别修改15个资源输入，在13个实际消费者上核验目标重算、其他任务缓存和还原。后者是明确的 stub/version/PHF CLI observer，不是分类器推理。
+
+固定 anvi’o 主归档含13个 Git 子模块占位，原解包树中有3个断链。完整枚举明确拒绝该树，不跳过断链。资源准备器现按 `tests/anvio-submodules.lock.json` 的原提交、长度和SHA补齐全部13个子模块，并分别验证原1185个源码摘要和各子模块摘要。运行准备器的驱动 Python 需支持 `tarfile` 的 data filter（Python3.12+）；实际anvi’o工具继续使用原3.7环境，方法和数据库不变。已有原解包树可用 `python3 tests/prepare_anvio_submodules.py --source <原解包树> --archives <锁定归档缓存> --output <新的完整源码目录>` 生成完整副本，再设置生产 `--plasx_anvio_source`。PlasX P3可用 `AUTOPLASM_ANVIO_SOURCE` 覆盖其源码目录，其他资源仍由 `AUTOPLASM_PLASX_ROOT` 提供。
+
+恢复控制绑定冷运行的精确 session UUID；并发驱动各用独立工作目录下的 `.nextflow/history`。运行名或未指明会话的 `-resume` 不能代替本轮实际任务状态断言。当前证据及尚未覆盖的隐式环境/模型以 `docs/tool-audit/contracts/resource-directory-cache.md` 和本轮receipt为准；TA-091未正式接受。

@@ -30,11 +30,18 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                def resource = { value ->
+                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+                    def root = file(value, checkIfExists: true)
+                    tuple(root, ResourceIdentity.capture(root))
+                }
+
                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
-                input[1] = DIAMOND_MAKEDB.out.db.map { _meta, db -> [ 'diamond', db ] }
+                input[1] = DIAMOND_MAKEDB.out.db.map { _meta, db -> [ 'diamond', db ] }.map { mode, db -> resource.call(db).with { value -> tuple(mode, value[0], value[1]) } }
                 eggnog_db = file(params.modules_testdata_base_path + '/delete_me/eggnogmapper/eggnog.db', checkIfExists: true)
                 eggnog_db.copyTo("${workDir}/tmp/eggnog.db")
-                input[2] = "${workDir}/tmp/"
+                input[2] = resource.call("${workDir}/tmp/")
                 """
             }
         }
@@ -68,11 +75,18 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                def resource = { value ->
+                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+                    def root = file(value, checkIfExists: true)
+                    tuple(root, ResourceIdentity.capture(root))
+                }
+
                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
-                input[1] = MMSEQS_CREATEDB.out.db.map { _meta, db -> [ 'mmseqs', db ] }
+                input[1] = MMSEQS_CREATEDB.out.db.map { _meta, db -> [ 'mmseqs', db ] }.map { mode, db -> resource.call(db).with { value -> tuple(mode, value[0], value[1]) } }
                 eggnog_db = file(params.modules_testdata_base_path + '/delete_me/eggnogmapper/eggnog.db', checkIfExists: true)
                 eggnog_db.copyTo("${workDir}/tmp/eggnog.db")
-                input[2] = "${workDir}/tmp/"
+                input[2] = resource.call("${workDir}/tmp/")
                 """
             }
         }
@@ -121,11 +135,18 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                def resource = { value ->
+                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+                    def root = file(value, checkIfExists: true)
+                    tuple(root, ResourceIdentity.capture(root))
+                }
+
                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
-                input[1] = EGGNOGMAPPER_SETUP.out.orthologs.map { _meta, orthologs -> [ 'no_search', orthologs ] }
+                input[1] = EGGNOGMAPPER_SETUP.out.orthologs.map { _meta, orthologs -> [ 'no_search', orthologs ] }.map { mode, db -> resource.call(db).with { value -> tuple(mode, value[0], value[1]) } }
                 eggnog_db = file(params.modules_testdata_base_path + '/delete_me/eggnogmapper/eggnog.db', checkIfExists: true)
                 eggnog_db.copyTo("${workDir}/tmp/eggnog.db")
-                input[2] = "${workDir}/tmp/"
+                input[2] = resource.call("${workDir}/tmp/")
                 """
             }
         }
@@ -161,11 +182,18 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                def resource = { value ->
+                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+                    def root = file(value, checkIfExists: true)
+                    tuple(root, ResourceIdentity.capture(root))
+                }
+
                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
-                input[1] = DIAMOND_MAKEDB.out.db.map { _meta, db -> [ 'diamond', db ] }
+                input[1] = DIAMOND_MAKEDB.out.db.map { _meta, db -> [ 'diamond', db ] }.map { mode, db -> resource.call(db).with { value -> tuple(mode, value[0], value[1]) } }
                 eggnog_db = file(params.modules_testdata_base_path + '/delete_me/eggnogmapper/eggnog.db', checkIfExists: true)
                 eggnog_db.copyTo("${workDir}/tmp/eggnog.db")
-                input[2] = "${workDir}/tmp/"
+                input[2] = resource.call("${workDir}/tmp/")
                 """
             }
         }

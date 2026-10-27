@@ -10,8 +10,8 @@ process RGI_MAIN {
 
     input:
     tuple val(meta), path(fasta)
-    path card
-    path wildcard
+    tuple path(card), val(card_identity)
+    tuple path(wildcard), val(wildcard_identity)
     // Explicit regular files: helper changes participate in deep caching.
     path(autoplasm_helper_0, stageAs: 'validate_rgi_card.py')
 

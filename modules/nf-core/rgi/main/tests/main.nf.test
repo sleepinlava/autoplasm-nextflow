@@ -42,13 +42,20 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                def resource = { value ->
+                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+                    def root = file(value, checkIfExists: true)
+                    tuple(root, ResourceIdentity.capture(root))
+                }
+
                 input[3] = file("${new File('bin/validate_rgi_card.py').absolutePath}", checkIfExists: true)
                 input[0] = [
                     [ id:'test', single_end:false ],
                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/haemophilus_influenzae/genome/genome.fna.gz', checkIfExists: true)
                 ]
-                input[1] = RGI_CARDANNOTATION.out.db
-                input[2] = []
+                input[1] = RGI_CARDANNOTATION.out.db.map { resource.call(it) }
+                input[2] = resource.call([])
                 """
             }
         }
@@ -68,13 +75,20 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                def resource = { value ->
+                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+                    def root = file(value, checkIfExists: true)
+                    tuple(root, ResourceIdentity.capture(root))
+                }
+
                 input[3] = file("${new File('bin/validate_rgi_card.py').absolutePath}", checkIfExists: true)
                 input[0] = [
                     [ id:'test', single_end:false ],
                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/haemophilus_influenzae/genome/genome.fna.gz', checkIfExists: true)
                 ]
-                input[1] = RGI_CARDANNOTATION.out.db
-                input[2] = []
+                input[1] = RGI_CARDANNOTATION.out.db.map { resource.call(it) }
+                input[2] = resource.call([])
                 """
             }
         }

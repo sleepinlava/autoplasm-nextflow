@@ -16,6 +16,7 @@ nextflow_process {
             script "tests/nf-test/prerequisites/nf-core/untar/main.nf"
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
                 input[0] = [
                     [id: "genomad_db"],
                     file("https://raw.githubusercontent.com/nf-core/test-datasets/refs/heads/mag/databases/genomad/genomad_db_subset_v1.9.tar.gz", checkIfExists: true)
@@ -29,11 +30,12 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
                 input[0] = [
                     [ id:'test' ], // meta map
                     file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
                     ]
-                input[1] = UNTAR.out.untar
+                input[1] = UNTAR.out.untar.map { meta, database -> tuple(meta, database, ResourceIdentity.capture(database)) }
                 """
             }
         }
@@ -59,11 +61,12 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
                 input[0] = [
                     [ id:'test' ], // meta map
                     file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
                 ]
-                input[1] = UNTAR.out.untar
+                input[1] = UNTAR.out.untar.map { meta, database -> tuple(meta, database, ResourceIdentity.capture(database)) }
                 """
             }
         }

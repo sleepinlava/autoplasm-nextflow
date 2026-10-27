@@ -1,4 +1,5 @@
 process BAKTA_BAKTA {
+    cache 'deep'
     tag "${meta.id}"
     label 'process_medium'
 
@@ -9,7 +10,7 @@ process BAKTA_BAKTA {
 
     input:
     tuple val(meta), path(fasta)
-    path db
+    tuple path(db), val(db_identity)
     path proteins
     path prodigal_tf
     path regions

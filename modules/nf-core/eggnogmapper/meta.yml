@@ -61,13 +61,19 @@ input:
         ontologies:
           - edam: http://edamontology.org/format_1370 # HMMER format
           - edam: http://edamontology.org/format_3475 # TSV
-  - eggnog_data_dir:
-      type: directory
-      description: |
-        Directory containing eggnog-mapper database files
-        (e.g. can be downloaded via download_eggnog_data.py,
-        found in the eggnog-mapper repository)
-      pattern: "*"
+    - db_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+  - - eggnog_data_dir:
+        type: directory
+        description: |
+          Directory containing eggnog-mapper database files
+          (e.g. can be downloaded via download_eggnog_data.py,
+          found in the eggnog-mapper repository)
+        pattern: "*"
+    - eggnog_data_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
 output:
   annotations:
     - - meta:

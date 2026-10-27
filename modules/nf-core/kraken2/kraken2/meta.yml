@@ -31,9 +31,12 @@ input:
           List of input FastQ files of size 1 and 2 for single-end and paired-end data,
           respectively.
         ontologies: []
-  - db:
-      type: directory
-      description: Kraken2 database
+  - - db:
+        type: directory
+        description: Kraken2 database
+    - db_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
   - save_output_fastqs:
       type: string
       description: |

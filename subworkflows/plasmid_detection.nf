@@ -20,27 +20,30 @@ workflow PLASMID_DETECTION {
 
     main:
     ch_report_events = Channel.empty()
+    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../lib/ResourceIdentity.groovy"))
+    def resource = { location ->
+        def directory = file(location, checkIfExists: true)
+        tuple(directory, ResourceIdentity.capture(directory))
+    }
     // nf-core module expects the database as tuple val(meta2), path(db); the
     // db carries no sample metadata, so meta2 is an empty map.
-    GENOMAD(ch_assembly, Channel.value([[:], file(params.genomad_db, checkIfExists: true)]))
+    GENOMAD(ch_assembly, Channel.value(resource.call(params.genomad_db)).map { directory, identity -> tuple([:], directory, identity) })
     ch_report_events = ch_report_events.mix(reportEvidence([channels: GENOMAD.out], '04_plasmid_detection', 'GENOMAD'))
 
     ch_plasme = Channel.empty()
     if (selectedTools(params.plasmid_detection_tools).contains('plasme')) {
-        PLASME(ch_assembly, Channel.value(file(params.plasme_db, checkIfExists: true)),
-               Channel.value(file(params.plasme_dir, checkIfExists: true)), Channel.value(tuple(file("${moduleDir}/../bin/normalize_plasme_outputs.py", checkIfExists: true), file("${moduleDir}/../bin/plasme_runtime.py", checkIfExists: true))))
+        PLASME(ch_assembly, Channel.value(resource.call(params.plasme_db)),
+               Channel.value(resource.call(params.plasme_dir)), Channel.value(tuple(file("${moduleDir}/../bin/normalize_plasme_outputs.py", checkIfExists: true), file("${moduleDir}/../bin/plasme_runtime.py", checkIfExists: true))))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASME.out], '04_plasmid_detection', 'PLASME'))
         ch_plasme = PLASME.out.predictions
     }
     ch_plasx = Channel.empty()
     if (selectedTools(params.plasmid_detection_tools).contains('plasx')) {
-        // Numbered dependency staging avoids basename collisions in full source
-        // trees. Recursive regular files make reference/source bytes cache inputs.
-        def resource = { location -> Channel.value(tuple(file(location, checkIfExists: true),
-            files("${location}/**", type: 'file', hidden: true))) }
-        PLASX_ANNOTATE(ch_assembly, resource.call(params.plasx_anvio_source),
-                      resource.call(params.plasx_cog_db), resource.call(params.plasx_pfam_db), Channel.value(tuple(file("${moduleDir}/../bin/plasx_inputs.py", checkIfExists: true), file("${moduleDir}/../bin/anvio_checked.py", checkIfExists: true))))
-        PLASX(PLASX_ANNOTATE.out.annotations, resource.call(params.plasx_source), resource.call(params.plasx_profiles),
+        // Compact content/layout identity avoids per-member staging and glob omissions.
+        def plasxResource = { location -> Channel.value(resource.call(location)) }
+        PLASX_ANNOTATE(ch_assembly, plasxResource.call(params.plasx_anvio_source),
+                      plasxResource.call(params.plasx_cog_db), plasxResource.call(params.plasx_pfam_db), Channel.value(tuple(file("${moduleDir}/../bin/plasx_inputs.py", checkIfExists: true), file("${moduleDir}/../bin/anvio_checked.py", checkIfExists: true))))
+        PLASX(PLASX_ANNOTATE.out.annotations, plasxResource.call(params.plasx_source), plasxResource.call(params.plasx_profiles),
               Channel.value(file(params.plasx_model, checkIfExists: true)), Channel.value(tuple(file("${moduleDir}/../bin/plasx_inputs.py", checkIfExists: true), file("${moduleDir}/../bin/plasx_checked.py", checkIfExists: true))))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASX_ANNOTATE.out], '04_plasmid_detection', 'PLASX_ANNOTATE'))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASX.out], '04_plasmid_detection', 'PLASX'))
@@ -48,8 +51,7 @@ workflow PLASMID_DETECTION {
     }
     ch_platon = Channel.empty()
     if (selectedTools(params.plasmid_detection_tools).contains('platon')) {
-        PLATON(ch_assembly, Channel.value(tuple(file(params.platon_db, checkIfExists: true),
-            files("${params.platon_db}/**", type: 'file', hidden: true))), Channel.value(file("${moduleDir}/../bin/platon_checked.py", checkIfExists: true)))
+        PLATON(ch_assembly, Channel.value(resource.call(params.platon_db)), Channel.value(file("${moduleDir}/../bin/platon_checked.py", checkIfExists: true)))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLATON.out], '04_plasmid_detection', 'PLATON'))
         ch_platon = PLATON.out.predictions
     }

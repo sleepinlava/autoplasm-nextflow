@@ -35,6 +35,9 @@ input:
         type: file
         description: CheckM2 database
         ontologies: []
+    - db_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
 output:
   checkm2_output:
     - - meta:

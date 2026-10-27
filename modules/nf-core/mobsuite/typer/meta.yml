@@ -28,10 +28,13 @@ input:
         pattern: "*.{fasta,fa,fna}"
         ontologies:
           - edam: "http://edamontology.org/format_1929" # FASTA
-  - db:
-      type: directory
-      description: Optional local copy of MOB-suite database directory
-      pattern: "databases/"
+  - - db:
+        type: directory
+        description: Optional local copy of MOB-suite database directory
+        pattern: "databases/"
+    - db_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
   - plasmid_mash_db:
       type: file
       description: |

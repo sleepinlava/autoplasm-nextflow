@@ -19,8 +19,8 @@ process LINK_HOTSPOT {
     input:
     tuple val(meta), path(plasmid_contigs, stageAs: 'plasmid_input.fasta')
     path hotspot_program, stageAs: 'hotspot_program/*'
-    path hotspot_database, stageAs: 'hotspot_database/*'
-    tuple path(hotspot_models, stageAs: 'hotspot_models'), path(hotspot_model_dependencies, stageAs: 'hotspot_model_dependencies/*')
+    tuple path(hotspot_database, stageAs: 'hotspot_database'), val(database_identity)
+    tuple path(hotspot_models, stageAs: 'hotspot_models'), val(models_identity)
     // Explicit regular files: helper changes participate in deep caching.
     tuple path(autoplasm_helper_0, stageAs: 'convert_hotspot_lineage.py'), path(autoplasm_helper_1, stageAs: 'hotspot_runtime.py')
 

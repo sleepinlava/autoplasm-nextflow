@@ -1,3 +1,4 @@
+include { resourceInput } from '../lib/resource_inputs'
 include { reportEvidence; reportSamples } from '../lib/report_events'
 include { selectedTools } from '../lib/tool_selection'
 
@@ -70,9 +71,8 @@ workflow HOST_LINKING {
                 Channel.value(['preprocessing.py', 'hotspot.py', 'model.py'].collect { name ->
                     file("${params.hotspot_home}/${name}", checkIfExists: true)
                 }),
-                Channel.value(files("${params.hotspot_db}/*", type: 'file', hidden: true, checkIfExists: true)),
-                Channel.value(tuple(file(params.hotspot_models, checkIfExists: true),
-                    files("${params.hotspot_models}/**", type: 'file', hidden: true, checkIfExists: true))), Channel.value(tuple(file("${moduleDir}/../bin/convert_hotspot_lineage.py", checkIfExists: true), file("${moduleDir}/../bin/hotspot_runtime.py", checkIfExists: true))))
+                Channel.value(resourceInput(params.hotspot_db)),
+                Channel.value(resourceInput(params.hotspot_models)), Channel.value(tuple(file("${moduleDir}/../bin/convert_hotspot_lineage.py", checkIfExists: true), file("${moduleDir}/../bin/hotspot_runtime.py", checkIfExists: true))))
             ch_report_events = ch_report_events.mix(reportEvidence([channels: LINK_HOTSPOT.out], '07_host_prediction', 'LINK_HOTSPOT'))
             ch_links = ch_links.mix(LINK_HOTSPOT.out.links.map { meta, f -> f })
         }

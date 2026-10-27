@@ -26,13 +26,16 @@ input:
         pattern: "*.{fasta,fasta.gz,fa,fa.gz,fna,fna.gz,faa,faa.gz}"
         ontologies:
           - edam: "http://edamontology.org/format_1929" # FASTA
-  - db:
-      type: file
-      description: A compressed tarball of the AMRFinderPlus database to query
-      pattern: "*.tar.gz"
-      ontologies:
-        - edam: "http://edamontology.org/format_3981" # TAR format
-        - edam: http://edamontology.org/format_3989 # GZIP format
+  - - db:
+        type: file
+        description: A compressed tarball of the AMRFinderPlus database to query
+        pattern: "*.tar.gz"
+        ontologies:
+          - edam: "http://edamontology.org/format_3981" # TAR format
+          - edam: http://edamontology.org/format_3989 # GZIP format
+    - db_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
 output:
   report:
     - - meta:

@@ -42,6 +42,9 @@ input:
           Must contain the 'metadata' subdirectory
         pattern: "release[0-9]+/"
         ontologies: []
+    - db_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
   - use_pplacer_scratch_dir:
       type: boolean
       description: Set to true to reduce pplacer memory usage by writing to disk (slower)

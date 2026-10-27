@@ -1,3 +1,4 @@
+include { resourceInput } from '../lib/resource_inputs'
 include { reportEvidence; reportSamples } from '../lib/report_events'
 include { selectedTools } from '../lib/tool_selection'
 
@@ -46,7 +47,7 @@ workflow HOST_PREDICTION {
         HOST_PROFILE_READS(ch_short_reads, ch_long_reads)
         METAPHLAN(
             HOST_PROFILE_READS.out.reads,
-            Channel.value(file(params.metaphlan_db, checkIfExists: true)),
+            Channel.value(resourceInput(params.metaphlan_db)),
             false   // save_samfile
         )
         ch_report_events = ch_report_events.mix(reportEvidence([channels: METAPHLAN.out], '07_host_prediction', 'METAPHLAN'))
@@ -55,14 +56,14 @@ workflow HOST_PREDICTION {
     if (selectedTools(params.host_prediction_tools).contains('kraken2') && is_illumina) {
         KRAKEN2(
             ch_short_reads.map { meta, r1, r2 -> tuple(meta + [single_end: false], [r1, r2]) },
-            Channel.value(file(params.kraken2_db, checkIfExists: true)),
+            Channel.value(resourceInput(params.kraken2_db)),
             false,  // save_output_fastqs
             false   // save_reads_assignment
         )
         ch_report_events = ch_report_events.mix(reportEvidence([channels: KRAKEN2.out], '07_host_prediction', 'KRAKEN2'))
     }
     if (selectedTools(params.host_prediction_tools).contains('plasmidhostfinder') && is_assembly) {
-        PLASMIDHOSTFINDER(ch_plasmids, Channel.value(file(params.plasmidhostfinder_db, checkIfExists: true)))
+        PLASMIDHOSTFINDER(ch_plasmids, Channel.value(resourceInput(params.plasmidhostfinder_db)))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMIDHOSTFINDER.out], '07_host_prediction', 'PLASMIDHOSTFINDER'))
     }
 

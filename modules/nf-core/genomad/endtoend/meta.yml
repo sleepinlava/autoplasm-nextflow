@@ -37,6 +37,9 @@ input:
     - genomad_db:
         type: directory
         description: Directory pointing to geNomad database
+    - genomad_db_identity:
+        type: map
+        description: Content fingerprint computed before cache lookup from recursive relative paths, file sizes and SHA256, including hidden files
 output:
   genomad_results:
     - - meta:

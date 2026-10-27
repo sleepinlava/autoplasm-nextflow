@@ -16,13 +16,14 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
                 input[2] = file("${new File('bin/platon_checked.py').absolutePath}", checkIfExists: true)
                 input[0] = [
                     [id: 'pUTI89'],
                     file("${System.getenv('AUTOPLASM_TEST_DATA')}/pUTI89.fasta", checkIfExists: true)
                 ]
                 input[1] = [file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true),
-                            files("${System.getenv('AUTOPLASM_DB')}/platon/db/**", type: 'file', hidden: true)]
+                            ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true))]
                 """
             }
         }
@@ -53,13 +54,14 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
                 input[2] = file("${new File('bin/platon_checked.py').absolutePath}", checkIfExists: true)
                 input[0] = [
                     [id: 'pUTI89_gzip'],
                     file("${System.getenv('AUTOPLASM_TEST_DATA')}/data/genomics/prokaryotes/plasmids/pUTI89/pUTI89.fna.gz", checkIfExists: true)
                 ]
                 input[1] = [file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true),
-                            files("${System.getenv('AUTOPLASM_DB')}/platon/db/**", type: 'file', hidden: true)]
+                            ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true))]
                 """
             }
         }

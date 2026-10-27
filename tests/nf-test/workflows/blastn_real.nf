@@ -4,6 +4,7 @@
 // blast/makeblastdb setup module; this chain covers the same node for real.
 // Backend: podman (wave blast image, pulled on demand).
 nextflow.enable.dsl = 2
+include { resourceInput; taggedResourceInput } from '../../../lib/resource_inputs'
 
 include { BLAST_BLASTN } from '../../../modules/nf-core/blast/blastn/main'
 
@@ -26,5 +27,6 @@ process MAKEBLASTDB_SCAFFOLD {
 workflow {
     def asm = file("${params.test_data}/pUTI89.fasta", checkIfExists: true)
     MAKEBLASTDB_SCAFFOLD(Channel.of(tuple([id: 'mini_blast_db'], asm)))
-    BLAST_BLASTN(Channel.of(tuple([id: 'pUTI89'], asm)), MAKEBLASTDB_SCAFFOLD.out, [], [], false)
+    BLAST_BLASTN(Channel.of(tuple([id: 'pUTI89'], asm)),
+        MAKEBLASTDB_SCAFFOLD.out.map { meta, db -> taggedResourceInput(meta, db) }, [], [], false)
 }

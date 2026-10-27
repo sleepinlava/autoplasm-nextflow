@@ -5,7 +5,7 @@ Requires an installed GTDB2.7.2 prefix and two real, already verified genome
 FASTA inputs. Source bytes/DNA are the independent preservation oracle. A tiny
 reference-name fixture and synthetic summary markers are explicitly observers.
 """
-from module_harness import render_module_harness
+from module_harness import render_module_harness, run_session_uuid
 import argparse
 import csv
 import gzip
@@ -67,10 +67,12 @@ def run(base,prefix,genomes,before):
             if not resume:workflow.write_text(render_module_harness(ROOT/'tests/nextflow/gtdb_inputs.nf', '../../modules/nf-core/gtdbtk/classifywf/main', module, 'normalize_gtdb_bins.py'))
         trace=folder/('trace-resume.tsv' if resume else 'trace.tsv')
         command=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(workflow),'-params-file',str(folder/'params.json'),'-work-dir',str(folder/'work'),'-with-trace',str(trace),'-ansi-log','false']
-        if resume:command+=['-resume']
+        run_name='gtdb_inputs_'+hashlib.sha256(str(folder).encode()).hexdigest()[:12]
+        if resume:command+=['-resume',run_session_uuid(run_name, directory=base)]
+        else:command+=['-name',run_name]
         env={**os.environ,'PATH':str(observers)+':'+str(prefix/'bin')+':'+os.environ['PATH']}
         if failure=='observer':env['GTDB_INPUT_OBSERVER_FAIL']='1'
-        result=subprocess.run(command,capture_output=True,text=True,env=env)
+        result=subprocess.run(command,capture_output=True,text=True,env=env,cwd=base)
         suffix='-resume' if resume else ''
         (folder/('stdout'+suffix+'.log')).write_text(result.stdout);(folder/('stderr'+suffix+'.log')).write_text(result.stderr)
         tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else []

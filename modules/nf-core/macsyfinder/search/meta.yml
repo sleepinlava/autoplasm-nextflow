@@ -43,10 +43,13 @@ input:
           Staged in the same sample tuple as the protein sequences.
         pattern: "*.txt"
         ontologies: []
-  - models:
-      type: directory
-      description: Directory containing MacSyFinder model(s)
-      pattern: "*"
+  - - models:
+        type: directory
+        description: Directory containing MacSyFinder model(s)
+        pattern: "*"
+    - models_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
   - model_names:
       type: string
       description: Space-separated list of model names to search for. If not provided,

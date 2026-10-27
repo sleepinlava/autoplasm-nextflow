@@ -1,4 +1,5 @@
 /*
+    cache 'deep'
  * PlasmidHostFinder assembly-based host prediction (pipeline step:
  * host_prediction_plasmidhostfinder; assembly platform).
  */
@@ -12,7 +13,7 @@ process PLASMIDHOSTFINDER {
 
     input:
     tuple val(meta), path(plasmid_contigs)
-    path phf_db
+    tuple path(phf_db), val(db_identity)
 
     output:
     tuple val(meta), path("${meta.id}.plasmidhostfinder.tsv"), emit: predictions

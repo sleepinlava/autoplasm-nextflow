@@ -33,7 +33,11 @@ class PlatonInputInterfaceTests(unittest.TestCase):
             path=base/(mode+('.fa' if mode=='plain' else '.fa.GZ' if mode=='uppercase' else '.fa.gz'))
             path.write_bytes(b'not a gzip file' if corrupt else data if mode=='plain' else gzip.compress(data,mtime=0))
             tuples.append("tuple([id:'"+mode+"'],file('"+str(path)+"'))")
-        (base/'probe.nf').write_text("nextflow.enable.dsl=2\ninclude { PLATON } from '"+str(ROOT/'modules/detection/platon')+"'\nworkflow { PLATON(Channel.of("+','.join(tuples)+"),Channel.value(tuple(file('"+str(self.db)+"'),files('"+str(self.db)+"/**',type:'file',hidden:true)))) }\n")
+        (base/'probe.nf').write_text(
+            "nextflow.enable.dsl=2\ninclude { PLATON } from '"+str(ROOT/'modules/detection/platon')+"'\n"
+            "include { resourceInput } from '"+str(ROOT/'lib/resource_inputs')+"'\n"
+            "workflow { PLATON(Channel.of("+','.join(tuples)+"),Channel.value(resourceInput('"+str(self.db)+"')),"
+            "Channel.value(file('"+str(ROOT/'bin/platon_checked.py')+"',checkIfExists:true))) }\n")
         (base/'config').write_text("params.outdir='"+str(base/'out')+"'\nparams.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=2\nprocess.memory='4 GB'\nprocess.maxForks=2\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n")
         command=['nextflow','-C',str(base/'config'),'run',str(base/'probe.nf'),'-work-dir',str(base/'work'),'-with-trace',str(base/'trace.tsv'),'-ansi-log','false']
         env={**os.environ,'PATH':str(self.prefix/'bin')+':'+os.environ['PATH'],'PYTHONDONTWRITEBYTECODE':'1'}

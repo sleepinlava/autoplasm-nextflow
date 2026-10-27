@@ -8,8 +8,8 @@ process PLASMAAG {
 
     input:
     tuple val(meta), val(samples), path(reads, stageAs: 'cohort_reads/read??/*'), path(assemblies, stageAs: 'cohort_assemblies/assembly??')
-    tuple path(program, stageAs: 'plasmaag_program'), path(program_files, stageAs: 'source_dependencies/dir??/*')
-    tuple path(database, stageAs: 'genomad_database'), path(database_files, stageAs: 'database_dependencies/dir??/*')
+    tuple path(program, stageAs: 'plasmaag_program'), val(program_identity)
+    tuple path(database, stageAs: 'genomad_database'), val(database_identity)
     val assembler
     val runtime_options
     tuple path(input_helper, stageAs: 'plasmaag_inputs.py'), path(runtime_helper, stageAs: 'plasmaag_checked.py')

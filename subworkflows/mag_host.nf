@@ -1,3 +1,4 @@
+include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
 include { reportEvidence; reportSamples } from '../lib/report_events'
 include { selectedTools } from '../lib/tool_selection'
 include { magSelectionError } from '../lib/mag_selection'
@@ -106,7 +107,7 @@ workflow MAG_HOST {
                 tsvs != null
             }
             .map { meta, assembly, tsvs -> tuple(meta, assembly, tsvs, []) }
-        DAS_TOOL(ch_das_in, [])
+        DAS_TOOL(ch_das_in, Channel.value(resourceInput(null)))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: DAS_TOOL.out], '07_host_prediction', 'DAS_TOOL'))
         ch_final_bins = DAS_TOOL.out.bins
     }
@@ -114,7 +115,7 @@ workflow MAG_HOST {
     if (selectedTools(params.mag_tools).contains('checkm2')) {
         CHECKM2(
             ch_final_bins,
-            Channel.value([[id: 'checkm2_db'], file(params.checkm2_db, checkIfExists: true)])
+            Channel.value(taggedResourceInput([id: 'checkm2_db'], params.checkm2_db))
         )
         ch_report_events = ch_report_events.mix(reportEvidence([channels: CHECKM2.out], '07_host_prediction', 'CHECKM2'))
     }
@@ -123,7 +124,7 @@ workflow MAG_HOST {
     if (selectedTools(params.mag_tools).contains('gtdbtk')) {
         GTDBTK(
             ch_final_bins,
-            Channel.value([[id: 'gtdbtk_db'], file(params.gtdbtk_db, checkIfExists: true)]),
+            Channel.value(taggedResourceInput([id: 'gtdbtk_db'], params.gtdbtk_db)),
             false
         , Channel.value(file("${moduleDir}/../bin/normalize_gtdb_bins.py", checkIfExists: true)))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: GTDBTK.out], '07_host_prediction', 'GTDBTK'))

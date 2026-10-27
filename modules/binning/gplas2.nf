@@ -12,7 +12,7 @@ process GPLAS2 {
 
     input:
     tuple val(meta), path(assembly_graph), path(node_predictions), path(ready_marker)
-    tuple path(source, stageAs: 'sources/gplas'), path(source_files, stageAs: 'source-cache/????/*')
+    tuple path(source, stageAs: 'sources/gplas'), val(source_identity)
     // Explicit regular files: helper changes participate in deep caching.
     path(autoplasm_helper_0, stageAs: '.gplas_checked.py')
 

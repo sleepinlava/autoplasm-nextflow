@@ -1,4 +1,5 @@
 process AMRFINDERPLUS_RUN {
+    cache 'deep'
     tag "$meta.id"
     label 'process_medium'
 
@@ -9,7 +10,7 @@ process AMRFINDERPLUS_RUN {
 
     input:
     tuple val(meta), path(fasta)
-    path db
+    tuple path(db), val(db_identity)
 
     output:
     tuple val(meta), path("${prefix}.tsv")          , emit: report

@@ -1,3 +1,4 @@
+include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
 include { reportEvidence; reportSamples } from '../lib/report_events'
 include { selectedTools } from '../lib/tool_selection'
 
@@ -42,7 +43,7 @@ workflow COMPARATIVE {
     if (selectedTools(params.comparative_optional_tools).contains('blast')) {
         BLASTN(
             ch_plasmids,
-            Channel.value(tuple([id: 'blast_db'], file(params.blast_db, checkIfExists: true))),
+            Channel.value(taggedResourceInput([id: 'blast_db'], params.blast_db)),
             [],     // taxidlist
             [],     // taxids
             false   // negative_tax

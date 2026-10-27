@@ -1,4 +1,5 @@
 process GENOMAD_ENDTOEND {
+    cache 'deep'
     tag "${meta.id}"
     label 'process_high'
 
@@ -9,7 +10,8 @@ process GENOMAD_ENDTOEND {
 
     input:
     tuple val(meta), path(fasta)
-    tuple val(meta2), path(genomad_db)
+    // This value covers recursive relative paths and contents before cache lookup.
+    tuple val(meta2), path(genomad_db), val(genomad_db_identity)
 
     output:
     tuple val(meta), path("${prefix}/")                                                              , emit: genomad_results

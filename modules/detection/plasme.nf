@@ -15,8 +15,8 @@ process PLASME {
 
     input:
     tuple val(meta), path(assembly)
-    path(plasme_db, stageAs: 'plasme_database')
-    path(plasme_source, stageAs: 'plasme_source')
+    tuple path(plasme_db, stageAs: 'plasme_database'), val(plasme_db_identity)
+    tuple path(plasme_source, stageAs: 'plasme_source'), val(plasme_source_identity)
     // Explicit regular files: helper changes participate in deep caching.
     tuple path(autoplasm_helper_0, stageAs: 'normalize_plasme_outputs.py'), path(autoplasm_helper_1, stageAs: 'plasme_runtime.py')
 

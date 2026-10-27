@@ -14,8 +14,8 @@ process COPLA {
     tuple val(meta), path(plasmid_contigs)
     path(copla_refgraph, stageAs: 'copla_reference.pickle')
     path(copla_reflist, stageAs: 'copla_references.fofn')
-    path(copla_install, stageAs: 'copla_install')
-    path(copla_macsyfinder, stageAs: 'copla_macsyfinder')
+    tuple path(copla_install, stageAs: 'copla_install'), val(copla_install_identity)
+    tuple path(copla_macsyfinder, stageAs: 'copla_macsyfinder'), val(copla_macsyfinder_identity)
     // Explicit regular files: helper changes participate in deep caching.
     path(autoplasm_helper_0, stageAs: 'run_copla_candidates.py')
 

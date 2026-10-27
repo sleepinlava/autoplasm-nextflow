@@ -22,7 +22,9 @@ def run(base, prefix, models, proteins, genome, before):
             workflow=folder/'original.nf'
             workflow.write_text((ROOT/'tests/nextflow/macsy_inputs.nf').read_text()
                 .replace("'../../modules/nf-core/macsyfinder/search/main'",repr(str(before.with_suffix(''))))
-                .replace(',file(params.topology,checkIfExists:true)', ''))
+                .replace(',file(params.topology,checkIfExists:true)', '')
+                .replace("'../../lib/resource_inputs'",repr(str(ROOT/'lib/resource_inputs')))
+                .replace('Channel.value(resourceInput(params.models))','Channel.value(file(params.models,checkIfExists:true))'))
         config=folder/'nextflow.config'
         args='--db-type gembase --replicon-topology linear'
         if old:args+=' --topology-file '+str(bad)

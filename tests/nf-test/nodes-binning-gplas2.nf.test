@@ -12,6 +12,7 @@ nextflow_process {
         when {
             process {
                 """
+                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
                 input[2] = file("${new File('bin/gplas_checked.py').absolutePath}", checkIfExists: true)
                 def root = System.getenv('AUTOPLASM_GPLAS_ROOT')
                 input[0] = [
@@ -20,7 +21,7 @@ nextflow_process {
                     file(root + '/gplas/independent_prediction/test_ecoli_plasmid_prediction.tab', checkIfExists: true),
                     file(root + '/resource_provenance.json', checkIfExists: true)
                 ]
-                input[1] = [file(root, checkIfExists: true), files(root + '/**', type: 'file', hidden: true)]
+                input[1] = [file(root, checkIfExists: true), ResourceIdentity.capture(file(root, checkIfExists: true))]
                 """
             }
         }

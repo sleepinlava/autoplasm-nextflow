@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from module_harness import run_session_uuid
 import subprocess
 import sys
 
@@ -113,10 +114,10 @@ def run(base, macsy, eggnog, models_archive, fixture, plasmid):
         trace=folder/('trace'+suffix+'.tsv')
         run_name='protein_'+hashlib.sha256(str(folder).encode()).hexdigest()[:12]
         command=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(ROOT/'tests/nextflow/protein_inputs.nf'),'-params-file',str(folder/'params.json'),'-work-dir',str(folder/'work'),'-with-trace',str(trace),'-ansi-log','false']
-        if resume:command+=['-resume',run_name]
+        if resume:command+=['-resume',run_session_uuid(run_name, directory=base)]
         else:command+=['-name',run_name]
         env={**os.environ,'PATH':str(nativebin)+':'+str(macsy/'bin')+':'+os.environ['PATH']}
-        result=subprocess.run(command,capture_output=True,text=True,env=env)
+        result=subprocess.run(command,capture_output=True,text=True,env=env,cwd=base)
         (folder/('stdout'+suffix+'.log')).write_text(result.stdout);(folder/('stderr'+suffix+'.log')).write_text(result.stderr)
         tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else []
         record={'scenario':name+suffix,'command':command,'exit_code':result.returncode,'trace':tasks}

@@ -1,4 +1,5 @@
 process KRAKEN2_KRAKEN2 {
+    cache 'deep'
     tag "$meta.id"
     label 'process_high'
 
@@ -9,7 +10,7 @@ process KRAKEN2_KRAKEN2 {
 
     input:
     tuple val(meta), path(reads)
-    path  db
+    tuple path(db), val(db_identity)
     val save_output_fastqs
     val save_reads_assignment
 

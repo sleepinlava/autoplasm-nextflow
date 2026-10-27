@@ -44,10 +44,13 @@ input:
         description: Predicted proteins in prodigal fasta format (>scaffoldID_geneNo)
         pattern: "*.{fa.gz,fas.gz,fasta.gz}"
         ontologies: []
-  - db_directory:
-      type: file
-      description: (optional) Directory of single copy gene database.
-      ontologies: []
+  - - db_directory:
+        type: file
+        description: (optional) Directory of single copy gene database.
+        ontologies: []
+    - db_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
 output:
   log:
     - - meta:

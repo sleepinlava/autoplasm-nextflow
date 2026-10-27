@@ -13,7 +13,7 @@ process PLATON {
 
     input:
     tuple val(meta), path(assembly, stageAs: 'assembly_input/*')
-    tuple path(platon_db, stageAs: 'platon_database'), path(platon_database_files, stageAs: 'platon_database_dependencies/*')
+    tuple path(platon_db, stageAs: 'platon_database'), val(platon_database_identity)
     // Explicit regular files: helper changes participate in deep caching.
     path(autoplasm_helper_0, stageAs: 'platon_checked.py')
 

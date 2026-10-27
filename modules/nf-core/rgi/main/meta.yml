@@ -25,14 +25,20 @@ input:
         description: Nucleotide or protein sequences in FASTA format
         pattern: "*.{fasta,fasta.gz,fa,fa.gz,fna,fna.gz,faa,faa.gz}"
         ontologies: []
-  - card:
-      type: directory
-      description: Directory containing the CARD database. This is expected to be the unarchived but otherwise unaltered download folder (see RGI documentation for download instructions).
-      pattern: "*/"
-  - wildcard:
-      type: directory
-      description: Directory containing the WildCARD database (optional). This is expected to be the unarchived but otherwise unaltered download folder (see RGI documentation for download instructions).
-      pattern: "*/"
+  - - card:
+        type: directory
+        description: Directory containing the CARD database. This is expected to be the unarchived but otherwise unaltered download folder (see RGI documentation for download instructions).
+        pattern: "*/"
+    - card_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+  - - wildcard:
+        type: directory
+        description: Directory containing the WildCARD database (optional). This is expected to be the unarchived but otherwise unaltered download folder (see RGI documentation for download instructions).
+        pattern: "*/"
+    - wildcard_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
   - autoplasm_helper_0:
       type: file
       description: Local checked adapter bin/validate_rgi_card.py; staged as validate_rgi_card.py. Explicit file content participates in deep task caching.

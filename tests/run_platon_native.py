@@ -46,17 +46,22 @@ def main():
     def put(value):target.write_bytes(value);os.utime(target,ns=(stat.st_atime_ns,stat.st_mtime_ns))
     (base/'mutation.json').write_text(json.dumps({'before_sha256':hashlib.sha256(data).hexdigest(),'corrupt_sha256':hashlib.sha256(corrupt).hexdigest(),'bytes':len(data),'mtime_ns':stat.st_mtime_ns,'scope':'one private copied HMM only; original full DB unchanged'},indent=2)+'\n')
     sources=['bin/platon_checked.py','modules/detection/platon.nf','envs/platon-linux-64.lock','tests/nextflow/platon_native.nf','tests/run_platon_native.py']
-    hashes={p:sha(ROOT/p) for p in sources};runs=[]
-    def execute(name,chosen=records,resume=False,failure=None,conda=False):
+    hashes={p:sha(ROOT/p) for p in sources};runs=[];sessions={}
+    def execute(name,chosen=records,resume=False,failure=None,conda=False,phase=None):
         folder=base/name;folder.mkdir(exist_ok=resume);config=folder/'config';work=folder/'work';key='platon_'+hashlib.sha256(str(folder).encode()).hexdigest()[:12]
         if not resume:
             config.write_text("params.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=2\nprocess.memory='4 GB'\nprocess.maxForks=2\nprocess.errorStrategy='terminate'\ndocker.enabled=false\nsingularity.enabled=false\nconda { enabled="+str(conda).lower()+";useMicromamba="+str(conda).lower()+";cacheDir="+repr(str(base/'conda-cache'))+";createOptions='--offline' }\n")
             (folder/'params.json').write_text(json.dumps({'records':chosen,'database':str(private),'outdir':str(folder/'out')},indent=2)+'\n')
         suffix='-bad-resume' if resume and failure else '-resume' if resume else ''
-        trace=folder/('trace'+suffix+'.tsv');cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(ROOT/'tests/nextflow/platon_native.nf'),'-params-file',str(folder/'params.json'),'-work-dir',str(work),'-with-trace',str(trace),'-ansi-log','false']+(['-resume',key] if resume else ['-name',key])
+        if phase:suffix='-'+phase+'-resume'
+        trace=folder/('trace'+suffix+'.tsv');cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(ROOT/'tests/nextflow/platon_native.nf'),'-params-file',str(folder/'params.json'),'-work-dir',str(work),'-with-trace',str(trace),'-ansi-log','false']+(['-resume',sessions[name]] if resume else ['-name',key])
         env={**os.environ,'PATH':str(prefix/'bin')+':'+os.environ['PATH'],'PYTHONDONTWRITEBYTECODE':'1','CONDA_PKGS_DIRS':str(ROOT/'results/tool-audit/runtime/mamba-root/pkgs'),'MAMBA_ROOT_PREFIX':str(ROOT/'results/tool-audit/runtime/mamba-root')}
         p=subprocess.run(cmd,env=env,text=True,capture_output=True);(folder/('stdout'+suffix+'.log')).write_text(p.stdout);(folder/('stderr'+suffix+'.log')).write_text(p.stderr)
         tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else [];entry={'case':name+suffix,'command':cmd,'exit_code':p.returncode,'tasks':tasks};runs.append(entry)
+        if not resume and p.returncode==0:
+            matches=[line.split('\t')[5] for line in (ROOT/'.nextflow/history').read_text().splitlines() if '\t'+key+'\t' in line]
+            assert len(matches)==1,matches
+            sessions[name]=matches[0];entry['session_uuid']=sessions[name]
         checks={}
         if failure:
             checks['explicit_failure']=p.returncode!=0 and any(t['status']=='FAILED' for t in tasks)
@@ -86,6 +91,7 @@ def main():
         execute('baseline',resume=True)
         put(corrupt);execute('baseline',resume=True,failure='HMM')
         put(data)
+        execute('baseline',resume=True,phase='restored')
         execute('length',[{'id':'Short','fasta':str(short)}])
         execute('corrupt-gzip',[{'id':'Bad','fasta':str(bad)}],failure='gzipped')
         execute('duplicate-ID',[{'id':'Dup','fasta':str(duplicate)}],failure='Duplicate FASTA ID')

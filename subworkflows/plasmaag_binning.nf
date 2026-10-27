@@ -9,6 +9,11 @@ workflow PLASMAAG_BINNING {
     ch_spades_bundle
 
     main:
+    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../lib/ResourceIdentity.groovy"))
+    def resource = { location ->
+        def directory = file(location, checkIfExists: true)
+        tuple(directory, ResourceIdentity.capture(directory))
+    }
     ch_bins = Channel.empty()
     ch_events = Channel.empty()
     if (selectedTools(params.plasmid_binning_tools).contains('plasmaag')) {
@@ -41,8 +46,8 @@ workflow PLASMAAG_BINNING {
             tuple([id: "plasmaag_cohort_${digest}"], rows.collect { it.meta }, rows.collectMany { it.reads }, rows.collect { it.assembly })
         }
         PLASMAAG(ch_cohort,
-            Channel.value(tuple(file(params.plasmaag_source, checkIfExists: true), files("${params.plasmaag_source}/**", type: 'file', hidden: true))),
-            Channel.value(tuple(file(params.genomad_db, checkIfExists: true), files("${params.genomad_db}/**", type: 'file', hidden: true))),
+            Channel.value(resource.call(params.plasmaag_source)),
+            Channel.value(resource.call(params.genomad_db)),
             params.short_read_assembler,
             [genomad_splits: params.plasmaag_genomad_splits ?: 0, vamb_arguments: params.plasmaag_vamb_arguments ?: '', conda_prefix: params.plasmaag_conda_prefix ?: ''],
             Channel.value(tuple(file("${moduleDir}/../bin/plasmaag_inputs.py", checkIfExists: true), file("${moduleDir}/../bin/plasmaag_checked.py", checkIfExists: true))))

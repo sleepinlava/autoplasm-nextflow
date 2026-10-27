@@ -8,9 +8,9 @@ process PLASX_ANNOTATE {
 
     input:
     tuple val(meta), path(assembly, stageAs: 'assembly_input/*')
-    tuple path(anvio_source, stageAs: 'anvio_source'), path(anvio_source_files, stageAs: 'anvio_dependencies/dir??/*')
-    tuple path(cog_db, stageAs: 'cog_database'), path(cog_files, stageAs: 'cog_dependencies/dir??/*')
-    tuple path(pfam_db, stageAs: 'pfam_database'), path(pfam_files, stageAs: 'pfam_dependencies/dir??/*')
+    tuple path(anvio_source, stageAs: 'anvio_source'), val(anvio_source_identity)
+    tuple path(cog_db, stageAs: 'cog_database'), val(cog_identity)
+    tuple path(pfam_db, stageAs: 'pfam_database'), val(pfam_identity)
     // Explicit regular files: helper changes participate in deep caching.
     tuple path(autoplasm_helper_0, stageAs: 'plasx_inputs.py'), path(autoplasm_helper_1, stageAs: 'anvio_checked.py')
 
@@ -51,8 +51,8 @@ process PLASX {
 
     input:
     tuple val(meta), path(assembly), path(mapping), path(gene_calls), path(annotations)
-    tuple path(plasx_source, stageAs: 'plasx_source'), path(plasx_source_files, stageAs: 'plasx_dependencies/dir??/*')
-    tuple path(profiles, stageAs: 'plasx_profiles'), path(profile_files, stageAs: 'profile_dependencies/dir??/*')
+    tuple path(plasx_source, stageAs: 'plasx_source'), val(plasx_source_identity)
+    tuple path(profiles, stageAs: 'plasx_profiles'), val(profile_identity)
     path plasx_model, stageAs: 'plasx_coefficients.tsv'
     // Explicit regular files: helper changes participate in deep caching.
     tuple path(autoplasm_helper_0, stageAs: 'plasx_inputs.py'), path(autoplasm_helper_1, stageAs: 'plasx_checked.py')

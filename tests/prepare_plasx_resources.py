@@ -129,6 +129,20 @@ def format_databases(directory, threads):
     pfam.hmmpress_files()
 
 
+def prepare_anvio_dependencies(source, downloads, cache=None):
+    # The primary archive records gitlinks but does not include their contents.
+    # Download only exact, independently locked submodule archives before the
+    # source guard or recursive resource fingerprint can accept this tree.
+    from prepare_anvio_submodules import hydrate
+    lock = json.loads((ROOT / 'tests/anvio-submodules.lock.json').read_text())
+    archives = downloads / 'anvio-gitlinks'
+    for row in lock['submodules']:
+        name = '-'.join(row['url'].split('/')[3:5]) + '-' + row['commit'] + '.tar.gz'
+        fetch({'url': row['url'], 'bytes': row['bytes'], 'sha256': row['archive_sha256']},
+              archives / name, cache)
+    return hydrate(source, archives)
+
+
 def prepare(args):
     directory = args.outdir.resolve()
     directory.mkdir(parents=True, exist_ok=False)
@@ -138,7 +152,7 @@ def prepare(args):
         path = downloads / item['archive']
         fetch(item, path, args.cache)
         extract(path, directory / 'sources' / ('anvio' if item['repository'] == 'merenlab/anvio' else 'plasx'), strip_root=True)
-    load_helper('anvio_checked').verify_source(directory / 'sources/anvio')
+    prepare_anvio_dependencies(directory / 'sources/anvio', downloads, args.cache)
     load_helper('plasx_checked').verify_source(directory / 'sources/plasx/plasx')
     for name, item in lock['downloads'].items():
         fetch(item, downloads / name, args.cache)
@@ -172,7 +186,9 @@ def prepare(args):
         for path in sorted((directory / folder).rglob('*')):
             if path.is_file():
                 files.append({'path': str(path.relative_to(directory)), 'bytes': path.stat().st_size, 'sha256': sha256(path)})
-    receipt = {'lock_sha256': sha256(args.lock), 'source_lock_status': lock['status'], 'format_exit_code': process.returncode,
+    receipt = {'lock_sha256': sha256(args.lock),
+               'anvio_submodule_lock_sha256': sha256(ROOT / 'tests/anvio-submodules.lock.json'),
+               'source_lock_status': lock['status'], 'format_exit_code': process.returncode,
                'scope': 'complete fixed source/COG2014/Pfam32/de-novo/model preparation; no classifier or biological validation claim',
                'files': files, 'parameters': {'plasx_anvio_source': str(directory / 'sources/anvio'),
                'plasx_source': str(directory / 'sources/plasx'), 'plasx_cog_db': str(directory / 'COG_2014'),

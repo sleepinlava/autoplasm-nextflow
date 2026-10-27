@@ -1,3 +1,4 @@
+include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
 include { reportEvidence; reportSamples } from '../lib/report_events'
 include { selectedTools } from '../lib/tool_selection'
 
@@ -74,17 +75,22 @@ workflow PLASMID_DOWNSTREAM {
     if (selectedTools(params.typing_tools).contains('mob_typer')) {
         // optional per-file db inputs (mash/meta/replicons/mask/mob/mpf/orit) left empty
         MOB_TYPER(ch_plasmids,
-                  Channel.value(file(params.mob_suite_db, checkIfExists: true)),
+                  Channel.value(resourceInput(params.mob_suite_db)),
                   [], [], [], [], [], [], [],
                   false, false)
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_TYPER.out], '06_plasmid_typing', 'MOB_TYPER'))
     }
     if (selectedTools(params.typing_optional_tools).contains('copla')) {
+        def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../lib/ResourceIdentity.groovy"))
+        def resource = { location ->
+            def directory = file(location, checkIfExists: true)
+            tuple(directory, ResourceIdentity.capture(directory))
+        }
         COPLA(ch_plasmids,
               Channel.value(file(params.copla_refgraph, checkIfExists: true)),
               Channel.value(file(params.copla_reflist, checkIfExists: true)),
-              Channel.value(file(params.copla_dir, checkIfExists: true)),
-              Channel.value(file(params.copla_macsyfinder_dir, checkIfExists: true)), Channel.value(file("${moduleDir}/../bin/run_copla_candidates.py", checkIfExists: true)))
+              Channel.value(resource.call(params.copla_dir)),
+              Channel.value(resource.call(params.copla_macsyfinder_dir)), Channel.value(file("${moduleDir}/../bin/run_copla_candidates.py", checkIfExists: true)))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: COPLA.out], '06_plasmid_typing', 'COPLA'))
     }
     if (run_conjscan || run_macsyfinder) {
@@ -94,11 +100,11 @@ workflow PLASMID_DOWNSTREAM {
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER_DOWNLOAD.out], '06_plasmid_typing', 'MACSYFINDER_DOWNLOAD'))
     }
     if (run_conjscan) {
-        CONJSCAN(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJScan/Plasmids all')
+        CONJSCAN(ch_proteins, MACSYFINDER_DOWNLOAD.out.models.map { resourceInput(it) }, 'CONJScan/Plasmids all')
         ch_report_events = ch_report_events.mix(reportEvidence([channels: CONJSCAN.out], '06_plasmid_typing', 'CONJSCAN'))
     }
     if (run_macsyfinder) {
-        MACSYFINDER(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJScan/Plasmids all')
+        MACSYFINDER(ch_proteins, MACSYFINDER_DOWNLOAD.out.models.map { resourceInput(it) }, 'CONJScan/Plasmids all')
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER.out], '06_plasmid_typing', 'MACSYFINDER'))
     }
 
@@ -107,14 +113,14 @@ workflow PLASMID_DOWNSTREAM {
     if (selectedTools(params.annotation_tools).contains('bakta')) {
         // optional proteins/prodigal-tf/regions/hmms inputs left empty
         BAKTA(ch_plasmids,
-              Channel.value(file(params.bakta_db, checkIfExists: true)),
+              Channel.value(resourceInput(params.bakta_db)),
               [], [], [], [])
         ch_report_events = ch_report_events.mix(reportEvidence([channels: BAKTA.out], '08_annotation', 'BAKTA'))
         // clinker consumes the directory holding the *.gbff files (the task dir itself)
         ch_bakta_dir = BAKTA.out.gbff.map { meta, gbff -> tuple(meta, gbff.parent) }
     }
     if (selectedTools(params.annotation_tools).contains('amrfinderplus')) {
-        AMRFINDERPLUS(ch_plasmids, Channel.value(file(params.amrfinderplus_db, checkIfExists: true)))
+        AMRFINDERPLUS(ch_plasmids, Channel.value(resourceInput(params.amrfinderplus_db)))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: AMRFINDERPLUS.out], '08_annotation', 'AMRFINDERPLUS'))
     }
     if (selectedTools(params.annotation_tools).contains('abricate') || selectedTools(params.annotation_optional_tools).contains('abricate')) {
@@ -138,15 +144,15 @@ workflow PLASMID_DOWNSTREAM {
     if (selectedTools(params.annotation_optional_tools).contains('rgi')) {
         // card = directory with card.json + card_database_v*.fasta; wildcard optional
         RGI(ch_plasmids,
-            Channel.value(file(params.card_db, checkIfExists: true)),
-            [], Channel.value(file("${moduleDir}/../bin/validate_rgi_card.py", checkIfExists: true)))
+            Channel.value(resourceInput(params.card_db)),
+            Channel.value(resourceInput(null)), Channel.value(file("${moduleDir}/../bin/validate_rgi_card.py", checkIfExists: true)))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: RGI.out], '08_annotation', 'RGI'))
     }
     if (run_eggnog) {
         // search_mode=diamond with no explicit dmnd db (falls back to --data_dir)
         EGGNOG_MAPPER(ch_proteins.map { meta, proteins, topology -> tuple(meta, proteins) },
-                      Channel.value(['diamond', []]),
-                      Channel.value(file(params.eggnog_db, checkIfExists: true)))
+                      Channel.value(taggedResourceInput('diamond', null)),
+                      Channel.value(resourceInput(params.eggnog_db)))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: EGGNOG_MAPPER.out], '08_annotation', 'EGGNOG_MAPPER'))
     }
 

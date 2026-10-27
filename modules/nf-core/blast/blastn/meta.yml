@@ -36,6 +36,9 @@ input:
         type: directory
         description: Directory containing the blast database
         pattern: "*"
+    - db_identity:
+        type: map
+        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
   - taxidlist:
       type: file
       description: File containing NCBI taxon ids, one per line, for filtering the

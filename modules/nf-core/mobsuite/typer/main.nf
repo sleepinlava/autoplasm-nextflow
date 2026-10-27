@@ -1,4 +1,5 @@
 process MOBSUITE_TYPER {
+    cache 'deep'
     tag "${meta.id}"
     label 'process_low'
 
@@ -9,7 +10,7 @@ process MOBSUITE_TYPER {
 
     input:
     tuple val(meta), path(fasta)
-    path db
+    tuple path(db), val(db_identity)
     path plasmid_mash_db
     path plasmid_meta_txt
     path plasmid_replicons_fas

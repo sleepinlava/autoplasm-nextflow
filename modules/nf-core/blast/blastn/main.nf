@@ -1,4 +1,5 @@
 process BLAST_BLASTN {
+    cache 'deep'
     tag "$meta.id"
     label 'process_medium'
 
@@ -9,7 +10,7 @@ process BLAST_BLASTN {
 
     input:
     tuple val(meta) , path(fasta)
-    tuple val(meta2), path(db)
+    tuple val(meta2), path(db), val(db_identity)
     path taxidlist
     val taxids
     val negative_tax

@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from module_harness import run_session_uuid
 import pickle
 import shutil
 import subprocess
@@ -61,7 +62,7 @@ def run(base,prefix,program,database,models,before):
         'raise SystemExit(r.returncode)\n')
     shim.chmod(0o755)
     runs=[]
-    def execute(name,chosen=records,legacy=False,resume=False,disabled=False,failure=False,conda=False):
+    def execute(name,chosen=records,legacy=False,resume=False,disabled=False,failure=False,conda=False,phase=None):
         folder=base/name;folder.mkdir(exist_ok=resume)
         workflow=ROOT/'tests/nextflow/hotspot.nf'
         if legacy:
@@ -77,12 +78,13 @@ def run(base,prefix,program,database,models,before):
                     'hotspot_home':str(program),'hotspot_db':str(database),'hotspot_models':str(local_models),'outdir':str(folder/'out')}
             (folder/'params.json').write_text(json.dumps(params,indent=2))
         suffix=('-corrupt-resume' if failure else '-resume') if resume else ''
+        if phase:suffix='-'+phase+'-resume'
         trace=folder/('trace'+suffix+'.tsv');key='hotspot_'+hashlib.sha256(str(folder).encode()).hexdigest()[:12]
         cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(workflow),'-params-file',str(folder/'params.json'),'-work-dir',str(folder/'work'),'-with-trace',str(trace),'-ansi-log','false']
-        cmd+=['-resume',key] if resume else ['-name',key]
+        cmd+=['-resume',run_session_uuid(key, directory=base)] if resume else ['-name',key]
         environment={**os.environ,'PATH':(str(transport)+':' if legacy else '')+str(prefix/'bin')+':'+os.environ['PATH'],
                      'PYTHONDONTWRITEBYTECODE':'1','MAMBA_ROOT_PREFIX':str(ROOT/'results/tool-audit/runtime/mamba-root')}
-        result=subprocess.run(cmd,env=environment,capture_output=True,text=True)
+        result=subprocess.run(cmd,env=environment,capture_output=True,text=True,cwd=base)
         (folder/('stdout'+suffix+'.log')).write_text(result.stdout);(folder/('stderr'+suffix+'.log')).write_text(result.stderr)
         tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else []
         record={'scenario':name+suffix,'command':cmd,'exit_code':result.returncode,'trace':tasks,'mutated_model':failure}
@@ -145,6 +147,7 @@ def run(base,prefix,program,database,models,before):
         execute('current',resume=True)
         put(corrupt);execute('current',resume=True,failure=True)
         put(original)
+        execute('current',resume=True,phase='restored')
         execute('disabled',disabled=True)
         execute('no-input',chosen=[])
         execute('locked-conda',chosen=records[:1],conda=True)
