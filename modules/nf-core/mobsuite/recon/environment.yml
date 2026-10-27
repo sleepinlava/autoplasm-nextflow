@@ -1,8 +1,22 @@
 ---
-# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/environment-schema.json
+# MOB-suite's Bioconda post-link runs mob_init. Install the identical official
+# wheel after Conda dependencies so software creation never initializes its DB.
 channels:
   - conda-forge
   - bioconda
-
 dependencies:
-  - bioconda::mob_suite=3.1.9
+  - conda-forge::python=3.10
+  - conda-forge::pip
+  - conda-forge::numpy>=1.11.1,<1.23.5
+  - conda-forge::pytables>=3.3.0,<4
+  - conda-forge::pandas>=0.22,<=1.5.3
+  - conda-forge::biopython>=1.8,<2
+  - conda-forge::pycurl>=7.43.0,<8
+  - conda-forge::scipy>=1.1.0,<2
+  - conda-forge::ete3>=3.1.3,<4
+  - conda-forge::six>=1.10,<2
+  - conda-forge::libsqlite<3.49
+  - bioconda::blast>=2.9.0,<2.16.0
+  - bioconda::mash>=2.0
+  - pip:
+      - https://files.pythonhosted.org/packages/9a/db/c6fec365628aa6f8a2a94bd8d99ed312a308bdfd14a9acbcec65c6adb085/mob_suite-3.1.9-py3-none-any.whl#sha256=467039630b3364f05ed736713db6119c5902b11cb0051b8b5891ca3ed73b808f

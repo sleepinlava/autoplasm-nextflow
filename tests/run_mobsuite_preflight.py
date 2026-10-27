@@ -19,7 +19,7 @@ def run(output,prefix,fixture):
     before={p:sha(ROOT/p) for p in sources}
     env=dict(os.environ,PATH=str(prefix/'bin')+':'+os.environ['PATH'],PYTHONDONTWRITEBYTECODE='1')
     database=prefix/'lib/python3.10/site-packages/mob_suite/databases'
-    def state():return {str(p.relative_to(database)):sha(p) for p in database.rglob('*') if p.is_file()}
+    def state():return {str(p.relative_to(database)):sha(p) for p in database.rglob('*') if p.is_file() and '__pycache__' not in p.relative_to(database).parts}
     initial=state();assert sorted(initial)==['__init__.py']
     runs=[]
     def execute(name,cmd,expected):
