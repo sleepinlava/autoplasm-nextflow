@@ -86,10 +86,16 @@ def run(base, prefix, fixture, golden):
                 assert 'runtime mismatch before cache lookup' in result.stdout + result.stderr
             row['no_consumer_submitted'] = True
         else:
-            assert result.returncode == 0 and len(tasks) == 2, row
+            assert (result.returncode == 0) == (status != 'FAILED') and len(tasks) == 2, row
             probe = next(t for t in tasks if t['name'].startswith('ABRICATE_RESOURCE_PROBE'))
             consumer = next(t for t in tasks if t['name'].startswith('ABRICATE ('))
             assert probe['status'] == 'COMPLETED' and consumer['status'] == status, row
+            if status == 'FAILED':
+                assert result.returncode != 0
+                assert 'ABRicate input converter/BLAST subprocess failed' in (Path(consumer['workdir']) / '.command.log').read_text()
+                row['native_error_propagated'] = True
+                print(name, status, flush=True)
+                return
             identity_path = Path(probe['workdir']) / 'abricate_runtime_identity.json'
             identity = json.loads(identity_path.read_text())
             assert identity['resolved_locations']['datadir'] == str(private / 'db')
@@ -141,7 +147,7 @@ def run(base, prefix, fixture, golden):
         restore()
         execute('external-alias-restored', 'CACHED')
         header.unlink()
-        execute('external-alias-missing-header', 'PROBE_FAILED')
+        execute('external-alias-missing-header', 'FAILED')
     finally:
         restore()
     execute('all-restored', 'CACHED')

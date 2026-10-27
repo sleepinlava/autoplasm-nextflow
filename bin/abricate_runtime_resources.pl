@@ -70,7 +70,7 @@ sub native_options {
 use strict; use JSON::PP;
 $0 = shift @ARGV;
 require FindBin; FindBin::again();
-open my $f, '<', $0 or die $!; local $/; my $source=<$f>;
+open my $f, '<', $0 or die $!; my $source=do {local $/; <$f>};
 $source =~ /my \$VERSION = "1\.0\.1";/ or die "Requires ABRicate1.0.1\n";
 my $replacement=q{setOptions(); print JSON::PP->new->canonical->ascii->encode({version=>$VERSION,datadir=>$datadir,db=>$db,minid=>$minid,mincov=>$mincov,threads=>$threads,noheader=>$noheader,csv=>$csv,nopath=>$nopath,fofn=>$fofn,summary=>$summary,list=>$list,setupdb=>$setupdb,check=>$check,files=>\@ARGV}); exit;};
 my $count=($source =~ s/\bsetOptions\(\);/$replacement/);
@@ -92,8 +92,8 @@ sub capture {
     my $entry = executable('abricate');
     my $parsed = native_options($entry,@args);
     die "Prepare ABRicate databases with --setupdb before resource lookup\n" if $parsed->{setupdb};
-    my %tools = map { $_ => executable($_) } qw(blastn blastx makeblastdb blastdbcmd any2fasta gzip unzip);
-    my %resources = (entrypoint=>resource($entry),perl=>resource($^X),
+    my %tools = map { $_ => executable($_) } qw(blastn blastx makeblastdb blastdbcmd any2fasta gzip unzip bash);
+    my %resources = (entrypoint=>resource($entry),perl=>resource($^X),resolver=>resource($0),
                      executables=>{map { $_=>resource($tools{$_}) } sort keys %tools});
     my %locations = (entrypoint=>$entry,perl=>$^X,executables=>\%tools);
     # Respect native --fofn precedence and Path::Tiny's exact line reader.
@@ -124,7 +124,7 @@ sub capture {
     # Threads are in the consumer command/cache key. The probe can hash with
     # its own CPU quota without differing solely because of that allocation.
     delete $parsed->{threads};
-    return {schema_version=>1,tool=>'ABRicate',version=>$parsed->{version},runtime=>$runtime,
+    return {schema_version=>1,tool=>'ABRicate',version=>$parsed->{version},execution_adapter=>'1.0.1_pipefail_close_v1',runtime=>$runtime,
             parsed_arguments=>$parsed,resources=>\%resources,resolved_locations=>\%locations};
 }
 my ($runtime64,$output,$verify,$execute);
@@ -137,6 +137,22 @@ die "ABRicate runtime resources or resolved arguments differ from pre-lookup ide
 if (defined $output) {open my $f,'>:raw',$output or die $!; print $f "$encoded\n"; close $f;}
 if ($execute) {
     defined($verify) or die "--execute requires verified pre-lookup receipt\n";
-    exec {$identity->{resolved_locations}{entrypoint}} $identity->{resolved_locations}{entrypoint},@ARGV;
+    # Fixed upstream1.0.1 neither enables pipeline failure propagation nor
+    # checks close(BLAST). Preserve its program/argv/thresholds, with exactly
+    # these two error-boundary checks in the trusted source evaluation.
+    my $driver = <<'DRIVER';
+use strict;
+$0=shift @ARGV;
+require FindBin; FindBin::again();
+open my $f,'<',$0 or die $!; my $source=do {local $/; <$f>};
+$source =~ /my \$VERSION = "1\.0\.1";/ or die "Requires ABRicate1.0.1\n";
+my $open_code=q{open BLAST, '-|', 'bash', '-o', 'pipefail', '-c', $cmd or err("Cannot start ABRicate search pipeline");};
+my $open=($source =~ s{open BLAST, "\$cmd \|";}{$open_code});
+my $close_code=q{close BLAST or err("ABRicate input converter/BLAST subprocess failed (status $?)");};
+my $close=($source =~ s{close BLAST;}{$close_code});
+$open==1 && $close==1 or die "Cannot identify fixed ABRicate subprocess boundaries\n";
+eval $source; die $@ if $@;
+DRIVER
+    exec {$^X} $^X,'-e',$driver,$identity->{resolved_locations}{entrypoint},@ARGV;
     die "Cannot execute ABRicate: $!\n";
 }
