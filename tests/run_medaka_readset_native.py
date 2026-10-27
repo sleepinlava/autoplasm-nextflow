@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Bounded Medaka 2.2.2 model-selection controls, never polishing or downloading.
+
+Run with the prepared Medaka environment's Python. All generated read records
+contain only N: these are parser controls, not biological reference samples.
+The Bash controls execute the exact installed consensus script prefix ending
+before its program-version/alignment/inference phase. They are not full runs.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+from unittest.mock import patch
+
+
+def sha(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    import medaka
+    import medaka.models as models
+    import medaka.options as options
+    import pysam
+
+    assert medaka.__version__ == '2.2.2', medaka.__version__
+    args.output.mkdir(parents=True, exist_ok=False)
+    output = args.output.resolve()
+    prefix = Path(sys.prefix)
+    lock_path = Path(__file__).with_name('medaka-readset.lock.json')
+    lock = json.loads(lock_path.read_text())
+    for relative, expected in lock['source_sha256_relative_to_prefix'].items():
+        assert sha(prefix / relative) == expected, relative
+    source = prefix / 'bin/medaka_consensus'
+    text = source.read_text()
+    boundary = '\necho "Checking program versions"\n'
+    assert text.count(boundary) == 1
+    cases = []
+    attempts = []
+
+    def blocked(url, *a, **kw):
+        attempts.append(url)
+        raise RuntimeError('Network disabled by native readset control')
+
+    def equal(name, operation, expected):
+        actual = operation()
+        assert actual == expected, (name, actual, expected)
+        cases.append({'name': name, 'actual': actual, 'expected': expected})
+
+    def rejects(name, operation, kind):
+        try:
+            operation()
+        except kind as exc:
+            cases.append({'name': name, 'exception': type(exc).__name__, 'message': str(exc)})
+        else:
+            raise AssertionError(f'{name}: expected {kind.__name__}')
+
+    sup = 'dna_r10.4.1_e8.2_400bps_sup@v5.2.0'
+    hac = 'dna_r10.4.1_e8.2_400bps_hac@v6.0.0'
+    sup_model = 'r1041_e82_400bps_sup_v5.2.0'
+    hac_model = 'r1041_e82_400bps_hac_v6.0.0'
+    bundled = {}
+
+    def store_state():
+        return {str(store): {str(p.relative_to(store)): sha(p) for p in sorted(Path(store).rglob('*')) if p.is_file()}
+                for store in options.model_stores}
+
+    before = store_state()
+    with tempfile.TemporaryDirectory(prefix='medaka-readset-') as tmp:
+        work = Path(tmp)
+
+        def fastq(name, comments):
+            path = work / f'{name}.fastq'
+            path.write_text(''.join(f'@control{i} {comment}\nN\n+\n!\n' for i, comment in enumerate(comments)))
+            return str(path)
+
+        tagged = fastq('tagged', [f'RG:Z:run_{sup}_barcode01'])
+        missing = fastq('missing', [''])
+        older = fastq('older', ['basecall_model_version_id=dna_r9.4.1_e8_sup@v3.3'])
+        with patch.object(models.requests, 'get', blocked):
+            for model in options.current_models:
+                path = Path(models.resolve_model(model))
+                bundled[model] = {'path': str(path), 'size': path.stat().st_size, 'sha256': sha(path)}
+                equal(f'explicit-path:{model}', lambda p=str(path): models.resolve_model(p), str(path))
+            equal('fastq-RG', lambda: models.model_from_basecaller(tagged), sup_model)
+            for tag in ['basecall_model_version_id', 'model_version_id']:
+                path = fastq(tag, [f'{tag}={hac}'])
+                equal(f'fastq-{tag}', lambda p=path: models.model_from_basecaller(p), hac_model)
+            equal('alias-consensus', lambda: models.resolve_model(sup + ':consensus'), bundled[sup_model]['path'])
+            first100 = fastq('first100', [f'RG:Z:run_{sup}'] * 100 + [f'RG:Z:run_{hac}'])
+            equal('first100-boundary', lambda: models.model_from_basecaller(first100), sup_model)
+            mixture = fastq('mixture', [f'RG:Z:run_{sup}', f'RG:Z:run_{hac}'])
+            rejects('mixed-callers', lambda: models.model_from_basecaller(mixture), ValueError)
+            rejects('no-metadata', lambda: models.model_from_basecaller(missing), ValueError)
+            unknown = fastq('unknown', ['model_version_id=unknown-control'])
+            rejects('unknown-caller', lambda: models.model_from_basecaller(unknown), KeyError)
+            bam = work / 'header.bam'
+            with pysam.AlignmentFile(str(bam), 'wb', header={'HD': {'VN': '1.6'}, 'RG': [{'ID': 'control', 'DS': f'basecall_model={sup} runid=control'}]}):
+                pass
+            equal('bam-header', lambda: models.model_from_basecaller(str(bam)), sup_model)
+            equal('bacteria-selection', lambda: models.model_from_basecaller(tagged, bacteria=True), options.bact_methyl_model)
+            rejects('bacteria-incompatible', lambda: models.model_from_basecaller(older, bacteria=True), RuntimeError)
+            rejects('deprecated', lambda: models.resolve_model(options.deprecated_models[0]), options.DeprecationError)
+            rejects('unknown-model', lambda: models.resolve_model('unknown-control'), ValueError)
+            rejects('bacteria-unprepared', lambda: models.resolve_model(options.bact_methyl_model), models.DownloadError)
+        assert len(attempts) == 1, attempts
+
+        # Each child still executes the original installed CLI/parser. The shim
+        # only refuses model downloads and records attempts outside stderr (the
+        # original Bash script suppresses auto-selection stderr).
+        shim = work / 'medaka'
+        shim.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
+import requests
+def deny(url, *args, **kwargs):
+    with open(os.environ['MEDAKA_NETWORK_MARKER'], 'a') as out:
+        out.write(json.dumps({'url': url}) + '\\n')
+    raise RuntimeError('Network disabled by native readset control')
+requests.get = deny
+from medaka.medaka import main
+main()
+''')
+        shim.chmod(0o755)
+        probe = work / 'consensus-prefix.sh'
+        probe.write_text(text.split(boundary)[0] + '\nprintf "SELECTED_MODEL=%s\\n" "$MODEL"\n')
+        assembly = work / 'control.fa'
+        assembly.write_text('>parser_control_only\nN\n')
+        shell_cases = [
+            ('auto-bundled', tagged, [], 0, bundled[sup_model]['path'], False),
+            ('metadata-fallback', missing, [], 0, sup_model, False),
+            ('explicit-overrides-bacteria', tagged, ['--bacteria', '-m', bundled[hac_model]['path']], 0, bundled[hac_model]['path'], False),
+            ('bacteria-unprepared', tagged, ['--bacteria'], 1, None, True),
+            ('auto-unprepared-falls-back', older, [], 0, sup_model, True),
+        ]
+        shell = []
+        for name, reads, extra, code, selected, network in shell_cases:
+            marker = output / f'{name}.network.jsonl'
+            env = dict(os.environ, PATH=f'{work}:{prefix / "bin"}:' + os.environ.get('PATH', ''), MEDAKA_NETWORK_MARKER=str(marker), PYTHONDONTWRITEBYTECODE='1', OMP_NUM_THREADS='2', MKL_NUM_THREADS='2')
+            command = ['bash', str(probe), '-i', reads, '-d', str(assembly), *extra]
+            result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=180)
+            (output / f'{name}.stdout').write_text(result.stdout)
+            (output / f'{name}.stderr').write_text(result.stderr)
+            assert result.returncode == code, (name, result.returncode, result.stderr)
+            if selected is not None:
+                assert f'SELECTED_MODEL={selected}\n' in result.stdout, (name, result.stdout)
+            assert marker.exists() == network, (name, marker)
+            shell.append({'name': name, 'returncode': result.returncode, 'selected_model': selected, 'attempted_download_refused': network, 'full_polishing': False})
+        shutil.copytree(work, output / 'controls')
+
+    after = store_state()
+    assert before == after, 'Model stores changed during readset controls'
+
+    sources = [Path(__file__).resolve(), lock_path.resolve(), source, Path(models.__file__), Path(options.__file__), prefix / 'bin/mini_align']
+    report = {'pass_bounded_checks': True, 'formal_acceptance': False, 'scope': 'native model selection only; no alignment, inference, scientific fixture, cache or production gate', 'version': medaka.__version__, 'prefix': str(prefix), 'source_sha256': {str(p): sha(p) for p in sources}, 'bundled_models': bundled, 'api_cases': cases, 'download_attempts_refused': attempts, 'shell_prefix_cases': shell, 'model_stores_unchanged': before == after, 'model_stores_before': before, 'model_stores_after': after, 'retained_controls': str(output / 'controls'), 'retained_controls_note': 'Original prefix and shim bytes retained; temporary input paths in prefix stdout are historical, regenerated by this driver.'}
+    (output / 'run.json').write_text(json.dumps(report, indent=2) + '\n')
+    print(json.dumps({'api_cases': len(cases), 'shell_prefix_cases': len(shell), 'output': str(output)}))
+
+
+if __name__ == '__main__':
+    main()

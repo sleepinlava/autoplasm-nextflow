@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "medaka_version": "2.2.2",
+  "upstream_tag": "v2.2.2",
+  "upstream_commit": "293b33dbf168935aee4d5b2f3e1a92f4a54e409f",
+  "conda_build": "py312h3050eb1_0",
+  "package_sha256": "8cca1d7aca2e6f2caef04fdec9e94a025467e347cd3671d7490464126e449d9b",
+  "source_sha256_relative_to_prefix": {
+    "lib/python3.12/site-packages/medaka/models.py": "83f5d3293b23baad2ea9ba7b07c2cc0a5c75d2629c883e77f15215a79925cff1",
+    "lib/python3.12/site-packages/medaka/options.py": "daa0150a00a2144c700b03a854b7161036ad04563b9910fe12d94417a6f26144",
+    "lib/python3.12/site-packages/medaka/medaka.py": "e101e5b1ffad0e42893db1af62bfec109fd817968a67100645f71fcedb06e909",
+    "lib/python3.12/site-packages/medaka/__init__.py": "45d8c7d81643c7e84d0b8e941bd39cfaf6c58c4d80c8707e91c0a61f18ab3c14",
+    "bin/medaka_consensus": "ed51264a7d108a10773dca2f2e6561fad2e0f3012a595d6d57fb6e5157d75f8c",
+    "bin/mini_align": "717ad91898f1e4f04fc7c221c2db5885b1274d77b32b57ff6f322852a03b4634"
+  },
+  "mini_align_provenance": "Conda archive only; absent from pinned upstream tag tree",
+  "scope": "Native model-selection controls only, no biological fixture or scientific inference"
+}
