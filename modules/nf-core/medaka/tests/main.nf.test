@@ -7,15 +7,20 @@ nextflow_process {
     script "../main.nf"
     process "MEDAKA"
 
-    test("Medaka") {
+    // User excludes viral elements. All three fixture paths must come from
+    // a complete reviewed bacterial ONT case and an independent full reference.
+    // Native prepared case remains required and unexecuted.
+    test("Medaka - complete bacterial prepared case") {
+
+        tag "medaka-native-prepared"
 
         when {
             process {
                 """
                 input[0] = [
                     [ id:'test', single_end:true ], // meta map
-                    file(params.modules_testdata_base_path + 'genomics/sarscov2/nanopore/fastq/test.fastq.gz', checkIfExists: true),
-                    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
+                    file(params.medaka_bacterial_reads, checkIfExists: true),
+                    file(params.medaka_bacterial_assembly, checkIfExists: true)
                 ]
                 """
             }
@@ -24,17 +29,23 @@ nextflow_process {
         then {
             assertAll(
                 { assert process.success },
-                { assert snapshot(
-                    path(process.out.assembly[0][1]).linesGzip.join()[0..99],
-                    process.out.findAll { key, val -> key.startsWith('versions') }
-                    ).match()
+                {
+                    def expected = new File(params.medaka_bacterial_expected_fasta.toString()).readLines()
+                    assert expected.any { it.startsWith('>') }
+                    assert expected.findAll { !it.startsWith('>') }.join('').size() > 0
+                    // Exact complete reference, including sequence IDs and DNA;
+                    // no first-100-base or automatically re-recorded snapshot.
+                    assert path(process.out.assembly[0][1]).linesGzip == expected
+                    assert process.out.versions_medaka[0][2] == '2.2.2'
                 }
             )
         }
 
     }
 
-    test("Medaka - stub") {
+    test("Medaka - bacterial stub interface") {
+
+        tag "medaka-bacterial-stub"
 
         options "-stub"
 
@@ -43,8 +54,8 @@ nextflow_process {
                 """
                 input[0] = [
                     [ id:'test', single_end:true ], // meta map
-                    file(params.modules_testdata_base_path + 'genomics/sarscov2/nanopore/fastq/test.fastq.gz', checkIfExists: true),
-                    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
+                    file(params.medaka_bacterial_reads, checkIfExists: true),
+                    file(params.medaka_bacterial_assembly, checkIfExists: true)
                 ]
                 """
             }
