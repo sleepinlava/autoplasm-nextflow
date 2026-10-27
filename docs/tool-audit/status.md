@@ -2,16 +2,16 @@
 
 由 scripts/refresh_status.py 从台账生成；日期 2026-10-26。基线 f57d0f91454ee0c99cf462ac9093bdf68349991a。
 
-- 生产 .nf 台账：114（当前=112，按用户要求退役=2）；investigating=112，matched=0。历史分母保留。
-- 问题：105；S0=34，S1=5，S2=66，S3=0。TA 为生产契约，TT 为测试逻辑/覆盖问题。
-- tests 来源台账：287（当前=283，退役=4）；包括 harness/config/文档，不是用例分母。
-- 已验证局部修复=99，按用户要求退役=2，其余未决=4（S0=1，S1=0，S2=3）。退役不计修复通过；运行记录=363。
+- 生产 .nf 台账：119（当前=117，按用户要求退役=2）；investigating=117，matched=0。历史分母保留。
+- 问题：109；S0=38，S1=5，S2=66，S3=0。TA 为生产契约，TT 为测试逻辑/覆盖问题。
+- tests 来源台账：342（当前=338，退役=4）；包括 harness/config/文档，不是用例分母。
+- 已验证局部修复=99，按用户要求退役=2，其余未决=8（S0=5，S1=0，S2=3）。退役不计修复通过；运行记录=450。
 
 原 main 独立拒绝场景 75/75；当前 main 哈希对应=75。重放不增加场景分母；不证明完整输入契约或 nf-test 框架通过。
 
 已纳入证据的来源哈希清单 718 项；当前工作区匹配=False。这不是全仓库来源或测试用例分母。
 
-词法扫描：112 文件、223 导入符号、105 主入口可达文件、0 未解析 include、155 配置声明。不能代替动态连接与执行证据。
+词法扫描：123 文件、274 导入符号、112 主入口可达文件、0 未解析 include、155 配置声明。不能代替动态连接与执行证据。
 
 最近接受的修复批次：[20261025-consolidated-acceptance](../../results/tool-audit/20261025-consolidated-acceptance/receipt.json)；完成日期 2026-10-25。
 
@@ -22,6 +22,10 @@
 | ID | 级别 | 修复状态 | 范围 |
 | --- | --- | --- | --- |
 | TA-091 | S0 | in_progress | Directory reference/source cache identity across reachable scientific tools |
+| TA-092 | S0 | ready | ABRicate converter/BLAST error propagation |
+| TA-093 | S0 | ready | IntegronFinder unmarked single-replicon topology versus approved unknown-linear rule |
+| TA-094 | S0 | ready | PlasmidFinder Conda startup Python compatibility |
+| TA-095 | S0 | ready | PlasmidFinder unsupported --legacy production option |
 | TA-016 | S2 | in_progress | methods.md / report_data.json / rendered HTML |
 | TA-031 | S2 | ready | gtdbtk input extension |
 | TT-003 | S2 | ready | P4 nonempty statistics and filtered sample gating |

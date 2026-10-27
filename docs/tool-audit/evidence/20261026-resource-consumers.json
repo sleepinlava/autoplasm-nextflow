@@ -1,0 +1,353 @@
+{
+  "run_id": "20261026-resource-consumers-candidate",
+  "completed_local_date": "2026-10-26",
+  "result": "bounded_candidate_checks_pass_unaccepted_TA091_open",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "artifacts": [
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/copla-native/run.json",
+      "sha256": "fd3b1e1af2ca5b4d1177bf039ecb0572694139fea30e89bcab9c69520aa36f30",
+      "level": "native/cache",
+      "bounded_pass": true,
+      "scope": "Two complete candidates, all9894 references; cold/unchanged/private corruption/restored. No biological accuracy claim."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/plasx-native-v3/execution.json",
+      "sha256": "d1ee87857ddd0430c618ee0f1c995c6b129d529cfd7bdca963ba800bdd3e5079",
+      "level": "native",
+      "bounded_pass": true,
+      "scope": "Full original annotation/search pipeline; 2 completed tasks, immutable source."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/plasx-native-v3/independent/run.json",
+      "sha256": "cebc593db05c5e43891d3830ed698fcf9528d0f64f87a6eed1d8542c454db470",
+      "level": "independent-output-oracle",
+      "bounded_pass": true,
+      "scope": "196 genes/39 scored contigs; original predict arithmetic agreement; precomputed fixture family counts differ, not biological truth."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/plasx-native-v3/cache-controls.json",
+      "sha256": "7eabe9b6965fceefbb93f0f0c35c431b01253d777efead113b08c2305c00c6b0",
+      "level": "native/cache",
+      "bounded_pass": true,
+      "scope": "Only private anvio primary-source key mutated; other PlasX resource groups not individually native-mutated."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/plasmaag-native-v2/run.json",
+      "sha256": "4fe85ecda26cd3573734c8293de4497dd97ce2cbc81a24cf8acba03783a4b21d",
+      "level": "native/cache",
+      "bounded_pass": true,
+      "scope": "Original two-sample fixture and 200 epochs; explicit test-only VAMB settings retained."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/plasmaag-native-v2/independent.json",
+      "sha256": "20a813b2ab656e8c34bc5066c673de9d45108955f9650cd0c46c1f770cc36fa7",
+      "level": "independent-output-oracle",
+      "bounded_pass": true,
+      "scope": "115 plasmid bins/129 memberships; exact original DNA, members and metadata; not accuracy."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/gplas-native/run.json",
+      "sha256": "3ac87e1c661037d7766f6a67bad0232d923c0587f02603a67277fb664812ecbd",
+      "level": "native/cache",
+      "bounded_pass": true,
+      "scope": "Original graph and synthetic DNA counterfactual with supplied classifications; not biological accuracy."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/platon-native-v2/run.json",
+      "sha256": "08d26cd115743ea21772df5c7b59b4e13f53d1a7ed2e82f9649dcd1c10e005ed",
+      "level": "native/cache",
+      "bounded_pass": true,
+      "scope": "9 phases including full DB, gzip/negative states and fresh locked offline environment."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/hotspot-native-v2/run.json",
+      "sha256": "fe42256833b4e2054b512be976757ba38bb6844cc4a938248cd68d32a2410b4d",
+      "level": "native/cache",
+      "bounded_pass": true,
+      "scope": "9 scenarios; full19 models/17 database files, native lineage conversion and fresh locked environment."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/dastool-native/run.json",
+      "sha256": "ef921560405ad078c5d96544520a36363e65a1166fd380c37832a4e2149d0cc1",
+      "level": "native-interface",
+      "bounded_pass": true,
+      "scope": "7 scenarios; custom/default genuine15 bins and DNA, negative database states."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/protein-native-v3/run.json",
+      "sha256": "16dbecec4be28dcc6826f177ab20750a46266e76be58015b3d37ccf4cdb5a82d",
+      "level": "native-interface",
+      "bounded_pass": true,
+      "scope": "7 scenarios/32 trace rows; MacSyFinder and eggNOG input contract; not full production database annotation."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/rgi-native-v2/run.json",
+      "sha256": "05dc284aa61cb1c802f6a2ed541f91711e1f889534486211463d104d01a84ed3",
+      "level": "native-interface",
+      "bounded_pass": true,
+      "scope": "4 cases with declared CARD and conflicting-global-database control."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/gtdb-interface/run.json",
+      "sha256": "a2894b3faf4fb79e30dfb46587208bf19f3d6c4c27583e17857f9eeba0e14b92",
+      "level": "interface-observer",
+      "bounded_pass": true,
+      "scope": "8 cases native2.7.2 parser/input roster; fake DB roster and taxonomy observer; no full r232 classification."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/mag-routing-v2/run.json",
+      "sha256": "6d5f509d7af87fc31b259c90d6936370493f7177b0d55fe79adcb9a8c3eea14d",
+      "level": "routing-observer/native-R",
+      "bounded_pass": true,
+      "scope": "18 scenarios with explicit binner/quality/taxonomy observers; no model inference."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/detection-routing/run.json",
+      "sha256": "b5115f28b1ee41a506d456b9938908b4f4b97a9b8c594647b26bee8fc52c4bd0",
+      "level": "routing-observer/native-R",
+      "bounded_pass": true,
+      "scope": "3 scenarios/28 completed tasks; classifiers are observers."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/consumer-cache-v2/run.json",
+      "sha256": "1f01591a7d31cdc94202f2a7207286e2f77496aa729d08240db70c2f61a29df1",
+      "level": "cache-observer",
+      "bounded_pass": true,
+      "scope": "32 rounds,15 private resource mutations/13 actual process definitions; explicit stubs/CLI observer; no inference."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/nf-test-gplas/run.json",
+      "sha256": "c921fd90437296493701c3ac8b796d043d440d7976c2c327aed386acffab59b0",
+      "level": "native-framework",
+      "bounded_pass": true,
+      "scope": "1 actual native framework case; local overlay, no OCI."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/nf-test-platon/run.json",
+      "sha256": "550d10bac912b4d608c14b0967fcc2425443e213545b053e02fe3ada62a07ffe",
+      "level": "native-framework",
+      "bounded_pass": true,
+      "scope": "2 actual native framework cases; local overlay, no OCI."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/mock-illumina-v2/validation.json",
+      "sha256": "a12a5a58201c0d4d4fd75d2dbd50d673b24321228666da0e67017d52392ea68e",
+      "level": "mock-integration/native-R",
+      "bounded_pass": true,
+      "scope": "160 completed tasks/6 synthetic samples; external assembler/classifier/quantifier mocks."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/main75/run.json",
+      "sha256": "4cb70b8a2a16ab4d78dff9f5c338718b03fb994f3095bd92c5a02db9cef8a00e",
+      "level": "P0-refusal",
+      "bounded_pass": true,
+      "scope": "75 existing main refusal cases replayed; zero analysis tasks; no new cases."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/preparation-integration/run.json",
+      "sha256": "7dc6470e640633a3a40d3bb29259e227431ee076103fd963f28347f65318c11e",
+      "level": "source-preparation",
+      "bounded_pass": true,
+      "scope": "Focused source hydration integration only; not a repeat of full large COG/Pfam formatting."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/anvio-unit.json",
+      "sha256": "1d404b80b4537906b1ce86bba1aee1966fb294971af6d6cd0ada9808e3e95872",
+      "level": "unit/source-integrity",
+      "bounded_pass": true,
+      "scope": "2 methods: pinned complete source, same-stat corruption/restore and missing target."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/patch-roundtrip.json",
+      "sha256": "03c1997d5a425bbc6e26646bf6bd1c47e21bc2fa7a07f07cefc7689f3f6a2229",
+      "level": "candidate-source-chain",
+      "bounded_pass": true,
+      "scope": "102 paths, two disjoint patches forward/current and reverse/HEAD; report candidate preserved, not newly accepted."
+    },
+    {
+      "artifact": "results/tool-audit/20261026-resource-consumers/vendor-source-state.json",
+      "sha256": "1e39045f40e4996f28594cdfa87bceceb15dcedab3b61fdb9d0e5754bb9d500c",
+      "level": "vendor-source-review",
+      "bounded_pass": null,
+      "scope": "13 candidate module deltas; 3 pre-existing stale comparisons require baseline-chain review."
+    }
+  ],
+  "source_comparison_mismatches": [],
+  "patches": {
+    "TA-091-resource-consumers.diff": {
+      "sha256": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+      "paths": [
+        "bin/anvio_checked.py",
+        "lib/ResourceIdentity.groovy",
+        "lib/resource_inputs.nf",
+        "modules/binning/gplas2.nf",
+        "modules/binning/plasmaag.nf",
+        "modules/detection/plasme.nf",
+        "modules/detection/plasx.nf",
+        "modules/detection/platon.nf",
+        "modules/host/plasmidhostfinder.nf",
+        "modules/linking/hotspot.nf",
+        "modules/nf-core/amrfinderplus/run/main.nf",
+        "modules/nf-core/amrfinderplus/run/meta.yml",
+        "modules/nf-core/amrfinderplus/run/tests/main.nf.test",
+        "modules/nf-core/bakta/bakta/main.nf",
+        "modules/nf-core/bakta/bakta/meta.yml",
+        "modules/nf-core/bakta/bakta/tests/main.nf.test",
+        "modules/nf-core/blast/blastn/main.nf",
+        "modules/nf-core/blast/blastn/meta.yml",
+        "modules/nf-core/blast/blastn/tests/main.nf.test",
+        "modules/nf-core/checkm2/predict/main.nf",
+        "modules/nf-core/checkm2/predict/meta.yml",
+        "modules/nf-core/checkm2/predict/tests/main.nf.test",
+        "modules/nf-core/dastool/dastool/main.nf",
+        "modules/nf-core/dastool/dastool/meta.yml",
+        "modules/nf-core/dastool/dastool/tests/main.nf.test",
+        "modules/nf-core/eggnogmapper/main.nf",
+        "modules/nf-core/eggnogmapper/meta.yml",
+        "modules/nf-core/eggnogmapper/tests/main.nf.test",
+        "modules/nf-core/genomad/endtoend/main.nf",
+        "modules/nf-core/genomad/endtoend/meta.yml",
+        "modules/nf-core/genomad/endtoend/tests/main.nf.test",
+        "modules/nf-core/gtdbtk/classifywf/main.nf",
+        "modules/nf-core/gtdbtk/classifywf/meta.yml",
+        "modules/nf-core/gtdbtk/classifywf/tests/main.nf.test",
+        "modules/nf-core/kraken2/kraken2/main.nf",
+        "modules/nf-core/kraken2/kraken2/meta.yml",
+        "modules/nf-core/kraken2/kraken2/tests/main.nf.test",
+        "modules/nf-core/macsyfinder/search/main.nf",
+        "modules/nf-core/macsyfinder/search/meta.yml",
+        "modules/nf-core/macsyfinder/search/tests/main.nf.test",
+        "modules/nf-core/metaphlan/metaphlan/main.nf",
+        "modules/nf-core/metaphlan/metaphlan/meta.yml",
+        "modules/nf-core/metaphlan/metaphlan/tests/main.nf.test",
+        "modules/nf-core/mobsuite/typer/main.nf",
+        "modules/nf-core/mobsuite/typer/meta.yml",
+        "modules/nf-core/mobsuite/typer/tests/main.nf.test",
+        "modules/nf-core/rgi/main/main.nf",
+        "modules/nf-core/rgi/main/meta.yml",
+        "modules/nf-core/rgi/main/tests/main.nf.test",
+        "modules/typing/copla.nf",
+        "subworkflows/comparative.nf",
+        "subworkflows/gplas_binning.nf",
+        "subworkflows/host_linking.nf",
+        "subworkflows/host_prediction.nf",
+        "subworkflows/mag_host.nf",
+        "subworkflows/plasmaag_binning.nf",
+        "subworkflows/plasmid_detection.nf",
+        "subworkflows/plasmid_downstream.nf",
+        "tests/anvio-submodules.lock.json",
+        "tests/module_harness.py",
+        "tests/nextflow/copla_native.nf",
+        "tests/nextflow/dastool_custom_db.nf",
+        "tests/nextflow/dastool_export.nf",
+        "tests/nextflow/gplas_native.nf",
+        "tests/nextflow/gtdb_inputs.nf",
+        "tests/nextflow/macsy_inputs.nf",
+        "tests/nextflow/plasme_native.nf",
+        "tests/nextflow/plasx_native.nf",
+        "tests/nextflow/platon_native.nf",
+        "tests/nextflow/resource_consumer_cache.nf",
+        "tests/nextflow/resource_identity.nf",
+        "tests/nextflow/resource_input_import.nf",
+        "tests/nextflow/rgi_database_scope.nf",
+        "tests/nf-test/README.md",
+        "tests/nf-test/nodes-binning-gplas2.nf.test",
+        "tests/nf-test/nodes-detection-plasme.nf.test",
+        "tests/nf-test/nodes-detection-plasx.nf.test",
+        "tests/nf-test/nodes-detection-platon.nf.test",
+        "tests/nf-test/nodes-typing-copla.nf.test",
+        "tests/nf-test/workflows/blastn_real.nf",
+        "tests/prepare_anvio_submodules.py",
+        "tests/prepare_plasx_resources.py",
+        "tests/run_dastool_custom_db.py",
+        "tests/run_gtdb_inputs.py",
+        "tests/run_hotspot_native.py",
+        "tests/run_platon_native.py",
+        "tests/run_protein_input_controls.py",
+        "tests/run_protein_inputs.py",
+        "tests/run_resource_consumers.py",
+        "tests/run_resource_identity.py",
+        "tests/run_rgi_database_scope.py",
+        "tests/test_anvio_submodules.py",
+        "tests/test_platon_input_interface.py"
+      ]
+    },
+    "TA-016-preserved-report-candidate.diff": {
+      "sha256": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+      "paths": [
+        "bin/generate_report.R",
+        "envs/r_analysis.yml",
+        "lib/report_events.nf",
+        "modules/cross_sample/report.nf",
+        "modules/detection/consensus.nf",
+        "modules/detection/structure.nf",
+        "tests/nextflow/report_runtime.nf",
+        "tests/run_report_runtime.py",
+        "tests/test_generate_report.py"
+      ]
+    }
+  },
+  "failed_or_superseded_attempts": [
+    {
+      "directory": "results/tool-audit/20261026-resource-consumers/plasx-native",
+      "classification": "superseded_or_failed_attempt_not_counted_as_pass"
+    },
+    {
+      "directory": "results/tool-audit/20261026-resource-consumers/plasx-native-v2",
+      "classification": "superseded_or_failed_attempt_not_counted_as_pass"
+    },
+    {
+      "directory": "results/tool-audit/20261026-resource-consumers/plasmaag-native",
+      "classification": "superseded_or_failed_attempt_not_counted_as_pass"
+    },
+    {
+      "directory": "results/tool-audit/20261026-resource-consumers/platon-native",
+      "classification": "superseded_or_failed_attempt_not_counted_as_pass"
+    },
+    {
+      "directory": "results/tool-audit/20261026-resource-consumers/hotspot-native",
+      "classification": "superseded_or_failed_attempt_not_counted_as_pass"
+    },
+    {
+      "directory": "results/tool-audit/20261026-resource-consumers/protein-native",
+      "classification": "superseded_or_failed_attempt_not_counted_as_pass"
+    },
+    {
+      "directory": "results/tool-audit/20261026-resource-consumers/protein-native-v2",
+      "classification": "superseded_or_failed_attempt_not_counted_as_pass"
+    },
+    {
+      "directory": "results/tool-audit/20261026-resource-consumers/rgi-native",
+      "classification": "superseded_or_failed_attempt_not_counted_as_pass"
+    },
+    {
+      "directory": "results/tool-audit/20261026-resource-consumers/mag-routing",
+      "classification": "superseded_or_failed_attempt_not_counted_as_pass"
+    },
+    {
+      "directory": "results/tool-audit/20261026-resource-consumers/consumer-cache",
+      "classification": "superseded_or_failed_attempt_not_counted_as_pass"
+    },
+    {
+      "directory": "results/tool-audit/20261026-resource-consumers/mock-illumina",
+      "classification": "superseded_or_failed_attempt_not_counted_as_pass"
+    }
+  ],
+  "remaining": [
+    "8 implicit environment/model/database resource pairs",
+    "Optional prefix/sidecar DB read sets and root locator metacharacters need explicit review",
+    "Remote/non-POSIX providers, immutable-resource operational boundary",
+    "Full GTDB r232, real shotgun P4, M0-M4/default-real/platform/OCI, S2 provenance and AWS remain unfinished"
+  ],
+  "scope": "Candidate evidence only. Accepted718-source manifest,99 bounded fixes,2 user retirements,4 unresolved findings unchanged. No source acceptance, commit, push or AWS execution.",
+  "full_receipt": "results/tool-audit/20261026-resource-consumers/receipt.json",
+  "full_receipt_sha256": "cbe8e7f61f539fa7e05f8ec93d6512558dd70b014aab8381dd725bc7985509a8",
+  "source_comparison_count": 119,
+  "source_comparison_mismatch_count": 0,
+  "candidate_source_path_count": 102,
+  "snapshot_path_count": 730,
+  "snapshot_note": "Full current snapshot in receipt; accepted manifest remains separate."
+}

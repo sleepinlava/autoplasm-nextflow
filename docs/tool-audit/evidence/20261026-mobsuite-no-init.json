@@ -1,0 +1,61 @@
+{
+  "run_id": "20261026-mobsuite-no-init-candidate",
+  "result": "bounded_native_software_install_fix_resources_pending",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "source_direct_matches": 12,
+  "source_comparison_scope": "Loaded control files and producer/readset sites observed by bounded drivers; matching hashes do not prove every production process executed.",
+  "wheel_sha256": "467039630b3364f05ed736713db6119c5902b11cb0051b8b5891ca3ed73b808f",
+  "all16_python_sources_equal_raw_conda_package": true,
+  "all179_dependency_builds_equal_native_baseline": true,
+  "all179_raw_archives_sha256_verified": true,
+  "actual_provider": "Nextflow26.10.0 Micromamba",
+  "global_link_script_skipping": false,
+  "native_software_trace_counts": {
+    "COMPLETED": 2,
+    "CACHED": 2
+  },
+  "native_scientific_tasks": 0,
+  "preflight_unique_unit_methods": 8,
+  "preflight_cli_refusals": 2,
+  "retained_software_prefix": "results/tool-audit/20261026-mobsuite-no-init/nextflow-micro-v2/conda-cache/env-e9c50785d67dd95b80c12bb7fc63b02c",
+  "new_implicit_resource_pair": "MOB_TYPER default environment DB when optional inputs absent",
+  "resource_pairs": {
+    "total": 42,
+    "candidate": 38,
+    "pending": 4
+  },
+  "cleanup_receipt": "results/tool-audit/20261026-cleanup-6/cleanup.json",
+  "remaining": [
+    "No-virus review/complete prepared references and scientific-time no-init guard before any native MOB classification",
+    "MOB Recon and newly identified Typer environment-default resource identities/probes/context/cache mutation/restore/corruption; optional full BLAST/filter/mash/ETE3 read/write boundaries",
+    "Native complete bacterial positive/negative and nf-test; remove/replace original viral fixtures before use",
+    "Conda CLI/Mamba CLI/OCI/providers and full environment/runtime proof; Micromamba software readiness does not certify all deployments",
+    "Dorado/Medaka/TA016/TA031/TT003/default-real/platform/M0-M4/AWS original scope subject to no-virus constraint"
+  ],
+  "scope": "Both production MOB Conda YAMLs now install original dependency ranges plus fixed-SHA official wheel, removing MOB Bioconda post-link trigger.16Python sources exactly equal original raw build1/179dependency builds unchanged, pip check passes. Actual fresh Nextflow environment creation and4software-only traces2COMPLETED2CACHED cover recon/typer YAML sharing same prefix, no global skip-link; not science. Default DB uninitialized except normal bytecode, no separate biological DB/model/taxonomy download, bundled examples not scientifically used. Readonly preflight2refusals/8unique structural metadata controls pass on new environment. New actual typer parser/source-slice confirms environment default DB/init branch, adding42nd resource pair;38candidate+4pending, not resource acceptance. Old separate native baseline prefix removed after full inventory/180archive+metadata preservation and16source/10software-FASTA equivalence; historical old commands no longer runnable. Current787snapshot/183candidate paths/16ordered unaccepted patches; formal718/99accepted+2retired/8unresolved unchanged. No viral input/model/scientific run, commit/push/upload/AWS/charge.",
+  "receipt": "results/tool-audit/20261026-mobsuite-no-init/receipt.json",
+  "receipt_sha256": "b1fc252f4287356b10d8a6cabaae394c5a3dd3a9eb7e0b94c91b001b94d58f3b",
+  "current_source_paths": 787,
+  "candidate_source_paths": 183,
+  "patches": {
+    "docs/tool-audit/patches/TA-091-resource-consumers.diff": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+    "docs/tool-audit/patches/TA-016-preserved-report-candidate.diff": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+    "docs/tool-audit/patches/TA-091-resource-root.diff": "b50cb5c15450d7a4b856acd880a86e590e6692520896a3dc7b59c9785f0e9b4e",
+    "docs/tool-audit/patches/TA-091-runtime-resource-pilot.diff": "74f4e758ce846f2050ef609f738b37b8c381f0181d5c9b815e413fbeaab82857",
+    "docs/tool-audit/patches/TA-091-semibin-runtime.diff": "ef097d7faa8f086fc83834fb15383aa4c922da0068781828a0b493651838130e",
+    "docs/tool-audit/patches/TA-091-isescan-runtime.diff": "865acb900581a8f7706b5e7c0a9d2d6ee1a09a6cf59c910eb0d6b18dc281e5da",
+    "docs/tool-audit/patches/TA-091-semibin-fgs-runtime.diff": "b6e568cb76d0653e709813fa61a32b1b1739f6ca638ba72026d4fd65bffb9bb6",
+    "docs/tool-audit/patches/TA-091-abricate-runtime.diff": "5c42d56e0be3a9843cf33c9d526f053c6dd3d477a363b605eb053a1c00c96496",
+    "docs/tool-audit/patches/TA-092-abricate-errors.diff": "40c178138031291e1dbee786a2d8a0a289b9f1a9ea67af88d5befd94d68b6151",
+    "docs/tool-audit/patches/TA-091-abricate-framework.diff": "78bd86b53f39c776be6c2945d5e4d44185d8544f95f1549346a299f2a5f6d19d",
+    "docs/tool-audit/patches/TA-091-TA-093-integronfinder.diff": "363e01d653df36b0c6432b6aa75a26d9307201835d173bb8c5947f78bd08ef67",
+    "docs/tool-audit/patches/TA-094-TA-095-plasmidfinder-startup.diff": "b906316185b3302e6df7bd52a19af97fe79a7c376bf54a42cc23679ef5a3ccae",
+    "docs/tool-audit/patches/TA-091-plasmidfinder-resources.diff": "eefd28fc8b6ade7c48579d79219b697d16e93fc0fe075e9d02bb48aeb9ca8087",
+    "docs/tool-audit/patches/TA-091-mobsuite-readset.diff": "f6da6b382d58ef864b03ce2b058dd9fd9649658ac0f04ef02d406f7d23efbfa1",
+    "docs/tool-audit/patches/TA-091-mobsuite-preflight.diff": "d702bcc68c33c58658cae8898153c5a08ce22cc8836afd9fcd86d6664eaaeae2",
+    "docs/tool-audit/patches/TA-091-mobsuite-no-init.diff": "3cc65c93cf8796f50495e9afff4da4c0a75d2e07b9ef4e651ed6826566a2123c"
+  },
+  "formal_source_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d"
+}

@@ -1,0 +1,108 @@
+{
+  "run_id": "20261026-semibin-fgs-runtime-candidate",
+  "result": "bounded_optional_FragGeneScan_resource_identity_native_cache_pass_TA091_open",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "artifacts": [
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/native-v3/run.json",
+      "sha256": "cb2f086b2056a7e3015acdabc59387bf1965e650daf8707cd36ee88da15ad4c9",
+      "scope": "full original fixture, actual optional FGS branch/native/cache/missing-model controls"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/units/run.json",
+      "sha256": "a307c22420102543ee4552200be8c2a5caece9b41704098e36c041000964ad31",
+      "scope": "11 parser/read-set methods; explicit FGS layout observers, not inference"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/native-argv0-alias/run.json",
+      "sha256": "7ad354a19c8ae8f886bb662e1a96583b20093fc932de632a99e0687da471058b",
+      "scope": "actual1.32 native binary and2.4.1 resolver alias path/missing training controls"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/readset-source.json",
+      "sha256": "643c1baa6f063c19ad36bc62828f39cb1c7680d0382529dd5500603ea42291ab",
+      "scope": "source/install/control boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/attempts.json",
+      "sha256": "e83920c65c36ded9a7e754b4afdb165b58aaf2ce6752064632e98a32780701cd",
+      "scope": "source/install/control boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/patch-roundtrip.json",
+      "sha256": "ebc32b6a3c16664768d17898fb5820d35f24b2259c131780632e1224f0c634b3",
+      "scope": "source/install/control boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/native-v3/original-fgs/command.json",
+      "sha256": "188a089e2ca4264eafc9b8c363217ed5fa43a4a79933f71c24cd60ad238672a0",
+      "scope": "source/install/control boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/native-v3/binary-sections.txt",
+      "sha256": "a0b9eb1ca4d75f7d486e8b2a9d9f0d48a1d758b776379ee3d70dcff625048aa2",
+      "scope": "source/install/control boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/native-argv0-alias/controller.py",
+      "sha256": "c88938b744998be3286bfbb984d12e70ba5768f19882778a574e4c2486b5e560",
+      "scope": "source/install/control boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/native-v3/original-fgs/contigs.faa",
+      "sha256": "ff081f42e8e1a654ed3760bcfcbc745f54c61b9f264da87de4c0ec7ca849555f",
+      "scope": "full native1.32 original complete/w0 output baseline, not biological truth"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/native-v3/original-fgs/contigs.ffn",
+      "sha256": "d253960fc7c9fccd31a15594048b1762865a36063818452ab31deeb206eb013e",
+      "scope": "full native1.32 original complete/w0 output baseline, not biological truth"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-fgs-runtime/native-v3/original-fgs/contigs.gff",
+      "sha256": "08b66907e03ccb8863122119ae06dcbbbfe71f81be9a4e799ce9b0c975457819",
+      "scope": "full native1.32 original complete/w0 output baseline, not biological truth"
+    }
+  ],
+  "source_direct_matches": 9,
+  "candidate_source_paths": 131,
+  "new_delta_paths": [
+    "bin/semibin_runtime_resources.py",
+    "tests/run_semibin_fgs_runtime.py",
+    "tests/test_semibin_runtime_resources.py"
+  ],
+  "patches": {
+    "docs/tool-audit/patches/TA-091-resource-consumers.diff": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+    "docs/tool-audit/patches/TA-016-preserved-report-candidate.diff": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+    "docs/tool-audit/patches/TA-091-resource-root.diff": "b50cb5c15450d7a4b856acd880a86e590e6692520896a3dc7b59c9785f0e9b4e",
+    "docs/tool-audit/patches/TA-091-runtime-resource-pilot.diff": "74f4e758ce846f2050ef609f738b37b8c381f0181d5c9b815e413fbeaab82857",
+    "docs/tool-audit/patches/TA-091-semibin-runtime.diff": "ef097d7faa8f086fc83834fb15383aa4c922da0068781828a0b493651838130e",
+    "docs/tool-audit/patches/TA-091-isescan-runtime.diff": "865acb900581a8f7706b5e7c0a9d2d6ee1a09a6cf59c910eb0d6b18dc281e5da",
+    "docs/tool-audit/patches/TA-091-semibin-fgs-runtime.diff": "b6e568cb76d0653e709813fa61a32b1b1739f6ca638ba72026d4fd65bffb9bb6"
+  },
+  "forward_current_bytes_and_modes": true,
+  "reverse_exact_HEAD_bytes": true,
+  "formal_source_manifest_unchanged": true,
+  "formal_source_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d",
+  "native_phases": 10,
+  "native_trace_counts": {
+    "COMPLETED": 13,
+    "CACHED": 5,
+    "FAILED": 1
+  },
+  "unit_methods": 11,
+  "watched_files_restored": 18,
+  "remaining": [
+    "Six implicit consumers still pending: Dorado,Medaka,ABRicate,PlasmidFinder,MOB-recon,IntegronFinder",
+    "Other ORF/executable read sets (including Prodigal/hmmsearch) and complete Python/system/shared-library environment fingerprint not complete",
+    "Optional pretrained/full GTDB inference, when/custom deployment/GPU/OCI/provider remain incomplete",
+    "M0 cache:false matching-context deployment and resource immutability between probe and execution remain required",
+    "TA016/TA031/TT003, full GTDB r232, real shotgun P4, default-real/platform/M0-M4 and AWS scope unchanged"
+  ],
+  "scope": "Unaccepted seventh increment; adds conditional actual SemiBin2.4.1 FragGeneScan1.32 binary and17 training files, invoked argv0 path and complete/w0. Full original40contig800000bp+original BAM,15epochs/seed0/CPU. Four native positives independently check bins/DNA/state; same native adapter output FAA/FFN/GFF equals fixed original direct executable after numerical-token-preserving model whitespace/nonallocated binary comment changes. Missing selected model fails probe before consumer submission. Default fast-naive and protein override do not require FragGeneScan. 11 unit methods include earlier8, not11 new independent biological cases. Formal718 manifest and99/2/4 unchanged; no commit/push/AWS/upload/charge.",
+  "full_receipt": "results/tool-audit/20261026-semibin-fgs-runtime/receipt.json",
+  "full_receipt_sha256": "daffa198d974b70f467b921eadd66c5da4e2883f20009fb4003f7564b1846992",
+  "snapshot_path_count": 749
+}

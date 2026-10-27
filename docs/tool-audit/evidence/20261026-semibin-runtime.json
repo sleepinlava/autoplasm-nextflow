@@ -1,0 +1,138 @@
+{
+  "run_id": "20261026-semibin-runtime-candidate",
+  "result": "bounded_production_default_runtime_identity_and_guards_pass_TA091_open",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "artifacts": [
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/native-v2/run.json",
+      "sha256": "7ff96d34244b0ea2b94ac3b264a77cbe9ac4d1cf9517eed058bba6a95071dd74",
+      "scope": "native/cache",
+      "phase_or_unique_case_count": 8,
+      "trace_counts": {
+        "COMPLETED": 10,
+        "CACHED": 3,
+        "FAILED": 1
+      }
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/runtime-contexts-v2/run.json",
+      "sha256": "c3a918de974fb41a3dfdf47edb43708684ff71b7be8df96c4c311ecedb25a5d5",
+      "scope": "engine-context-controls",
+      "phase_or_unique_case_count": 6,
+      "trace_counts": {
+        "COMPLETED": 7
+      }
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/native-states-v2/run.json",
+      "sha256": "0b84c7b0761c8fece0995981388ef875a437918c926dff4d7b05af6b91c9edd3",
+      "scope": "native/states/stub",
+      "phase_or_unique_case_count": 6,
+      "trace_counts": {
+        "COMPLETED": 8,
+        "CACHED": 1,
+        "FAILED": 1
+      }
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/mag-routing-v3/run.json",
+      "sha256": "bd2aea0bed61ee88fdae6bea18553bc0c0ff8f13bb2dc52e4bb9bfdb8c461d0b",
+      "scope": "routing-observers/native-R",
+      "phase_or_unique_case_count": 18,
+      "trace_counts": {
+        "COMPLETED": 270,
+        "FAILED": 2
+      }
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/units-v2/run.json",
+      "sha256": "96359901362a64d20dcd0c34e646ccf18453d1e5285371cbb5587107377996e8",
+      "scope": "native-parser/readset-unit",
+      "phase_or_unique_case_count": 8,
+      "trace_counts": {}
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/framework-v5/run.json",
+      "sha256": "0ec5824c2f08da23b5b22f0d0555e29fe755fdf7fecd1f4bc86560191c6a8682",
+      "scope": "native-framework-recovery/stub",
+      "phase_or_unique_case_count": 2,
+      "trace_counts": {}
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/framework-source-bridge.json",
+      "sha256": "8af5618861daf36830d9aec59a50c7c92a02d3f7a81d4837912bee3c2c5c63f6",
+      "scope": "source/evidence/control-boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/package-restoration.json",
+      "sha256": "6df9c4341d76df675377d029e4a123f88285f8625285e3d3b51334ff8610abe1",
+      "scope": "source/evidence/control-boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/framework-data/download.json",
+      "sha256": "ca50d30dd6dba4cc3c64f257dd255c77b40c2b6377360b49e91fa2faa1e698a0",
+      "scope": "source/evidence/control-boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/driver-count-label-bridge.json",
+      "sha256": "b951b3729c278b1e8ac627a5253002f6f285caae0425d22ccde66912a05ab483",
+      "scope": "source/evidence/control-boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/attempts.json",
+      "sha256": "2e83374bbaecd65260cd63ed7a48de0d5ba1ca5b355ba7ad7c792d7ab66663a5",
+      "scope": "source/evidence/control-boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-semibin-runtime/patch-roundtrip.json",
+      "sha256": "c2ce08df786ccf0ab168d1a437c65f0b0485fddb0f56cdee06cff2d4d167656e",
+      "scope": "source/evidence/control-boundary"
+    }
+  ],
+  "source_direct_matches": 41,
+  "source_documented_presentation_bridges": 1,
+  "candidate_source_paths": 120,
+  "new_delta_paths": [
+    "bin/semibin_runtime_resources.py",
+    "lib/semibin_runtime.nf",
+    "modules/nf-core/semibin/singleeasybin/main.nf",
+    "modules/nf-core/semibin/singleeasybin/meta.yml",
+    "modules/nf-core/semibin/singleeasybin/tests/main.nf",
+    "modules/nf-core/semibin/singleeasybin/tests/main.nf.test",
+    "modules/nf-core/semibin/singleeasybin/tests/nextflow.config",
+    "subworkflows/mag_host.nf",
+    "tests/mag_interface_observer.py",
+    "tests/nextflow/semibin_runtime_native.nf",
+    "tests/nextflow/semibin_states.nf",
+    "tests/run_mag_routing.py",
+    "tests/run_semibin_runtime_native.py",
+    "tests/run_semibin_runtime_resources.py",
+    "tests/run_semibin_states.py",
+    "tests/test_semibin_runtime_resources.py"
+  ],
+  "patches": {
+    "docs/tool-audit/patches/TA-091-resource-consumers.diff": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+    "docs/tool-audit/patches/TA-016-preserved-report-candidate.diff": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+    "docs/tool-audit/patches/TA-091-resource-root.diff": "b50cb5c15450d7a4b856acd880a86e590e6692520896a3dc7b59c9785f0e9b4e",
+    "docs/tool-audit/patches/TA-091-runtime-resource-pilot.diff": "74f4e758ce846f2050ef609f738b37b8c381f0181d5c9b815e413fbeaab82857",
+    "docs/tool-audit/patches/TA-091-semibin-runtime.diff": "ef097d7faa8f086fc83834fb15383aa4c922da0068781828a0b493651838130e"
+  },
+  "forward_current_bytes_and_modes": true,
+  "reverse_exact_HEAD_bytes": true,
+  "formal_source_manifest_unchanged": true,
+  "formal_source_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d",
+  "remaining": [
+    "Other7 implicit environment consumers still not wired",
+    "SemiBin alternate ORF dependencies/FragGeneScan and full optional-model/GTDB native inference need verification; parser/read-set controls are not inference",
+    "M0 deployment configuration must preserve cache:false probe and matching contexts; no validated direct task.cache guard was added",
+    "Custom when/profile/backend behavior, immutable resources across hosts/providers, GPU/OCI/complete environment validation remain",
+    "Resource receipts retained in work/task inputs are not yet full final-report provenance (TA016)",
+    "Full GTDB r232, real shotgun P4, default-real/platform/M0-M4 and AWS scope unchanged"
+  ],
+  "scope": "Unaccepted candidate increment. Native scientific algorithm/default15epoch self-training retained; parsed argv is verified then executed once. Semi-supervised GTDB must be prepared before launch instead of appearing unrecorded during scientific execution. Explicit stub/routing/native/cold-cache roles separated. Formal718-source manifest and99bounded fixes+2user retirements+4unresolved unchanged. No commits/pushes/AWS resources/uploads/charges.",
+  "full_receipt": "results/tool-audit/20261026-semibin-runtime/receipt.json",
+  "full_receipt_sha256": "b209435f0987bb9b6e9e451379a0890a7a5db2d68f379073568761abf22e212a",
+  "snapshot_path_count": 740
+}

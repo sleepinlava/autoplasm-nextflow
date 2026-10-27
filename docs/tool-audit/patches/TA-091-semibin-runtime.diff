@@ -1,0 +1,971 @@
+diff --git a/bin/semibin_runtime_resources.py b/bin/semibin_runtime_resources.py
+new file mode 100644
+--- /dev/null
++++ b/bin/semibin_runtime_resources.py
+@@ -0,0 +1,115 @@
++#!/usr/bin/env python3
++"""Resolve fixed SemiBin's actual CLI read set inside its execution environment."""
++import argparse
++import base64
++import hashlib
++import importlib
++import json
++import logging
++import os
++from pathlib import Path
++import stat
++import sys
++
++
++def resource(path):
++    """Content/layout identity; reject incomplete, cyclic or special resources."""
++    root = Path(path)
++    entries = []
++
++    def visit(p, relative, ancestors):
++        link = os.readlink(p) if p.is_symlink() else None
++        before = p.stat()
++        mode = stat.S_IMODE(before.st_mode)
++        if stat.S_ISDIR(before.st_mode):
++            key = (before.st_dev, before.st_ino)
++            if key in ancestors:
++                raise ValueError('Resource directory symlink cycle: ' + str(p))
++            entries.append(dict(path=relative, kind='directory', mode=mode, link=link))
++            for child in sorted(p.iterdir(), key=lambda x: x.name):
++                visit(child, relative + '/' + child.name, ancestors | {key})
++        elif stat.S_ISREG(before.st_mode):
++            digest = hashlib.sha256()
++            with p.open('rb') as stream:
++                for block in iter(lambda: stream.read(1024 * 1024), b''):
++                    digest.update(block)
++            after = p.stat()
++            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
++                    before.st_mode) != (after.st_dev, after.st_ino, after.st_size,
++                                        after.st_mtime_ns, after.st_mode):
++                raise ValueError('Resource changed while hashing: ' + str(p))
++            entries.append(dict(path=relative, kind='file', bytes=after.st_size,
++                                sha256=digest.hexdigest(), mode=mode, link=link))
++        else:
++            raise ValueError('Resource member is not regular file/directory: ' + str(p))
++
++    visit(root, '.', set())
++    return entries
++
++
++def capture(runtime, native_args):
++    version = importlib.import_module('SemiBin.semibin_version')
++    if version.__version__ != '2.4.1':
++        raise ValueError('SemiBin resource resolver requires native 2.4.1')
++    main = importlib.import_module('SemiBin.main')
++    utils = importlib.import_module('SemiBin.utils')
++    args = main.parse_args(native_args)
++    if args.cmd != 'single_easy_bin':
++        raise ValueError('Expected SemiBin single_easy_bin command')
++    utils.set_training_type(logging.getLogger('semibin-resources'), args)
++    package = Path(version.__file__).parent
++    resources = {'bundled_marker': resource(package / 'marker.hmm'),
++                 'package_code': {p.name: resource(p) for p in sorted(package.glob('*.py'))}}
++    # Capture explicit overrides too; the real native parser applies aliases and
++    # precedence. Input files already staged by Nextflow are checked as well.
++    file_fields = ['contig_fasta', 'bams', 'abundances', 'depth_metabat2',
++                   'prodigal_output_faa', 'taxonomy_results_fname']
++    for field in file_fields:
++        value = getattr(args, field, None)
++        if value is not None:
++            values = value if isinstance(value, list) else [value]
++            resources[field] = [resource(v) for v in values]
++    if args.environment is not None:
++        resources['pretrained_model'] = resource(utils.get_model_path(args.environment))
++    elif args.training_type == 'semi' and args.taxonomy_results_fname is None:
++        ref = args.GTDB_reference
++        if ref is None:
++            ref = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'SemiBin/mmseqs2-GTDB'
++        ref = Path(ref)
++        if not (ref / 'GTDB').exists():
++            raise ValueError('Prepare the selected SemiBin GTDB reference before cache lookup (SemiBin2 download_GTDB --reference-db PATH); missing ' + str(ref / 'GTDB'))
++        # GTDB is an MMseqs prefix: all neighbouring index/taxonomy files matter.
++        resources['gtdb_reference_directory'] = resource(ref)
++    parsed = vars(args).copy()
++    # CPUs are already present in the consumer task script/cache key. A probe
++    # needs no GPU inference or the consumer's full CPU allocation to hash bytes.
++    parsed.pop('num_process', None)
++    return dict(schema_version=1, tool='SemiBin', version=version.__version__,
++                runtime=runtime, parsed_arguments=parsed, resources=resources)
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--runtime-base64', required=True)
++    parser.add_argument('--output', type=Path)
++    parser.add_argument('--verify', type=Path)
++    parser.add_argument('--execute', action='store_true')
++    parser.add_argument('native_args', nargs=argparse.REMAINDER)
++    args = parser.parse_args()
++    native_args = args.native_args[1:] if args.native_args[:1] == ['--'] else args.native_args
++    runtime = json.loads(base64.b64decode(args.runtime_base64).decode('utf-8'))
++    identity = capture(runtime, native_args)
++    if args.verify is not None and json.loads(args.verify.read_text()) != identity:
++        raise ValueError('SemiBin runtime resources or resolved arguments differ from pre-lookup identity')
++    if args.output is not None:
++        args.output.write_text(json.dumps(identity, sort_keys=True, ensure_ascii=True, separators=(',', ':')) + '\n')
++    if args.execute:
++        if args.verify is None:
++            raise ValueError('--execute requires a verified pre-lookup receipt')
++        # Use this exact, already resolved argv. Expanding ext.args a second
++        # time in a separate shell command could select different parameters.
++        os.execvp('SemiBin2', ['SemiBin2'] + native_args)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/lib/semibin_runtime.nf b/lib/semibin_runtime.nf
+new file mode 100644
+--- /dev/null
++++ b/lib/semibin_runtime.nf
+@@ -0,0 +1,31 @@
++/* Evaluated in both process script closures, before consumer cache lookup. */
++def semibinRuntime(task, engine, meta) {
++    def accelerator = task.accelerator
++    return [
++        conda: task.conda?.toString() ?: '',
++        container: task.container?.toString() ?: '',
++        engine: engine?.toString() ?: '',
++        accelerator: accelerator ? [request: accelerator.request, limit: accelerator.limit,
++                                     type: accelerator.type, runtime: accelerator.runtime] : null,
++        before_script: task.beforeScript ?: '',
++        modules: task.module ?: [],
++        container_options: task.containerOptions ?: '',
++        args: (task.ext.args ?: '').toString(),
++        args2: (task.ext.args2 ?: '').toString(),
++        prefix: (task.ext.prefix ?: meta.id).toString()
++    ]
++}
++
++def semibinRequireRuntime(identity, actual) {
++    if (identity.runtime != actual)
++        throw new IllegalStateException('SemiBin resource probe/consumer runtime mismatch before cache lookup; configure SEMIBIN and SEMIBIN_RESOURCE_PROBE with matching conda/container/accelerator, beforeScript, modules, containerOptions and ext.args/args2/prefix')
++}
++
++def semibinRuntimeBase64(runtime) {
++    return groovy.json.JsonOutput.toJson(runtime).getBytes('UTF-8').encodeBase64().toString()
++}
++
++def semibinResourceRecord(meta, receipt) {
++    def identity = new groovy.json.JsonSlurper().parseText(receipt.text)
++    return tuple(meta, identity, receipt)
++}
+diff --git a/modules/nf-core/semibin/singleeasybin/main.nf b/modules/nf-core/semibin/singleeasybin/main.nf
+--- a/modules/nf-core/semibin/singleeasybin/main.nf
++++ b/modules/nf-core/semibin/singleeasybin/main.nf
+@@ -1,3 +1,5 @@
++include { semibinRuntime; semibinRequireRuntime; semibinRuntimeBase64 } from '../../../../lib/semibin_runtime'
++
+ process SEMIBIN_SINGLEEASYBIN {
+     cache 'deep'
+     tag "${meta.id}"
+@@ -14,9 +16,10 @@
+             : 'community.wave.seqera.io/library/semibin:2.4.1--594344a862aee1b8')}"
+ 
+     input:
+-    tuple val(meta), path(fasta), path(bam)
++    tuple val(meta), path(fasta), path(bam), val(runtime_identity), path(runtime_receipt)
+     // Explicit regular files: helper changes participate in deep caching.
+     path(autoplasm_helper_0, stageAs: 'semibin_output_state.py')
++    path(resource_helper, stageAs: 'semibin_runtime_resources.py')
+ 
+     output:
+     tuple val(meta), path("${prefix}/*.csv"), emit: csv
+@@ -35,22 +38,18 @@
+     def args2 = task.ext.args2 ?: ""
+     prefix = task.ext.prefix ?: "${meta.id}"
+     def engine = task.accelerator ? 'gpu' : 'cpu'
++    def runtime = semibinRuntime(task, workflow.containerEngine, meta)
++    semibinRequireRuntime(runtime_identity, runtime)
++    def runtime64 = semibinRuntimeBase64(runtime)
+     """
+ 
+-    SemiBin2 \\
+-        ${args} \\
+-        single_easy_bin \\
+-        --input-fasta ${fasta} \\
+-        --input-bam ${bam} \\
+-        --output ${prefix} \\
+-        -t ${task.cpus} \\
+-        --engine ${engine} \\
+-        ${args2}
++    python semibin_runtime_resources.py --runtime-base64 '${runtime64}' --verify ${runtime_receipt} --execute -- ${args} single_easy_bin --input-fasta ${fasta} --input-bam ${bam} --output ${prefix} -t ${task.cpus} --engine ${engine} ${args2}
+ 
+     python3 semibin_output_state.py --output "${prefix}"
+     """
+ 
+     stub:
++    semibinRequireRuntime(runtime_identity, semibinRuntime(task, workflow.containerEngine, meta))
+     prefix = task.ext.prefix ?: "${meta.id}"
+     """
+     mkdir ${prefix}
+@@ -60,3 +59,48 @@
+     echo '{"schema":1,"state":"stub_not_validated","bin_count":null,"bins":[]}' > ${prefix}/binning_status.json
+     """
+ }
++
++
++/* Always refresh installed resources before the scientific task cache lookup.
++ * Divergent per-name runtime/argument overrides are rejected by the consumer
++ * script closure before lookup. Configure both names with a shared selector.
++ */
++process SEMIBIN_RESOURCE_PROBE {
++    cache false
++    tag "${meta.id}"
++    label 'process_medium'
++    label 'process_gpu'
++
++    conda "${task.accelerator ? "${moduleDir}/environment.gpu.yml" : "${moduleDir}/environment.yml"}"
++    container "${workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container
++        ? (task.accelerator
++            ? 'https://community-cr-prod.seqera.io/docker/registry/v2/blobs/sha256/fb/fbd557d49df87acd78159a1be8a78dc8fec2030a0ab3e26b11b16ed112ad5e57/data'
++            : 'https://community-cr-prod.seqera.io/docker/registry/v2/blobs/sha256/4c/4c049230e87478349b2ecca53156faedfb077df85a4f6deaa8d0b22bd8a975c4/data')
++        : (task.accelerator
++            ? 'community.wave.seqera.io/library/semibin_pytorch-gpu_cuda-version:d7e398c7556966b1'
++            : 'community.wave.seqera.io/library/semibin:2.4.1--594344a862aee1b8')}"
++
++    input:
++    tuple val(meta), path(fasta), path(bam)
++    path(resource_helper, stageAs: 'semibin_runtime_resources.py')
++
++    output:
++    tuple val(meta), path('semibin_runtime_identity.json'), emit: identity
++
++    script:
++    def args = task.ext.args ?: ''
++    def args2 = task.ext.args2 ?: ''
++    def prefix = task.ext.prefix ?: "${meta.id}"
++    def engine = task.accelerator ? 'gpu' : 'cpu'
++    def runtime64 = semibinRuntimeBase64(semibinRuntime(task, workflow.containerEngine, meta))
++    """
++    python semibin_runtime_resources.py --runtime-base64 '${runtime64}' --output semibin_runtime_identity.json -- ${args} single_easy_bin --input-fasta ${fasta} --input-bam ${bam} --output ${prefix} -t ${task.cpus} --engine ${engine} ${args2}
++    """
++
++    stub:
++    def identity = [schema_version: 1, stub: true, runtime: semibinRuntime(task, workflow.containerEngine, meta)]
++    def encoded = semibinRuntimeBase64(identity)
++    """
++    printf '%s' '${encoded}' | base64 -d > semibin_runtime_identity.json
++    """
++}
+diff --git a/modules/nf-core/semibin/singleeasybin/meta.yml b/modules/nf-core/semibin/singleeasybin/meta.yml
+--- a/modules/nf-core/semibin/singleeasybin/meta.yml
++++ b/modules/nf-core/semibin/singleeasybin/meta.yml
+@@ -29,9 +29,20 @@
+         description: BAM/CRAM/SAM file
+         pattern: "*.{bam,cram}"
+         ontologies: []
++    - runtime_identity:
++        type: map
++        description: Fresh environment resource identity and resolved execution context from SEMIBIN_RESOURCE_PROBE; checked before consumer cache lookup.
++    - runtime_receipt:
++        type: file
++        description: Deterministic JSON resource receipt, staged and rechecked before scientific execution.
++        pattern: "*.json"
+   - autoplasm_helper_0:
+       type: file
+       description: Local checked adapter bin/semibin_output_state.py; staged as semibin_output_state.py. Explicit file content participates in deep task caching.
++      pattern: "*.py"
++  - resource_helper:
++      type: file
++      description: bin/semibin_runtime_resources.py; the same helper is staged in the probe and consumer.
+       pattern: "*.py"
+ output:
+   csv:
+diff --git a/modules/nf-core/semibin/singleeasybin/tests/main.nf b/modules/nf-core/semibin/singleeasybin/tests/main.nf
+new file mode 100644
+--- /dev/null
++++ b/modules/nf-core/semibin/singleeasybin/tests/main.nf
+@@ -0,0 +1,23 @@
++nextflow.enable.dsl=2
++include { SEMIBIN_SINGLEEASYBIN as SEMIBIN; SEMIBIN_RESOURCE_PROBE } from '../main'
++include { semibinResourceRecord } from '../../../../../lib/semibin_runtime'
++
++workflow SEMIBIN_RUNTIME_TEST {
++    take:
++    sequence
++    state_helper
++    resource_helper
++    main:
++    SEMIBIN_RESOURCE_PROBE(sequence, resource_helper)
++    def identity = SEMIBIN_RESOURCE_PROBE.out.identity.map { meta, receipt -> semibinResourceRecord(meta, receipt) }
++    SEMIBIN(sequence.join(identity, failOnDuplicate:true, failOnMismatch:true), state_helper, resource_helper)
++    emit:
++    source_fasta = sequence.map { meta, fasta, bam -> tuple(meta, fasta) }
++    csv = SEMIBIN.out.csv
++    model = SEMIBIN.out.model
++    tsv = SEMIBIN.out.tsv
++    output_fasta = SEMIBIN.out.output_fasta
++    state = SEMIBIN.out.state
++    versions_semibin = SEMIBIN.out.versions_semibin
++    versions_cuda = SEMIBIN.out.versions_cuda
++}
+diff --git a/modules/nf-core/semibin/singleeasybin/tests/main.nf.test b/modules/nf-core/semibin/singleeasybin/tests/main.nf.test
+--- a/modules/nf-core/semibin/singleeasybin/tests/main.nf.test
++++ b/modules/nf-core/semibin/singleeasybin/tests/main.nf.test
+@@ -1,9 +1,9 @@
+-nextflow_process {
++nextflow_workflow {
+ 
+-    name "Test Process SEMIBIN_SINGLEEASYBIN"
++    name "Test SemiBin with fresh runtime resource identity"
+ 
+-    script "../main.nf"
+-    process "SEMIBIN_SINGLEEASYBIN"
++    script "./main.nf"
++    workflow "SEMIBIN_RUNTIME_TEST"
+ 
+     tag "modules"
+     tag "modules_nfcore"
+@@ -12,16 +12,18 @@
+     config './nextflow.config'
+ 
+     test("metagenome - binning") {
++        options(System.getenv('AUTOPLASM_SEMIBIN_NATIVE_OPTIONS') ?: '')
+ 
+         when {
+             params {
+                 module_args  = ''
+                 module_args2 = '--ml-threshold 0 --minfasta-kbs 0 --min-len 0 --random-seed 0'
+             }
+-            process {
++            workflow {
+                 """
+                 input[1] = file("${new File('bin/semibin_output_state.py').absolutePath}", checkIfExists: true)
+-                input[0] = [
++                input[2] = file("${new File('bin/semibin_runtime_resources.py').absolutePath}", checkIfExists: true)
++                input[0] = Channel.value([
+                     [id:'test'],
+                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/contigs.fasta.gz', checkIfExists:true),
+                     [
+@@ -29,35 +31,60 @@
+                         file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/s2.sorted.bam', checkIfExists:true),
+                         file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/s3.sorted.bam', checkIfExists:true)
+                     ]
+-                ]
++                ])
+                 """
+             }
+         }
+         then {
+-            assert process.success
+-            assert process.out.model.size() == 1
+-            def modelValue = process.out.model.get(0).get(1)
++            assert workflow.success
++            assert workflow.out.model.size() == 1
++            def modelValue = workflow.out.model.get(0).get(1)
+             def modelFiles = modelValue instanceof List ? modelValue : [modelValue]
+-            assert modelFiles.size() == 1 && path(modelFiles[0]).name.endsWith('.pt')
++            assert modelFiles.size() == 1 && path(modelFiles[0]).fileName.toString().endsWith('.pt')
+             assert path(modelFiles[0]).size() > 0
+-            def stateValue = process.out.state.get(0).get(1)
++            def stateValue = workflow.out.state.get(0).get(1)
+             def stateFiles = stateValue instanceof List ? stateValue : [stateValue]
+             assert stateFiles.size() == 1
+             def state = new groovy.json.JsonSlurper().parseText(path(stateFiles[0]).text)
+             assert state.state == 'bins_ready'
+-            def binValue = process.out.output_fasta.get(0).get(1)
++            def binValue = workflow.out.output_fasta.get(0).get(1)
+             def binFiles = binValue instanceof List ? binValue : [binValue]
+             assert state.bin_count == binFiles.size()
+-            def bins = binFiles.collect { path(it).fasta }
+-            def featurised = path(process.out.csv.get(0).get(1).find { it.endsWith('/data.csv') })
++            // Independent FASTA reader: nf-test0.9.5 has no Path.fasta API.
++            def fastaRecords = { value ->
++                def source = value.toString()
++                def stream = source.startsWith('https://') || source.startsWith('http://') ?
++                    new URL(source).openStream() : java.nio.file.Files.newInputStream(path(value))
++                if (source.endsWith('.gz')) stream = new java.util.zip.GZIPInputStream(stream)
++                def records = [:]
++                def current = null
++                stream.withReader('UTF-8') { reader ->
++                    reader.eachLine { line ->
++                        if (line.startsWith('>')) {
++                            current = line.substring(1).tokenize()[0]
++                            assert !records.containsKey(current)
++                            records[current] = new StringBuilder()
++                        } else if (line.trim()) {
++                            assert current != null
++                            records[current].append(line.trim())
++                        }
++                    }
++                }
++                assert records && records.values().every { it.length() > 0 }
++                return records.collectEntries { id, dna -> [(id): dna.toString()] }
++            }
++            def bins = binFiles.collect { fastaRecords(it) }
++            def sourceDna = fastaRecords(workflow.out.source_fasta.get(0).get(1))
++            def featurised = path(workflow.out.csv.get(0).get(1).find { path(it).fileName.toString() == 'data.csv' })
+                 .readLines().drop(1).collect { it.split(',')[0] }
+             assertAll(
++                { assert bins.every { records -> records.every { id, dna -> sourceDna[id] == dna } } },
+                 // every contig SemiBin featurised lands in exactly one bin. Which bin varies between machines
+                 { assert featurised && bins.collectMany { it.keySet().toList() }.sort() == featurised.sort() },
+-                { assert process.out.csv.get(0).get(1).collect { file(it).name }.toSet() == ['data.csv', 'data_split.csv', 's1.sorted.bam_0_data_cov.csv', 's2.sorted.bam_1_data_cov.csv', 's3.sorted.bam_2_data_cov.csv'].toSet() },
+-                { assert process.out.tsv.get(0).get(1).collect { file(it).name }.toSet() == ['contig_bins.tsv', 'recluster_bins_info.tsv'].toSet() },
+-                { assert process.out.versions_semibin.size() == 1 && process.out.versions_semibin.get(0).get(2) == '2.4.1' },
+-                { assert process.out.versions_cuda.size() == 1 && process.out.versions_cuda.get(0).get(2) == 'no CUDA available' }
++                { assert workflow.out.csv.get(0).get(1).collect { path(it).fileName.toString() }.toSet() == ['data.csv', 'data_split.csv', 's1.sorted.bam_0_data_cov.csv', 's2.sorted.bam_1_data_cov.csv', 's3.sorted.bam_2_data_cov.csv'].toSet() },
++                { assert workflow.out.tsv.get(0).get(1).collect { path(it).fileName.toString() }.toSet() == ['contig_bins.tsv', 'recluster_bins_info.tsv'].toSet() },
++                { assert workflow.out.versions_semibin.size() == 1 && workflow.out.versions_semibin.get(0).get(2) == '2.4.1' },
++                { assert workflow.out.versions_cuda.size() == 1 && workflow.out.versions_cuda.get(0).get(2) == 'no CUDA available' }
+ 
+             )
+         }
+@@ -70,10 +97,11 @@
+                 module_args  = ''
+                 module_args2 = '--ml-threshold 0 --minfasta-kbs 0 --min-len 0 --random-seed 0'
+             }
+-            process {
++            workflow {
+                 """
+                 input[1] = file("${new File('bin/semibin_output_state.py').absolutePath}", checkIfExists: true)
+-                input[0] = [
++                input[2] = file("${new File('bin/semibin_runtime_resources.py').absolutePath}", checkIfExists: true)
++                input[0] = Channel.value([
+                     [id:'test'],
+                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/contigs.fasta.gz', checkIfExists:true),
+                     [
+@@ -81,15 +109,15 @@
+                         file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/s2.sorted.bam', checkIfExists:true),
+                         file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/s3.sorted.bam', checkIfExists:true)
+                     ]
+-                ]
++                ])
+                 """
+             }
+         }
+         then {
+-            assert process.success
+-            assert process.out.output_fasta.size() == 0
+-            assert process.out.model.size() == 0
+-            def stateValue = process.out.state.get(0).get(1)
++            assert workflow.success
++            assert workflow.out.output_fasta.size() == 0
++            assert workflow.out.model.size() == 0
++            def stateValue = workflow.out.state.get(0).get(1)
+             def stateFiles = stateValue instanceof List ? stateValue : [stateValue]
+             assert stateFiles.size() == 1
+             def state = new groovy.json.JsonSlurper().parseText(path(stateFiles[0]).text)
+diff --git a/modules/nf-core/semibin/singleeasybin/tests/nextflow.config b/modules/nf-core/semibin/singleeasybin/tests/nextflow.config
+--- a/modules/nf-core/semibin/singleeasybin/tests/nextflow.config
++++ b/modules/nf-core/semibin/singleeasybin/tests/nextflow.config
+@@ -1,5 +1,5 @@
+ process {
+-    withName: 'SEMIBIN_SINGLEEASYBIN' {
++    withName: 'SEMIBIN|SEMIBIN_RESOURCE_PROBE' {
+         ext.args = params.module_args
+         ext.args2 = params.module_args2
+     }
+diff --git a/subworkflows/mag_host.nf b/subworkflows/mag_host.nf
+--- a/subworkflows/mag_host.nf
++++ b/subworkflows/mag_host.nf
+@@ -1,4 +1,5 @@
+ include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
++include { semibinResourceRecord } from '../lib/semibin_runtime'
+ include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ include { magSelectionError } from '../lib/mag_selection'
+@@ -23,7 +24,7 @@
+ include { CONCOCT_CONCOCT } from '../modules/nf-core/concoct/concoct/main'
+ include { CONCOCT_MERGECUTUPCLUSTERING } from '../modules/nf-core/concoct/mergecutupclustering/main'
+ include { CONCOCT_EXTRACTFASTABINS as CONCOCT } from '../modules/nf-core/concoct/extractfastabins/main'
+-include { SEMIBIN_SINGLEEASYBIN as SEMIBIN } from '../modules/nf-core/semibin/singleeasybin/main'
++include { SEMIBIN_SINGLEEASYBIN as SEMIBIN; SEMIBIN_RESOURCE_PROBE } from '../modules/nf-core/semibin/singleeasybin/main'
+ include { DASTOOL_FASTATOCONTIG2BIN as SCAFFOLDS2BIN_METABAT2 } from '../modules/nf-core/dastool/fastatocontig2bin/main'
+ include { DASTOOL_FASTATOCONTIG2BIN as SCAFFOLDS2BIN_CONCOCT } from '../modules/nf-core/dastool/fastatocontig2bin/main'
+ include { DASTOOL_FASTATOCONTIG2BIN as SCAFFOLDS2BIN_SEMIBIN } from '../modules/nf-core/dastool/fastatocontig2bin/main'
+@@ -83,7 +84,13 @@
+ 
+     ch_semibin_bins = Channel.empty()
+     if (selectedTools(params.mag_tools).contains('semibin')) {
+-        SEMIBIN(ch_assembly.join(ch_contig_bam, failOnDuplicate: true, failOnMismatch: true), Channel.value(file("${moduleDir}/../bin/semibin_output_state.py", checkIfExists: true)))
++        ch_semibin_input = ch_assembly.join(ch_contig_bam, failOnDuplicate: true, failOnMismatch: true)
++        ch_semibin_resource_helper = Channel.value(file("${moduleDir}/../bin/semibin_runtime_resources.py", checkIfExists: true))
++        SEMIBIN_RESOURCE_PROBE(ch_semibin_input, ch_semibin_resource_helper)
++        ch_semibin_identity = SEMIBIN_RESOURCE_PROBE.out.identity.map { meta, receipt -> semibinResourceRecord(meta, receipt) }
++        SEMIBIN(ch_semibin_input.join(ch_semibin_identity, failOnDuplicate: true, failOnMismatch: true),
++                Channel.value(file("${moduleDir}/../bin/semibin_output_state.py", checkIfExists: true)),
++                ch_semibin_resource_helper)
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: SEMIBIN.out], '07_host_prediction', 'SEMIBIN'))
+         ch_semibin_bins = SEMIBIN.out.output_fasta
+     }
+diff --git a/tests/mag_interface_observer.py b/tests/mag_interface_observer.py
+--- a/tests/mag_interface_observer.py
++++ b/tests/mag_interface_observer.py
+@@ -5,6 +5,7 @@
+ checks staged identities and supplies controlled predictions/consumer records.
+ GTDB-Tk records staged files here; its real extension filter is NOT exercised.
+ """
++import base64
+ import gzip
+ import hashlib
+ import json
+@@ -156,6 +157,20 @@
+     for name in ['gtdbtk.log', 'gtdbtk.warnings.log']:
+         (out / name).write_text('INTERFACE_OBSERVER_ONLY\n')
+ elif tool == 'python':
++    if args and Path(args[0]).name == 'semibin_runtime_resources.py':
++        # This routing fixture deliberately supplies fake BAMs/classifications.
++        # The resource scan is also an explicit observer, never native evidence.
++        wrapper_args = args[1:args.index('--')]
++        runtime = json.loads(base64.b64decode(wrapper_args[wrapper_args.index('--runtime-base64') + 1]))
++        identity = {'schema_version': 1, 'runtime': runtime,
++                    'scope': 'EXPLICIT_MAG_ROUTING_OBSERVER_NO_RESOURCE_SCAN'}
++        if '--verify' in wrapper_args:
++            assert json.loads(Path(wrapper_args[wrapper_args.index('--verify')+1]).read_text()) == identity
++        if '--output' in wrapper_args:
++            Path(wrapper_args[wrapper_args.index('--output')+1]).write_text(json.dumps(identity,sort_keys=True)+'\n')
++        if '--execute' in wrapper_args:
++            os.execvp('SemiBin2', ['SemiBin2'] + args[args.index('--')+1:])
++        raise SystemExit(0)
+     # Only the SemiBin CUDA version eval; no real torch/model execution.
+     if args == ['-c', "import torch; print(torch.version.cuda or 'no CUDA available')"]:
+         print('INTERFACE_OBSERVER_NO_CUDA')
+diff --git a/tests/nextflow/semibin_runtime_native.nf b/tests/nextflow/semibin_runtime_native.nf
+new file mode 100644
+--- /dev/null
++++ b/tests/nextflow/semibin_runtime_native.nf
+@@ -0,0 +1,12 @@
++nextflow.enable.dsl=2
++include { semibinResourceRecord } from '../../lib/semibin_runtime'
++include { SEMIBIN_SINGLEEASYBIN as SEMIBIN; SEMIBIN_RESOURCE_PROBE } from '../../modules/nf-core/semibin/singleeasybin/main'
++
++workflow {
++    def sequence = Channel.value(tuple([id:'sample'],file(params.fasta,checkIfExists:true),file(params.bam,checkIfExists:true)))
++    def helper = Channel.value(file("${moduleDir}/../../bin/semibin_runtime_resources.py",checkIfExists:true))
++    SEMIBIN_RESOURCE_PROBE(sequence, helper)
++    def identity = SEMIBIN_RESOURCE_PROBE.out.identity.map { meta, receipt -> semibinResourceRecord(meta, receipt) }
++    SEMIBIN(sequence.join(identity,failOnDuplicate:true,failOnMismatch:true),
++            Channel.value(file("${moduleDir}/../../bin/semibin_output_state.py",checkIfExists:true)), helper)
++}
+diff --git a/tests/nextflow/semibin_states.nf b/tests/nextflow/semibin_states.nf
+--- a/tests/nextflow/semibin_states.nf
++++ b/tests/nextflow/semibin_states.nf
+@@ -1,9 +1,15 @@
+ nextflow.enable.dsl=2
+ 
+-include { SEMIBIN_SINGLEEASYBIN as SEMIBIN } from '../../modules/nf-core/semibin/singleeasybin/main'
++include { SEMIBIN_SINGLEEASYBIN as SEMIBIN; SEMIBIN_RESOURCE_PROBE } from '../../modules/nf-core/semibin/singleeasybin/main'
++
++include { semibinResourceRecord } from '../../lib/semibin_runtime'
+ 
+ workflow {
+-    SEMIBIN(Channel.value(tuple([id:'sample'],file(params.fasta,checkIfExists:true),file(params.bam,checkIfExists:true))), Channel.value(file("${moduleDir}/../../bin/semibin_output_state.py", checkIfExists: true)))
++    def sequence = Channel.value(tuple([id:'sample'],file(params.fasta,checkIfExists:true),file(params.bam,checkIfExists:true)))
++    def helper = Channel.value(file("${moduleDir}/../../bin/semibin_runtime_resources.py",checkIfExists:true))
++    SEMIBIN_RESOURCE_PROBE(sequence,helper)
++    def identity = SEMIBIN_RESOURCE_PROBE.out.identity.map { meta,receipt -> semibinResourceRecord(meta,receipt) }
++    SEMIBIN(sequence.join(identity,failOnDuplicate:true,failOnMismatch:true), Channel.value(file("${moduleDir}/../../bin/semibin_output_state.py", checkIfExists: true)), helper)
+     SEMIBIN.out.output_fasta.view { meta, bins -> 'BIN_EMIT='+meta.id }
+     SEMIBIN.out.model.view { meta, model -> 'MODEL_EMIT='+meta.id }
+     if (!params.original) {
+diff --git a/tests/run_mag_routing.py b/tests/run_mag_routing.py
+--- a/tests/run_mag_routing.py
++++ b/tests/run_mag_routing.py
+@@ -94,7 +94,7 @@
+                           "params.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=1\n"
+                           "process.memory='512 MB'\nprocess.maxForks=2\nconda.enabled=false\n"
+                           "docker.enabled=false\nsingularity.enabled=false\n"
+-                          "process { withName: 'SEMIBIN|CHECKM2|GTDBTK' { cpus=1; memory='512 MB' } }\n")
++                          "process { withName: 'SEMIBIN|SEMIBIN_RESOURCE_PROBE|CHECKM2|GTDBTK' { cpus=1; memory='512 MB' } }\n")
+         selected = {s.strip() for s in binners}
+         params = {'records': records, 'outdir': str(p / 'out'), 'mag_tools': binners + (['checkm2', 'gtdbtk'] if binners else []), 'checkm2_db': str(fixtures / 'checkm2.dmnd'), 'gtdbtk_db': str(fixtures / 'gtdb'), 'host_plasmid_linking': True, 'host_linking_methods': ['sequence'], 'host_linking_optional_methods': [], 'link_min_similarity': 0}
+         (p / 'params.json').write_text(json.dumps(params))
+@@ -172,8 +172,8 @@
+                 checks['no_dropped_or_duplicate_consumer_tasks'] = consumer_count == expected_consumer_count
+         runs.append({'case': name, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
+         print(name, checks, flush=True)
+-        source_names = ['main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'conf/nfcore_mag.config', 'modules/nf-core/gtdbtk/classifywf/main.nf', 'bin/normalize_gtdb_bins.py', 'modules/nf-core/semibin/singleeasybin/main.nf', 'bin/semibin_output_state.py', 'tests/nextflow/mag_selection.nf', 'tests/mag_interface_observer.py', 'tests/run_mag_routing.py', 'subworkflows/host_linking.nf', 'modules/linking/sequence.nf', 'bin/sequence_similarity_link.R']
+-        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in source_names}, 'limitations': ['explicit synthetic binner/DAS/CheckM/GTDB observers, fake BAM/db inputs; no tool inference or scientific accuracy claim', 'actual original workflow + gzip/converter helper + native R host linking; per-sample bin identity/DNA/metadata/multiplicity checks', 'GTDB observer verifies private normalized staging and unchanged final-bin identities, not the actual classifier; separate real2.7.2 parser/selection tests, no image/nf-test framework/full platform']}
++        source_names = ['bin/semibin_runtime_resources.py', 'lib/semibin_runtime.nf', 'main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'conf/nfcore_mag.config', 'modules/nf-core/gtdbtk/classifywf/main.nf', 'bin/normalize_gtdb_bins.py', 'modules/nf-core/semibin/singleeasybin/main.nf', 'bin/semibin_output_state.py', 'tests/nextflow/mag_selection.nf', 'tests/mag_interface_observer.py', 'tests/run_mag_routing.py', 'subworkflows/host_linking.nf', 'modules/linking/sequence.nf', 'bin/sequence_similarity_link.R']
++        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in source_names}, 'limitations': ['explicit synthetic binner/DAS/CheckM/GTDB and runtime-resource-scan observers, fake BAM/db inputs; no tool inference or scientific accuracy claim', 'actual original workflow + gzip/converter helper + native R host linking; per-sample bin identity/DNA/metadata/multiplicity checks', 'GTDB observer verifies private normalized staging and unchanged final-bin identities, not the actual classifier; separate real2.7.2 parser/selection tests, no image/nf-test framework/full platform']}
+         if mag_host:
+             receipt['source_sha256']['subworkflows/mag_host.nf'] = hashlib.sha256(mag_host.read_bytes()).hexdigest()
+             receipt['module_override'] = str(mag_host)
+diff --git a/tests/run_semibin_runtime_native.py b/tests/run_semibin_runtime_native.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_semibin_runtime_native.py
+@@ -0,0 +1,165 @@
++#!/usr/bin/env python3
++"""Production SemiBin runtime-resource identities and pre-cache context guards."""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++
++from module_harness import run_session_uuid
++from run_semibin_states import dna
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def sha(p):
++    return hashlib.sha256(p.read_bytes()).hexdigest()
++
++
++def run(base, prefix, fixture):
++    base.mkdir(parents=True, exist_ok=False)
++    package = prefix / 'lib/python3.12/site-packages/SemiBin'
++    private = base / 'private-python/SemiBin'
++    shutil.copytree(package, private, ignore=shutil.ignore_patterns('__pycache__'))
++    marker = private / 'marker.hmm'
++    original = marker.read_bytes()
++    original_stat = marker.stat()
++    original_sha = sha(package / 'marker.hmm')
++    module = ROOT / 'modules/nf-core/semibin/singleeasybin/main.nf'
++    workflow = ROOT / 'tests/nextflow/semibin_runtime_native.nf'
++    params = dict(probe=str(ROOT / 'tests/semibin_runtime_resource_probe.py'),
++                  fasta=str(fixture / 'input.fasta'), bam=str(fixture / 'input.sorted.bam'),
++                  state_helper=str(ROOT / 'bin/semibin_output_state.py'))
++    (base / 'params.json').write_text(json.dumps(params))
++    config = base / 'config'
++    config.write_text("process { executor='local'; cpus=2; memory='2 GB'; errorStrategy='terminate'; maxRetries=0; withName: 'SEMIBIN|SEMIBIN_RESOURCE_PROBE' { ext.args2='--random-seed 0' } }\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\n")
++    env = dict(os.environ, PATH=str(prefix / 'bin') + ':' + os.environ['PATH'],
++               PYTHONPATH=str(private.parent), OMP_NUM_THREADS='2', OPENBLAS_NUM_THREADS='2',
++               MKL_NUM_THREADS='2', PYTHONDONTWRITEBYTECODE='1')
++    source = dna(fixture / 'input.fasta')
++    assert len(source) == 40 and sum(map(len, source.values())) == 800000
++    sources = ['tests/run_semibin_runtime_native.py', 'bin/semibin_runtime_resources.py',
++               'lib/semibin_runtime.nf', 'tests/nextflow/semibin_runtime_native.nf', str(module.relative_to(ROOT)),
++               'bin/semibin_output_state.py']
++    before = {p: sha(ROOT / p) for p in sources}
++    runs = []
++    session = None
++
++    def execute(name, expected):
++        nonlocal session
++        case = base / name
++        case.mkdir()
++        trace = case / 'trace.tsv'
++        cmd = [str(ROOT / 'results/tool-audit/runtime/bin/nextflow'), '-C', str(config),
++               'run', str(workflow), '-params-file', str(base / 'params.json'),
++               '-work-dir', str(base / 'work'), '-with-trace', str(trace), '-ansi-log', 'false']
++        if session is None:
++            cmd += ['-name', 'semibin_runtime_native']
++        else:
++            cmd += ['-resume', session]
++        result = subprocess.run(cmd, cwd=base, env=env, text=True, capture_output=True, timeout=600)
++        (case / 'stdout').write_text(result.stdout)
++        (case / 'stderr').write_text(result.stderr)
++        tasks = list(csv.DictReader(trace.open(), delimiter='\t')) if trace.exists() else []
++        record = dict(case=name, command=cmd, exit_code=result.returncode, tasks=tasks,
++                      private_marker_sha256=sha(marker))
++        runs.append(record)
++        (base / 'progress.json').write_text(json.dumps(runs, indent=2) + '\n')
++        assert len(tasks) == 2, record
++        probe = [t for t in tasks if t['name'].startswith('SEMIBIN_RESOURCE_PROBE')][0]
++        task = [t for t in tasks if t['name'].startswith('SEMIBIN (')][0]
++        assert probe['status'] == 'COMPLETED', record
++        assert task['status'] == expected, record
++        assert (result.returncode == 0) == (expected != 'FAILED'), record
++        work = Path(task['workdir'])
++        if expected == 'COMPLETED':
++            out = work / 'sample'
++            state = json.loads((out / 'binning_status.json').read_text())
++            bins = list((out / 'output_bins').glob('*.fa.gz'))
++            assert bins and state['state'] == 'bins_ready' and state['bin_count'] == len(bins)
++            seen = set()
++            for path in bins:
++                seqs = dna(path)
++                assert seqs and not seen.intersection(seqs)
++                assert all(source[k] == seq for k, seq in seqs.items())
++                seen.update(seqs)
++            assert (out / 'model.pt').is_file()
++            record['independent_DNA_and_state_checks'] = True
++        if expected == 'FAILED':
++            log = (work / '.command.log').read_text()
++            assert 'hmmsearch' in log and ('format' in log.lower() or 'parse' in log.lower()), log[-3000:]
++            assert 'Runtime marker differs' not in log
++        if session is None:
++            session = run_session_uuid('semibin_runtime_native', base)
++        record['consumer_hash'] = task['hash']
++        record['identity_sha256'] = sha(Path(probe['workdir']) / 'semibin_runtime_identity.json')
++        print(name, expected, flush=True)
++
++    def mutate(data):
++        assert len(data) == len(original)
++        marker.write_bytes(data)
++        os.utime(marker, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
++        assert marker.stat().st_size == original_stat.st_size
++        assert marker.stat().st_mtime_ns == original_stat.st_mtime_ns
++
++    try:
++        execute('cold', 'COMPLETED')
++        execute('unchanged', 'CACHED')
++        # HMM description text is not a numerical parameter or profile state.
++        changed = bytearray(original)
++        desc = original.index(b'DESC  ') + len(b'DESC  ')
++        changed[desc] = ord('X') if changed[desc] != ord('X') else ord('Y')
++        mutate(bytes(changed))
++        execute('description-change', 'COMPLETED')
++        execute('changed-unchanged', 'CACHED')
++        corrupt = bytearray(original)
++        corrupt[0] = ord('X')
++        mutate(bytes(corrupt))
++        execute('corrupt-header', 'FAILED')
++    finally:
++        mutate(original)
++    execute('restored', 'CACHED')
++    positive_config = config.read_text()
++    for field, override in [('args', "ext.args2='--random-seed 1'"),
++                            ('container', "container='TEST_ONLY_DIFFERENT_CONTAINER'")]:
++        config.write_text(positive_config + "\nprocess { withName: 'SEMIBIN' { " + override + " } }\n")
++        case = base / ('mismatch-' + field)
++        case.mkdir()
++        trace = case / 'trace.tsv'
++        cmd = [str(ROOT / 'results/tool-audit/runtime/bin/nextflow'), '-C', str(config),
++               'run', str(workflow), '-params-file', str(base / 'params.json'),
++               '-work-dir', str(base / 'work'), '-with-trace', str(trace),
++               '-ansi-log', 'false', '-resume', session]
++        result = subprocess.run(cmd,cwd=base,env=env,text=True,capture_output=True,timeout=120)
++        (case/'stdout').write_text(result.stdout)
++        (case/'stderr').write_text(result.stderr)
++        tasks = list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else []
++        assert result.returncode != 0 and 'runtime mismatch before cache lookup' in result.stdout+result.stderr, result.stdout+result.stderr
++        assert len(tasks)==1 and tasks[0]['name'].startswith('SEMIBIN_RESOURCE_PROBE') and tasks[0]['status']=='COMPLETED', tasks
++        runs.append(dict(case='mismatch-'+field,command=cmd,exit_code=result.returncode,tasks=tasks,
++                         pre_cache_refusal=True,no_consumer_task_submitted=True))
++        print('mismatch-'+field,'REFUSED_BEFORE_CACHE',flush=True)
++    config.write_text(positive_config)
++    assert runs[0]['consumer_hash'] == runs[1]['consumer_hash'] == runs[5]['consumer_hash']
++    assert runs[2]['consumer_hash'] == runs[3]['consumer_hash'] != runs[0]['consumer_hash']
++    assert sha(package / 'marker.hmm') == original_sha == sha(marker)
++    assert before == {p: sha(ROOT / p) for p in sources}
++    receipt = dict(pass_checks=True, runs=runs, session_uuid=session, source_sha256=before,
++                   source_unchanged=True, original_marker_unchanged=True,
++                   production_module_sha256=sha(module),
++                   fixture_sha256={p: sha(fixture / p) for p in ['input.fasta', 'input.sorted.bam']},
++                   scope='Actual production module and pre-cache/runtime guards; default SemiBin2.4.1 CPU15epochs, full official40contig800000bp fixture, seed0. Probe always runs before lookup. Conditional-resource parser tests separate; no OCI/GPU inference/platform or biological accuracy certification.')
++    (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    print('PASS: production runtime probe/native consumer and context guards', flush=True)
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--out', type=Path, required=True)
++    parser.add_argument('--prefix', type=Path, required=True)
++    parser.add_argument('--fixture', type=Path, required=True)
++    args = parser.parse_args()
++    run(args.out.resolve(), args.prefix.resolve(), args.fixture.resolve())
+diff --git a/tests/run_semibin_runtime_resources.py b/tests/run_semibin_runtime_resources.py
+--- a/tests/run_semibin_runtime_resources.py
++++ b/tests/run_semibin_runtime_resources.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env python3
+-"""Native default SemiBin pilot for pre-lookup runtime resource identities."""
++"""Historical fixed-baseline SemiBin resource pilot; use run_semibin_runtime_native.py for production."""
+ import argparse
+ import csv
+ import hashlib
+@@ -28,7 +28,9 @@
+     original = marker.read_bytes()
+     original_stat = marker.stat()
+     original_sha = sha(package / 'marker.hmm')
+-    module = ROOT / 'modules/nf-core/semibin/singleeasybin/main.nf'
++    baseline = '9a270d30cd5ba27e93743256dfbfdac7d9c929ec'
++    module = base / 'frozen_baseline.nf'
++    module.write_bytes(subprocess.check_output(['git', 'show', baseline + ':modules/nf-core/semibin/singleeasybin/main.nf'], cwd=ROOT))
+     generated = module.read_text()
+     needle = "    path(autoplasm_helper_0, stageAs: 'semibin_output_state.py')"
+     assert generated.count(needle) == 1
+@@ -140,7 +142,8 @@
+                    source_unchanged=True, original_marker_unchanged=True,
+                    generated_consumer_sha256=sha(consumer), original_module_sha256=sha(module),
+                    fixture_sha256={p: sha(fixture / p) for p in ['input.fasta', 'input.sorted.bam']},
+-                   scope='Pilot copied production consumer with only identity inputs/pre-CLI verification added. Actual default SemiBin2.4.1 CPU15epochs, full official40contig800000bp fixture, seed0. Probe always runs before lookup. No production wiring, custom flags/read-set, OCI/GPU/platform or biological accuracy acceptance.')
++                   baseline_commit=baseline,
++                   scope='Historical pilot copied frozen production consumer with only identity inputs/pre-CLI verification added. Actual default SemiBin2.4.1 CPU15epochs, full official40contig800000bp fixture, seed0. Probe always runs before lookup. No production wiring, custom flags/read-set, OCI/GPU/platform or biological accuracy acceptance.')
+     (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
+     print('PASS: runtime probe/native consumer pilot; production integration remains open', flush=True)
+ 
+diff --git a/tests/run_semibin_states.py b/tests/run_semibin_states.py
+--- a/tests/run_semibin_states.py
++++ b/tests/run_semibin_states.py
+@@ -5,7 +5,7 @@
+ official input. It is not a model sensitivity/specificity benchmark. Stub and
+ native failures are kept separate from successful inference.
+ """
+-from module_harness import render_module_harness
++from module_harness import render_module_harness, run_session_uuid
+ import argparse
+ import csv
+ import hashlib
+@@ -33,24 +33,33 @@
+         folder=base/name;folder.mkdir(exist_ok=resume)
+         config=folder/'nextflow.config'
+         if not resume:
+-            config.write_text("process { executor='local'; cpus=2; memory='2 GB'; errorStrategy='terminate'; maxRetries=0; publishDir=[path:"+repr(str(folder/'out'))+",mode:'copy']; withName:'SEMIBIN' { ext.args2="+repr('--random-seed 0 '+extra)+" } }\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n")
++            config.write_text("process { executor='local'; cpus=2; memory='2 GB'; errorStrategy='terminate'; maxRetries=0; publishDir=[path:"+repr(str(folder/'out'))+",mode:'copy']; withName:'SEMIBIN|SEMIBIN_RESOURCE_PROBE' { ext.args2="+repr('--random-seed 0 '+extra)+" } }\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n")
+             (folder/'params.json').write_text(json.dumps({'fasta':str(fixture/'input.fasta'),'bam':str(fixture/'input.sorted.bam'),'original':original}))
+         workflow=ROOT/'tests/nextflow/semibin_states.nf'
+         if original:
+             workflow=folder/'original.nf'
+-            workflow.write_text(render_module_harness(ROOT/'tests/nextflow/semibin_states.nf', '../../modules/nf-core/semibin/singleeasybin/main', before, 'semibin_output_state.py'))
++            historical_template=folder/'historical-template.nf'
++            historical_template.write_bytes(subprocess.check_output(['git','show','HEAD:tests/nextflow/semibin_states.nf'],cwd=ROOT))
++            workflow.write_text(render_module_harness(historical_template, '../../modules/nf-core/semibin/singleeasybin/main', before, 'semibin_output_state.py'))
+         suffix='-resume' if resume else '';trace=folder/('trace'+suffix+'.tsv')
+         name_key='semibin_'+hashlib.sha256(str(folder).encode()).hexdigest()[:12]
+         cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(workflow),'-params-file',str(folder/'params.json'),'-work-dir',str(folder/'work'),'-with-trace',str(trace),'-ansi-log','false']
+-        cmd+=['-resume',name_key] if resume else ['-name',name_key]
++        cmd+=['-resume',run_session_uuid(name_key,folder)] if resume else ['-name',name_key]
+         if stub:cmd+=['-stub-run']
+-        result=subprocess.run(cmd,env=env,capture_output=True,text=True)
++        result=subprocess.run(cmd,cwd=folder,env=env,capture_output=True,text=True)
+         (folder/('stdout'+suffix+'.log')).write_text(result.stdout);(folder/('stderr'+suffix+'.log')).write_text(result.stderr)
+         tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else []
+         record={'scenario':name+suffix,'command':cmd,'exit_code':result.returncode,'trace':tasks}
+         runs.append(record);(base/'runs-progress.json').write_text(json.dumps(runs,indent=2)+'\n')
+-        assert len(tasks)==1,record
++        if name!='native-failure':
++            consumer=[t for t in tasks if t['name'].startswith('SEMIBIN (')]
++            assert len(consumer)==1,record
++            if not original:
++                probes=[t for t in tasks if t['name'].startswith('SEMIBIN_RESOURCE_PROBE')]
++                assert len(probes)==1 and probes[0]['status']=='COMPLETED',record
++            tasks=consumer
+         if name=='native-failure':
++            assert len(tasks)==1 and tasks[0]['name'].startswith('SEMIBIN_RESOURCE_PROBE'),record
+             checks={'native_failure_propagates':result.returncode!=0 and tasks[0]['status']=='FAILED',
+                     'native_parser_diagnostic':'unrecognized arguments' in result.stdout+result.stderr,
+                     'no_fake_state':not (folder/'out/sample/binning_status.json').exists()}
+@@ -99,15 +108,15 @@
+     execute('no-bins','--minfasta-kbs 1000')
+     execute('stub',stub=True)
+     execute('native-failure','--not-a-real-option')
+-    files=['bin/semibin_output_state.py','modules/nf-core/semibin/singleeasybin/main.nf','tests/test_semibin_output_state.py','tests/run_semibin_states.py','tests/nextflow/semibin_states.nf']
++    files=['lib/semibin_runtime.nf','bin/semibin_runtime_resources.py','bin/semibin_output_state.py','modules/nf-core/semibin/singleeasybin/main.nf','tests/test_semibin_output_state.py','tests/run_semibin_states.py','tests/nextflow/semibin_states.nf']
+     payload={'pass':True,'runs':runs,'source_sha256':{f:hashlib.sha256((ROOT/f).read_bytes()).hexdigest() for f in files},
+              'fixture_sha256':{f:hashlib.sha256((fixture/f).read_bytes()).hexdigest() for f in ['input.fasta','input.sorted.bam']},
+              'limitations':['Native CPU only; exact official fixture identity and DNA/metrics verified, not biological clustering accuracy/MAG quality.',
+                             'No-bin uses declared size-filter boundary greater than total input; default self-supervised 15epochs retained; random seed0 fixed.',
+                             'Original legitimate-zero failure is a separate retained original module run; original missing model emit and current .pt model load are checked here.',
+-                            'Stub performs no inference; model/status assertions replace outdated empty-model/positive-stub snapshots. Vendored nf-test/GPU/images/full platforms not certified.']}
++                            'Resource probes run before cache lookup; unknown-argument control fails native parser in the probe before inference. Stub performs no inference; model/status assertions replace outdated empty-model/positive-stub snapshots. Vendored nf-test/GPU/images/full platforms not certified.']}
+     (base/'run.json').write_text(json.dumps(payload,indent=2)+'\n')
+-    print('native SemiBin states passed',len(runs),'selected trace entries')
++    print('native SemiBin states passed',len(runs),'scenarios,',sum(len(r['trace']) for r in runs),'trace entries')
+ 
+ 
+ if __name__=='__main__':
+diff --git a/tests/test_semibin_runtime_resources.py b/tests/test_semibin_runtime_resources.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_semibin_runtime_resources.py
+@@ -0,0 +1,106 @@
++"""Native parser/read-set controls; fake GTDB files never certify classification."""
++import importlib.util
++import logging
++import os
++from pathlib import Path
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++spec = importlib.util.spec_from_file_location('semibin_resource_test', ROOT / 'bin/semibin_runtime_resources.py')
++resolver = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(resolver)
++
++
++class RuntimeResources(unittest.TestCase):
++    def setUp(self):
++        self.directory = tempfile.TemporaryDirectory()
++        self.root = Path(self.directory.name)
++        self.fasta = self.root / 'input.fna'
++        self.bam = self.root / 'input.bam'
++        self.fasta.write_bytes(b'>READ_SET_ONLY\nACGT\n')
++        self.bam.write_bytes(b'EXPLICIT_READ_SET_OBSERVER_NOT_BAM\n')
++        self.args = ['single_easy_bin', '--input-fasta', str(self.fasta),
++                     '--input-bam', str(self.bam), '--output', 'sample']
++
++    def tearDown(self):
++        self.directory.cleanup()
++
++    def capture(self, *args):
++        return resolver.capture({'scope': 'EXPLICIT_PARSER_READ_SET_CONTROL'}, self.args + list(args))
++
++    def test_default_self_training_uses_marker_and_code(self):
++        value = self.capture()
++        self.assertEqual(value['parsed_arguments']['training_type'], 'self')
++        self.assertIn('bundled_marker', value['resources'])
++        self.assertIn('main.py', value['resources']['package_code'])
++        self.assertNotIn('pretrained_model', value['resources'])
++        self.assertNotIn('gtdb_reference_directory', value['resources'])
++
++    def test_native_environment_alias_resolves_real_bundled_model(self):
++        value = self.capture('--environment', 'human-gut')
++        from SemiBin.utils import get_model_path
++        expected = resolver.resource(get_model_path('human_gut'))
++        self.assertEqual(value['resources']['pretrained_model'], expected)
++        self.assertGreater(expected[0]['bytes'], 0)
++
++    def test_semi_with_precomputed_taxonomy_bypasses_gtdb(self):
++        tax = self.root / 'taxonomy.tsv'
++        tax.write_text('EXPLICIT_READ_SET_ONLY\n')
++        value = self.capture('--semi-supervised', '--taxonomy-annotation-table', str(tax))
++        self.assertEqual(value['parsed_arguments']['training_type'], 'semi')
++        self.assertEqual(value['resources']['taxonomy_results_fname'], [resolver.resource(tax)])
++        self.assertNotIn('gtdb_reference_directory', value['resources'])
++
++    def test_gtdb_prefix_sidecars_and_hidden_newline_member(self):
++        ref = self.root / 'gtdb'
++        ref.mkdir()
++        (ref / 'GTDB').write_bytes(b'FAKE_PREFIX_NOT_A_DATABASE')
++        sidecar = ref / '.hidden\nsidecar'
++        sidecar.write_bytes(b'old\n')
++        old_stat = sidecar.stat()
++        first = self.capture('--semi-supervised', '--reference-db', str(ref))
++        sidecar.write_bytes(b'new\n')
++        os.utime(sidecar, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns))
++        second = self.capture('--semi-supervised', '--reference-db', str(ref))
++        self.assertNotEqual(first['resources']['gtdb_reference_directory'], second['resources']['gtdb_reference_directory'])
++
++    def test_missing_gtdb_refuses_instead_of_unfingerprinted_download(self):
++        with self.assertRaisesRegex(ValueError, 'Prepare the selected SemiBin GTDB'):
++            self.capture('--semi-supervised', '--reference-db', str(self.root / 'missing'))
++
++    def test_native_both_training_flags_keep_self_training(self):
++        value = self.capture('--semi-supervised', '--self-supervised')
++        self.assertEqual(value['parsed_arguments']['training_type'], 'self')
++        self.assertNotIn('gtdb_reference_directory', value['resources'])
++
++    def test_external_protein_override_is_hashed(self):
++        proteins = self.root / 'genes.faa'
++        proteins.write_bytes(b'>READ_SET_ONLY\nAAA\n')
++        value = self.capture('--prodigal-output-faa', str(proteins))
++        self.assertEqual(value['resources']['prodigal_output_faa'], [resolver.resource(proteins)])
++
++    def test_directory_failures_and_link_target_are_explicit(self):
++        ref = self.root / 'ref'
++        ref.mkdir()
++        target = self.root / 'target'
++        target.write_bytes(b'bytes')
++        link = ref / 'link'
++        link.symlink_to(target)
++        self.assertEqual(resolver.resource(ref)[1]['link'], str(target))
++        target.unlink()
++        with self.assertRaises(FileNotFoundError):
++            resolver.resource(ref)
++        link.unlink()
++        (ref / 'loop').symlink_to(ref, target_is_directory=True)
++        with self.assertRaisesRegex(ValueError, 'cycle'):
++            resolver.resource(ref)
++        (ref / 'loop').unlink()
++        os.mkfifo(ref / 'fifo')
++        with self.assertRaisesRegex(ValueError, 'not regular'):
++            resolver.resource(ref)
++
++
++if __name__ == '__main__':
++    logging.disable(logging.WARNING)
++    unittest.main()

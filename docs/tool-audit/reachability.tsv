@@ -1,6 +1,13 @@
 path	include_reachable	runtime_status
+lib/abricate_runtime.nf	True	unknown; includes do not prove branch execution
+lib/integronfinder_runtime.nf	True	unknown; includes do not prove branch execution
+lib/isescan_runtime.nf	True	unknown; includes do not prove branch execution
 lib/mag_selection.nf	True	unknown; includes do not prove branch execution
+lib/mobsuite_runtime.nf	True	unknown; includes do not prove branch execution
+lib/plasmidfinder_runtime.nf	True	unknown; includes do not prove branch execution
 lib/report_events.nf	True	unknown; includes do not prove branch execution
+lib/resource_inputs.nf	True	unknown; includes do not prove branch execution
+lib/semibin_runtime.nf	True	unknown; includes do not prove branch execution
 lib/tool_selection.nf	True	unknown; includes do not prove branch execution
 main.nf	True	unknown; includes do not prove branch execution
 modules/annotation/isescan.nf	True	unknown; includes do not prove branch execution
@@ -39,6 +46,7 @@ modules/linking/longread.nf	True	unknown; includes do not prove branch execution
 modules/linking/sequence.nf	True	unknown; includes do not prove branch execution
 modules/mag/samtools_index.nf	True	unknown; includes do not prove branch execution
 modules/nf-core/abricate/run/main.nf	True	unknown; includes do not prove branch execution
+modules/nf-core/abricate/run/tests/main.nf	False	unknown; includes do not prove branch execution
 modules/nf-core/amrfinderplus/run/main.nf	True	unknown; includes do not prove branch execution
 modules/nf-core/amrfinderplus/update/main.nf	False	unknown; includes do not prove branch execution
 modules/nf-core/bakta/bakta/main.nf	True	unknown; includes do not prove branch execution
@@ -66,6 +74,7 @@ modules/nf-core/genomad/endtoend/main.nf	True	unknown; includes do not prove bra
 modules/nf-core/gtdbtk/classifywf/main.nf	True	unknown; includes do not prove branch execution
 modules/nf-core/hifiadapterfilt/hifiadapterfilt/main.nf	True	unknown; includes do not prove branch execution
 modules/nf-core/integronfinder/main.nf	True	unknown; includes do not prove branch execution
+modules/nf-core/integronfinder/tests/main.nf	False	unknown; includes do not prove branch execution
 modules/nf-core/kraken2/kraken2/main.nf	True	unknown; includes do not prove branch execution
 modules/nf-core/macsyfinder/download/main.nf	True	unknown; includes do not prove branch execution
 modules/nf-core/macsyfinder/search/main.nf	True	unknown; includes do not prove branch execution
@@ -81,6 +90,7 @@ modules/nf-core/mobsuite/typer/main.nf	True	unknown; includes do not prove branc
 modules/nf-core/multiqc/main.nf	True	unknown; includes do not prove branch execution
 modules/nf-core/nanoplot/main.nf	True	unknown; includes do not prove branch execution
 modules/nf-core/plasmidfinder/main.nf	True	unknown; includes do not prove branch execution
+modules/nf-core/plasmidfinder/tests/main.nf	False	unknown; includes do not prove branch execution
 modules/nf-core/prodigal/main.nf	True	unknown; includes do not prove branch execution
 modules/nf-core/quast/main.nf	True	unknown; includes do not prove branch execution
 modules/nf-core/rgi/main/main.nf	True	unknown; includes do not prove branch execution
@@ -89,6 +99,7 @@ modules/nf-core/samtools/merge/main.nf	True	unknown; includes do not prove branc
 modules/nf-core/samtools/sort/main.nf	False	unknown; includes do not prove branch execution
 modules/nf-core/samtools/view/main.nf	True	unknown; includes do not prove branch execution
 modules/nf-core/semibin/singleeasybin/main.nf	True	unknown; includes do not prove branch execution
+modules/nf-core/semibin/singleeasybin/tests/main.nf	False	unknown; includes do not prove branch execution
 modules/nf-core/spades/main.nf	True	unknown; includes do not prove branch execution
 modules/typing/copla.nf	True	unknown; includes do not prove branch execution
 subworkflows/assembly.nf	True	unknown; includes do not prove branch execution

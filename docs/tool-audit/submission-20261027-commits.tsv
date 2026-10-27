@@ -1,0 +1,22 @@
+order	layer	commit	subject
+1	resource-core	0a351385ad39d2092c8c1170ac478d24b34b6b78	fix(resources): add content identity for explicit resource consumers
+2	report-provenance	03991156bbc304cb09d497252f919cb70aa114db	feat(provenance): preserve pending report runtime candidate
+3	resource-core	6925356955f66cd6df3dbd38828f20a44bcc1d41	fix(resources): track resource roots links and permissions
+4	runtime-resource-adapters	f5050f6c354bbf995bca6eafc7f1242c50279b7a	feat(resources): probe implicit runtime resource paths
+5	runtime-resource-adapters	9ead94fb533e717ba0224f1a75824bcf33b34a2b	fix(semibin): bind native runtime model resources
+6	runtime-resource-adapters	a36ac849193f3e8a801d337c790b2f38a925d982	fix(isescan): probe prepared native resources
+7	runtime-resource-adapters	bd6eb334e254203d3837a33e4d547c19ecaf2b3d	fix(semibin): track FGS runtime and native helpers
+8	runtime-resource-adapters	d91a423f98fa07ee2373eed82dbdbceec5abb9bd	fix(abricate): bind runtime database and tool identity
+9	native-error-propagation	03763efec9c8c9c071840324740de5e04b81afd4	fix(abricate): propagate native BLAST failures
+10	framework-tests	fed5e87df52d725370e50db2ffc8e78516e01c67	test(abricate): restore native framework resource coverage
+11	approved-method-and-resources	69dff7c2c9990c25e752ea86c78f9a519a888b25	fix(integronfinder)!: preserve unknown-linear topology and resource identity
+12	environment-compatibility	87b937c5f37fa383acac3e22ecf90879197a60a8	fix(plasmidfinder): pin Python compatibility and remove unsupported legacy flag
+13	runtime-resource-adapters	512d3fbd1993546ce85e72cdebb9bb2779efa0e1	fix(plasmidfinder): bind prepared databases and retire viral test input
+14	native-readset-tests	b1ab63cf17ffca70766b795d821e87abe37e5d6e	test(mobsuite): map native resource selection readsets
+15	runtime-resource-adapters	8e8f3b4f322aafd173ac9779b3ac926e1eafa1fd	feat(mobsuite): refuse unprepared native resources
+16	environment-compatibility	394e677771e5dbc5a368059cb7e986b06d62e3ae	fix(mobsuite): install pinned wheel without implicit database initialization
+17	native-execution-guard	b2c637ec3189cf0ee8f09f077c63f9a63730b308	fix(mobsuite): guard native execution against implicit initialization
+18	native-readset-tests	c022f7d721272ff2566acdb013dfbe4287762ef7	test(medaka): lock native model selection readsets
+19	model-selection-candidate	d418439a462f2c91df068c1ffb38a5a4b3bb5b4a	feat(medaka): observe model byte identity without downloads
+20	unexecuted-ONT-drivers	acd90a5411884b9b9d039c65904d0083dfc54cff	test(medaka): checkpoint pending full ONT and neural-coverage drivers
+21	audit-cleanup-and-plan	SELF	docs(audit): checkpoint candidate evidence cleanup and execution plan

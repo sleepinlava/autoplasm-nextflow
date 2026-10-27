@@ -1,0 +1,863 @@
+diff --git a/bin/mobsuite_preflight.py b/bin/mobsuite_preflight.py
+--- a/bin/mobsuite_preflight.py
++++ b/bin/mobsuite_preflight.py
+@@ -1,14 +1,16 @@
+ #!/usr/bin/env python3
+ """Read-only preparation checks for fixed MOB-suite3.1.9, without running mob_init.
+ 
+-This standalone candidate checks presence and ETE3 schema readiness. It never
+-executes MOB science and does not certify complete DB content, cache identity,
+-optional filters or nonviral provenance. Production integration remains pending.
++Checks presence and ETE3 schema readiness before optional guarded native main.
++Only implicit MOB/ETE3 preparation is replaced; scientific code/argv stay native.
++Complete DB content, cache identity, optional filters and nonviral provenance
++remain outside this bounded candidate.
+ """
+ import argparse
+ import ast
+ import hashlib
+ import json
++import importlib
+ import os
+ from pathlib import Path
+ import sqlite3
+@@ -16,6 +18,7 @@
+ from urllib.parse import quote
+ 
+ EXPECTED_SOURCE = {
++    'mob_typer.py':'3fc7053ade859deea58fdeae4ab15d1ee21922e99c9cc2841d4c45d67a30e1b4',
+     'mob_recon.py':'567143cd1477c1ed59fb833ddbd5db3167ba4ba55d48d4ae902fe377fbf64eb0',
+     'utils.py':'ff0cdff8f7e2d9f3b5df93f87c65eba10d6b8a4c278165cd9a8c5c090e6640ed',
+     'constants.py':'7aab451815d7e9032e530c425537dae632b6e3afcef6d9d1f87eaf528b1c2ea4',
+@@ -29,8 +32,9 @@
+     pass
+ 
+ 
+-def native_resource_paths(native_args):
+-    import mob_suite.mob_recon as recon
++def native_resource_paths(native_args,tool='mob_recon'):
++    if tool not in ['mob_recon','mob_typer']:raise PreparationRequired('Unsupported MOB entrypoint')
++    recon=importlib.import_module('mob_suite.'+tool)
+     from mob_suite.version import __version__
+     from mob_suite.constants import default_database_dir
+     package=Path(recon.__file__).parent
+@@ -40,14 +44,19 @@
+             raise PreparationRequired('Fixed3.1.9 source differs: '+name)
+     saved=sys.argv
+     try:
+-        sys.argv=['mob_recon']+list(native_args)
++        sys.argv=[tool]+list(native_args)
+         args=recon.parse_args()
+     finally:sys.argv=saved
+     tree=ast.parse(Path(recon.__file__).read_text())
+     main=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='main')
+     def assigns(n,name):return isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id==name for t in n.targets)
+-    start=next(i for i,n in enumerate(main.body) if assigns(n,'database_dir'))
+-    stop=next(i for i,n in enumerate(main.body) if assigns(n,'NCBI_PLASMID_TAXONOMY_FILE'))
++    statements=[]
++    for node in main.body:
++        if any(assigns(node,name) for name in ['database_dir','ETE3DBTAXAFILE','LIT_PLASMID_TAXONOMY_FILE','NCBI_PLASMID_TAXONOMY_FILE']):
++            statements.append(node)
++        elif isinstance(node,ast.If) and ast.unparse(node.test)=='database_dir == default_database_dir':
++            statements.append(node)
++    if len(statements)!=5:raise PreparationRequired('Unexpected fixed MOB DB selection boundary')
+     def refuse_initialization(logger,directory):
+         status=Path(directory)/'status.txt'
+         if not status.is_file() or status.stat().st_size==0:
+@@ -56,11 +65,11 @@
+                    verify_init=refuse_initialization,logger=None)
+     # Only the original resource path-selection statements are executed.
+     # Its verify_init call becomes a check that never starts an initializer.
+-    exec(compile(ast.Module(body=main.body[start:stop+1],type_ignores=[]),str(recon.__file__),'exec'),namespace)
++    exec(compile(ast.Module(body=statements,type_ignores=[]),str(recon.__file__),'exec'),namespace)
+     names=['plasmid_ref_db','mob_ref','mash_db','replicon_ref','plasmid_meta',
+            'repetitive_mask_file','mpf_ref','plasmid_orit','ETE3DBTAXAFILE',
+            'LIT_PLASMID_TAXONOMY_FILE','NCBI_PLASMID_TAXONOMY_FILE']
+-    return args,{name:namespace[name] for name in names}
++    return args,{name:namespace[name] for name in names if name in namespace}
+ 
+ 
+ def taxonomy_schema(path):
+@@ -87,28 +96,75 @@
+     finally:connection.close()
+ 
+ 
+-def check(native_args):
+-    args,paths=native_resource_paths(native_args)
+-    if args.filter_db or args.genome_filter_db_prefix:
++def check(native_args,tool='mob_recon',allow_optional=False):
++    args,paths=native_resource_paths(native_args,tool)
++    optional=bool(getattr(args,'filter_db',None) or getattr(args,'genome_filter_db_prefix',None))
++    if optional and not allow_optional:
+         raise PreparationRequired('Optional filter DB/prefix readiness has not been implemented; original native support remains pending validation')
+     missing=[name for name,path in paths.items() if not Path(path).is_file() or Path(path).stat().st_size==0]
+     if missing:raise PreparationRequired('Required prepared resources missing/empty: '+','.join(missing))
+     version=taxonomy_schema(paths['ETE3DBTAXAFILE'])
+-    return dict(tool='MOB-suite',version='3.1.9',preparation_presence_checks=True,
+-                taxonomy_schema_version=version,selected_paths=paths,
+-                scope='Read-only standalone preparation candidate only. No native science/init/download, full DB validity/cache identity/optional filter or nonviral provenance certification.')
++    return dict(tool='MOB-suite',entrypoint=tool,version='3.1.9',preparation_presence_checks=True,
++                taxonomy_schema_version=version,selected_paths=paths,optional_filter_validation_deferred=optional,
++                scope='No native science invoked by this check; preparation presence/schema only, not full DB validity/cache identity/optional filter or nonviral provenance certification.')
++
++
++def guarded_main(tool,native_args):
++    """Run unchanged native main/argv, replacing only implicit preparers.
++
++    Recheck status at the real verify_init call and deny all ETE3 update paths,
++    so resources disappearing after preflight cannot start a download.
++    """
++    import mob_suite.utils as utils
++    import mob_suite.mob_init as initializer
++    from ete3 import NCBITaxa
++    from ete3.ncbi_taxonomy import ncbiquery
++    program=importlib.import_module('mob_suite.'+tool)
++    def refuse_initialization(logger,directory):
++        status=Path(directory)/'status.txt'
++        if not status.is_file() or status.stat().st_size==0:
++            raise PreparationRequired('MOB DB became unprepared; implicit initialization is prohibited')
++    def deny_update(*args,**kwargs):
++        raise PreparationRequired('Implicit MOB/ETE3 database initialization or upgrade is prohibited')
++    def readonly_taxonomy_connect(self):
++        try:
++            self.db=sqlite3.connect('file:'+quote(str(Path(self.dbfile).resolve()),safe='/')+'?mode=ro',uri=True)
++        except sqlite3.DatabaseError as error:
++            raise PreparationRequired('Prepared taxonomy disappeared or is unreadable: '+str(error)) from error
++    def readonly_taxonomy_current(dbfile=ncbiquery.DEFAULT_TAXADB):
++        taxonomy_schema(dbfile)
++        return True
++    overrides=[(utils,'verify_init',refuse_initialization),
++               (program,'verify_init',refuse_initialization),
++               (initializer,'main',deny_update),
++               (NCBITaxa,'update_taxonomy_database',deny_update),
++               (NCBITaxa,'_connect',readonly_taxonomy_connect),
++               (ncbiquery,'is_taxadb_up_to_date',readonly_taxonomy_current)]
++    originals=[(obj,name,getattr(obj,name)) for obj,name,_ in overrides]
++    saved=sys.argv
++    try:
++        for obj,name,value in overrides:setattr(obj,name,value)
++        sys.argv=[tool]+list(native_args)
++        return program.main()
++    finally:
++        sys.argv=saved
++        for obj,name,value in reversed(originals):setattr(obj,name,value)
+ 
+ 
+ def main():
+     parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--tool',choices=['mob_recon','mob_typer'],default='mob_recon')
++    parser.add_argument('--execute',action='store_true')
+     parser.add_argument('--output',type=Path)
+     parser.add_argument('native_args',nargs=argparse.REMAINDER)
+     args=parser.parse_args();native=args.native_args[1:] if args.native_args[:1]==['--'] else args.native_args
+-    try:result=check(native)
++    try:
++        result=check(native,args.tool,allow_optional=args.execute)
++        text=json.dumps(result,sort_keys=True)+'\n'
++        if args.output:args.output.write_text(text)
++        elif not args.execute:print(text,end='')
++        if args.execute:return guarded_main(args.tool,native)
+     except (PreparationRequired,OSError) as error:parser.exit(2,str(error)+'\n')
+-    text=json.dumps(result,sort_keys=True)+'\n'
+-    if args.output:args.output.write_text(text)
+-    else:print(text,end='')
+ 
+ 
+-if __name__=='__main__':main()
++if __name__=='__main__':sys.exit(main())
+diff --git a/lib/mobsuite_runtime.nf b/lib/mobsuite_runtime.nf
+new file mode 100644
+--- /dev/null
++++ b/lib/mobsuite_runtime.nf
+@@ -0,0 +1,4 @@
++/* Shell quoting only; full runtime resource identity is still pending. */
++def mobsuiteQuote(value) {
++    return "'" + value.toString().replace("'", "'\"'\"'") + "'"
++}
+diff --git a/modules/nf-core/mobsuite/recon/main.nf b/modules/nf-core/mobsuite/recon/main.nf
+--- a/modules/nf-core/mobsuite/recon/main.nf
++++ b/modules/nf-core/mobsuite/recon/main.nf
+@@ -1,4 +1,7 @@
++include { mobsuiteQuote } from '../../../../lib/mobsuite_runtime'
++
+ process MOBSUITE_RECON {
++    cache 'deep'
+     tag "$meta.id"
+     label 'process_medium'
+ 
+@@ -9,6 +12,7 @@
+ 
+     input:
+     tuple val(meta), path(fasta)
++    path(preflight_helper, stageAs: 'mobsuite_preflight.py')
+ 
+     output:
+     tuple val(meta), path("results/chromosome.fasta")    , emit: chromosome
+@@ -27,15 +31,15 @@
+     def fasta_name = fasta.getName().replace(".gz", "")
+     """
+     if [ "${is_compressed}" == "true" ]; then
+-        gzip -c -d ${fasta} > ${fasta_name}
++        gzip -c -d ${mobsuiteQuote(fasta)} > ${mobsuiteQuote(fasta_name)}
+     fi
+ 
+-    mob_recon \\
+-        --infile ${fasta_name} \\
++    python3 mobsuite_preflight.py --tool mob_recon --output mobsuite_preflight.json --execute -- \\
++        --infile ${mobsuiteQuote(fasta_name)} \\
+         ${args} \\
+         --num_threads ${task.cpus} \\
+         --outdir results \\
+-        --sample_id ${prefix}
++        --sample_id ${mobsuiteQuote(prefix)}
+     """
+ 
+     stub:
+diff --git a/modules/nf-core/mobsuite/recon/meta.yml b/modules/nf-core/mobsuite/recon/meta.yml
+--- a/modules/nf-core/mobsuite/recon/meta.yml
++++ b/modules/nf-core/mobsuite/recon/meta.yml
+@@ -26,6 +26,10 @@
+         description: A bacterial genome assembly in FASTA format
+         pattern: "*.{fasta,fa,fna}"
+         ontologies: []
++  - preflight_helper:
++      type: file
++      description: Fixed native source/prepare guard; full resource identity remains pending
++      pattern: "mobsuite_preflight.py"
+ output:
+   chromosome:
+     - - meta:
+diff --git a/modules/nf-core/mobsuite/recon/tests/main.nf.test b/modules/nf-core/mobsuite/recon/tests/main.nf.test
+--- a/modules/nf-core/mobsuite/recon/tests/main.nf.test
++++ b/modules/nf-core/mobsuite/recon/tests/main.nf.test
+@@ -1,56 +1,51 @@
+-
+ nextflow_process {
+-
+-    name "Test Process MOBSUITE_RECON"
++    name "MOB recon guarded entrypoint"
+     script "../main.nf"
+     process "MOBSUITE_RECON"
+-
+     tag "modules"
+     tag "modules_nfcore"
+     tag "mobsuite"
+-    tag "mobsuite/recon"
+-
+-    test("test-mobsuite-recon") {
+-
++    // User excludes viral input. Supply a reviewed complete plain bacterial
++    // chromosome >450kb and prepared DB for the full native case. Not yet run.
++    test("full bacterial chromosome - native prepared resources required") {
++        tag "mobsuite-native-prepared"
+         when {
+             process {
+                 """
+-                input[0] = [
+-                    [ id:'test' ],
+-				    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
+-                ]
++                input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
++                input[1]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
+                 """
+             }
+         }
+-
+         then {
+-            assertAll(
+-                { assert process.success },
+-                { assert snapshot(sanitizeOutput(process.out)).match() }
+-            )
++            assert process.success
++            def input=new File(params.mobsuite_bacterial_fasta.toString()).readLines()
++            assert input.count { it.startsWith('>') }==1
++            def dna=input.findAll { !it.startsWith('>') }.join('')
++            assert dna.size()>450000
++            def chromosome=new File(process.out.chromosome.get(0).get(1).toString()).readLines()
++            assert chromosome.findAll { !it.startsWith('>') }.join('')==dna
++            assert new File(process.out.contig_report.get(0).get(1).toString()).readLines().size()>1
++            assert !process.out.plasmids
++            assert process.out.versions_mobsuite.get(0).get(2)=='3.1.9'
+         }
+     }
+-
+-    test("test-mobsuite-recon-stub") {
+-        options '-stub'
+-
++    test("full bacterial input - stub interface") {
++        tag "mobsuite-guard-stub"
++        options "-stub"
+         when {
+             process {
+                 """
+-                input[0] = [
+-                    [ id:'test' ],
+-				    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
+-                ]
++                input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
++                input[1]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
+                 """
+             }
+         }
+-
+         then {
+-            assertAll(
+-                { assert process.success },
+-                { assert snapshot(sanitizeOutput(process.out)).match() }
+-            )
++            assert process.success
++            assert new File(process.out.chromosome.get(0).get(1).toString()).length()==0
++            assert new File(process.out.contig_report.get(0).get(1).toString()).length()==0
++            assert process.out.versions_mobsuite.get(0).get(2)=='3.1.9'
+         }
+     }
+-
+ }
+diff --git a/modules/nf-core/mobsuite/typer/main.nf b/modules/nf-core/mobsuite/typer/main.nf
+--- a/modules/nf-core/mobsuite/typer/main.nf
++++ b/modules/nf-core/mobsuite/typer/main.nf
+@@ -1,3 +1,5 @@
++include { mobsuiteQuote } from '../../../../lib/mobsuite_runtime'
++
+ process MOBSUITE_TYPER {
+     cache 'deep'
+     tag "${meta.id}"
+@@ -20,6 +22,7 @@
+     path plasmid_orit_fas
+     val generate_biomarker_report
+     val generate_mge_report
++    path(preflight_helper, stageAs: 'mobsuite_preflight.py')
+ 
+     output:
+     tuple val(meta), path("*.txt"), emit: report
+@@ -35,20 +38,20 @@
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     def biomarker_report_cmd = generate_biomarker_report ? "--biomarker_report_file ${prefix}_biomarker_report.txt" : ''
+     def mge_report_cmd = generate_mge_report ? "--mge_report_file ${prefix}_mge_report.txt" : ''
+-    def plasmid_mash_db_cmd = plasmid_mash_db ? "--plasmid_mash_db ${plasmid_mash_db}" : ''
+-    def plasmid_meta_cmd = plasmid_meta_txt ? "--plasmid_meta ${plasmid_meta_txt}" : ''
+-    def plasmid_replicons_cmd = plasmid_replicons_fas ? "--plasmid_replicons ${plasmid_replicons_fas}" : ''
+-    def repetitive_mask_cmd = repetitive_mask_fas ? "--repetitive_mask ${repetitive_mask_fas}" : ''
+-    def plasmid_mob_cmd = plasmid_mob_faa ? "--plasmid_mob ${plasmid_mob_faa}" : ''
+-    def plasmid_mpf_cmd = plasmid_mpf_faa ? "--plasmid_mpf ${plasmid_mpf_faa}" : ''
+-    def plasmid_orit_fas_cmd = plasmid_orit_fas ? "--plasmid_orit ${plasmid_orit_fas}" : ''
+-    def db_cmd = db ? "--database_directory ${db}" : ''
++    def plasmid_mash_db_cmd = plasmid_mash_db ? "--plasmid_mash_db ${mobsuiteQuote(plasmid_mash_db)}" : ''
++    def plasmid_meta_cmd = plasmid_meta_txt ? "--plasmid_meta ${mobsuiteQuote(plasmid_meta_txt)}" : ''
++    def plasmid_replicons_cmd = plasmid_replicons_fas ? "--plasmid_replicons ${mobsuiteQuote(plasmid_replicons_fas)}" : ''
++    def repetitive_mask_cmd = repetitive_mask_fas ? "--repetitive_mask ${mobsuiteQuote(repetitive_mask_fas)}" : ''
++    def plasmid_mob_cmd = plasmid_mob_faa ? "--plasmid_mob ${mobsuiteQuote(plasmid_mob_faa)}" : ''
++    def plasmid_mpf_cmd = plasmid_mpf_faa ? "--plasmid_mpf ${mobsuiteQuote(plasmid_mpf_faa)}" : ''
++    def plasmid_orit_fas_cmd = plasmid_orit_fas ? "--plasmid_orit ${mobsuiteQuote(plasmid_orit_fas)}" : ''
++    def db_cmd = db ? "--database_directory ${mobsuiteQuote(db)}" : ''
+     """
+-    mob_typer \\
++    python3 mobsuite_preflight.py --tool mob_typer --output mobsuite_preflight.json --execute -- \\
+         --num_threads ${task.cpus} \\
+-        --sample_id ${prefix} \\
++        --sample_id ${mobsuiteQuote(prefix)} \\
+         ${args} \\
+-        --infile ${fasta} \\
++        --infile ${mobsuiteQuote(fasta)} \\
+         ${plasmid_mash_db_cmd} \\
+         ${plasmid_meta_cmd} \\
+         ${plasmid_replicons_cmd} \\
+diff --git a/modules/nf-core/mobsuite/typer/meta.yml b/modules/nf-core/mobsuite/typer/meta.yml
+--- a/modules/nf-core/mobsuite/typer/meta.yml
++++ b/modules/nf-core/mobsuite/typer/meta.yml
+@@ -98,6 +98,10 @@
+   - generate_mge_report:
+       type: boolean
+       description: Whether to generate a mobile genetic element (MGE) report file
++  - preflight_helper:
++      type: file
++      description: Fixed native source/prepare guard; full resource identity remains pending
++      pattern: "mobsuite_preflight.py"
+ output:
+   report:
+     - - meta:
+diff --git a/modules/nf-core/mobsuite/typer/tests/main.nf.test b/modules/nf-core/mobsuite/typer/tests/main.nf.test
+--- a/modules/nf-core/mobsuite/typer/tests/main.nf.test
++++ b/modules/nf-core/mobsuite/typer/tests/main.nf.test
+@@ -1,95 +1,68 @@
+ nextflow_process {
+-
+-    name "Test Process MOBSUITE_TYPER"
++    name "MOB typer guarded entrypoint"
+     script "../main.nf"
+     process "MOBSUITE_TYPER"
+-
+     tag "modules"
+     tag "modules_nfcore"
+     tag "mobsuite"
+-    tag "mobsuite/typer"
+-
+-    test("sarscov2 - fasta") {
+-
++    // Viral fixture retired by user. Native full bacterial scientific case
++    // awaits prepared complete resources; stub is not its replacement.
++    test("full bacterial assembly - native prepared resources required") {
++        tag "mobsuite-native-prepared"
+         when {
+             process {
+                 """
+-                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+-                def resource = { value ->
+-                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+-                    def root = file(value, checkIfExists: true)
+-                    tuple(root, ResourceIdentity.capture(root))
+-                }
+-
+-                input[0] = [
+-                    [ id:'test' ],
+-                    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true),
+-                ]
+-                input[1] = resource.call([])
+-                input[2] = []
+-                input[3] = []
+-                input[4] = []
+-                input[5] = []
+-                input[6] = []
+-                input[7] = []
+-                input[8] = []
+-                input[9] = true
+-                input[10] = true
++                input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
++                input[1]=[[],[schema_version:2,resource_state:'absent']]
++                input[2]=[]; input[3]=[]; input[4]=[]; input[5]=[]
++                input[6]=[]; input[7]=[]; input[8]=[]
++                input[9]=true; input[10]=true
++                input[11]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
+                 """
+             }
+         }
+-
+         then {
+             assert process.success
+-            assertAll(
+-                { assert snapshot(
+-                    process.out,
+-                    process.out.findAll { key, val -> key.startsWith('versions') }
+-                ).match() }
+-            )
++            def input=new File(params.mobsuite_bacterial_fasta.toString()).readLines()
++            assert input.count { it.startsWith('>') }==1
++            def dna=input.findAll { !it.startsWith('>') }.join('')
++            assert dna.size()>450000
++            def products=process.out.report.get(0).get(1)
++            def files=products instanceof List ? products : [products]
++            def report=files.find { new File(it.toString()).name=='test.txt' }
++            assert report!=null
++            def rows=new File(report.toString()).readLines().findAll { it.trim() }
++            assert rows.size()==2
++            def header=rows[0].split('\t',-1).toList()
++            def values=rows[1].split('\t',-1).toList()
++            assert values[header.indexOf('num_contigs')]=='1'
++            assert values[header.indexOf('size')].toLong()==dna.size()
++            assert values[header.indexOf('md5')]==java.security.MessageDigest.getInstance('MD5').digest(dna.bytes).encodeHex().toString()
++            assert process.out.versions_mobsuite.get(0).get(2)=='3.1.9'
+         }
+-
+     }
+-
+-    test("sarscov2 - fasta - stub") {
+-
++    test("full bacterial input - stub interface") {
++        tag "mobsuite-guard-stub"
+         options "-stub"
+-
+         when {
+             process {
+                 """
+-                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+-                def resource = { value ->
+-                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
+-                    def root = file(value, checkIfExists: true)
+-                    tuple(root, ResourceIdentity.capture(root))
+-                }
+-
+-                input[0] = [
+-                    [ id:'test' ],
+-                    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true),
+-                ]
+-                input[1] = resource.call([])
+-                input[2] = []
+-                input[3] = []
+-                input[4] = []
+-                input[5] = []
+-                input[6] = []
+-                input[7] = []
+-                input[8] = []
+-                input[9] = true
+-                input[10] = true
++                input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
++                input[1]=[[],[schema_version:2,resource_state:'absent']]
++                input[2]=[]; input[3]=[]; input[4]=[]; input[5]=[]
++                input[6]=[]; input[7]=[]; input[8]=[]
++                input[9]=true; input[10]=true
++                input[11]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
+                 """
+             }
+         }
+-
+         then {
+             assert process.success
+-            assertAll(
+-                { assert snapshot(process.out).match() }
+-            )
++            def products=process.out.report.get(0).get(1)
++            def files=products instanceof List ? products : [products]
++            assert files.size()==3
++            assert files.every { new File(it.toString()).length()==0 }
++            assert process.out.versions_mobsuite.get(0).get(2)=='3.1.9'
+         }
+-
+     }
+-
+ }
+diff --git a/subworkflows/plasmid_downstream.nf b/subworkflows/plasmid_downstream.nf
+--- a/subworkflows/plasmid_downstream.nf
++++ b/subworkflows/plasmid_downstream.nf
+@@ -82,10 +82,11 @@
+     }
+     if (selectedTools(params.typing_tools).contains('mob_typer')) {
+         // optional per-file db inputs (mash/meta/replicons/mask/mob/mpf/orit) left empty
++        ch_mob_typer_preflight = Channel.value(file("${moduleDir}/../bin/mobsuite_preflight.py",checkIfExists:true))
+         MOB_TYPER(ch_plasmids,
+                   Channel.value(resourceInput(params.mob_suite_db)),
+                   [], [], [], [], [], [], [],
+-                  false, false)
++                  false, false,ch_mob_typer_preflight)
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_TYPER.out], '06_plasmid_typing', 'MOB_TYPER'))
+     }
+     if (selectedTools(params.typing_optional_tools).contains('copla')) {
+@@ -160,7 +161,7 @@
+     if (selectedTools(params.annotation_optional_tools).contains('mob_suite')) {
+         // Uses the environment DB; native3.1.9 may auto-initialize/download if unprepared.
+         // Resource preflight/native validation remain pending; do not launch unprepared.
+-        MOB_SUITE_ANNOT(ch_plasmids)
++        MOB_SUITE_ANNOT(ch_plasmids,Channel.value(file("${moduleDir}/../bin/mobsuite_preflight.py",checkIfExists:true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_SUITE_ANNOT.out], '08_annotation', 'MOB_SUITE_ANNOT'))
+     }
+     if (selectedTools(params.annotation_optional_tools).contains('rgi')) {
+@@ -182,7 +183,7 @@
+     if (selectedTools(params.plasmid_binning_tools).contains('mob_suite') || selectedTools(params.plasmid_binning_tools).contains('mob_recon')) {
+         // Uses the environment DB; native3.1.9 may auto-initialize/download if unprepared.
+         // Resource preflight/native validation remain pending; do not launch unprepared.
+-        MOB_RECON(ch_plasmids)
++        MOB_RECON(ch_plasmids,Channel.value(file("${moduleDir}/../bin/mobsuite_preflight.py",checkIfExists:true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_RECON.out], '05_plasmid_binning', 'MOB_RECON'))
+     }
+     if (selectedTools(params.plasmid_binning_tools).contains('recycler')) {
+diff --git a/tests/mock_e2e/mock_python.py b/tests/mock_e2e/mock_python.py
+--- a/tests/mock_e2e/mock_python.py
++++ b/tests/mock_e2e/mock_python.py
+@@ -9,8 +9,21 @@
+ import sys
+ 
+ args = sys.argv[1:]
+-if not args or Path(args[0]).name not in ['isescan_runtime_resources.py','integronfinder_runtime_resources.py','plasmidfinder_runtime_resources.py']:
++if not args or Path(args[0]).name not in ['isescan_runtime_resources.py','integronfinder_runtime_resources.py','plasmidfinder_runtime_resources.py','mobsuite_preflight.py']:
+     os.execv(sys.executable, [sys.executable] + args)
++
++if Path(args[0]).name == 'mobsuite_preflight.py':
++    parser=argparse.ArgumentParser()
++    parser.add_argument('--tool',choices=['mob_recon','mob_typer'],default='mob_recon')
++    parser.add_argument('--output',type=Path)
++    parser.add_argument('--execute',action='store_true')
++    parser.add_argument('native_args',nargs=argparse.REMAINDER)
++    request=parser.parse_args(args[1:])
++    native=request.native_args[1:] if request.native_args[:1]==['--'] else request.native_args
++    if request.output:
++        request.output.write_text(json.dumps(dict(scope='EXPLICIT_MOCK_MOB_PREPARATION_NO_REAL_DATABASE',tool=request.tool,native_arguments=native))+'\n')
++    if request.execute:os.execvp(request.tool,[request.tool]+native)
++    sys.exit(0)
+ 
+ if Path(args[0]).name == 'plasmidfinder_runtime_resources.py':
+     parser = argparse.ArgumentParser()
+diff --git a/tests/run_mob_publication.py b/tests/run_mob_publication.py
+--- a/tests/run_mob_publication.py
++++ b/tests/run_mob_publication.py
+@@ -13,6 +13,7 @@
+ from pathlib import Path
+ import shutil
+ import subprocess
++import sys
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ 
+@@ -46,12 +47,15 @@
+ pathlib.Path('observer.json').write_text(json.dumps({'observer_only':True,'sample_id':a.sample_id,'arguments':sys.argv,'dna_hex':dna.hex()}))
+ ''')
+     observer.chmod(0o755)
++    python_observer = bindir / 'python3'
++    python_observer.write_text('#!' + sys.executable + '\n' + (ROOT / 'tests/mock_e2e/mock_python.py').read_text().split('\n',1)[1])
++    python_observer.chmod(0o755)
+     records = []
+     for sid, empty, dna in [('A', False, 'ACGT' * 40), ('A__B.v1', True, 'TGCA' * 53)]:
+         fasta = base / (sid + '.fa')
+         fasta.write_text('>shared_id\n' + dna + '\n')
+         records.append({'id': sid, 'empty': empty, 'fasta': str(fasta)})
+-    sources = ['conf/nfcore_downstream.config', 'modules/nf-core/mobsuite/recon/main.nf', 'tests/nextflow/mob_publication.nf', 'tests/run_mob_publication.py']
++    sources = ['conf/nfcore_downstream.config', 'modules/nf-core/mobsuite/recon/main.nf', 'tests/nextflow/mob_publication.nf', 'tests/run_mob_publication.py', 'tests/mock_e2e/mock_python.py', 'bin/mobsuite_preflight.py', 'lib/mobsuite_runtime.nf']
+     hashes = {path: sha(ROOT / path) for path in sources}
+     runs = []
+     work = base / 'work'
+diff --git a/tests/nextflow/mob_publication.nf b/tests/nextflow/mob_publication.nf
+--- a/tests/nextflow/mob_publication.nf
++++ b/tests/nextflow/mob_publication.nf
+@@ -6,8 +6,9 @@
+     records = Channel.fromList(params.records).map { row ->
+         tuple([id: row.id, observer_empty: row.empty], file(row.fasta, checkIfExists: true))
+     }
+-    MOB_SUITE_ANNOT(records)
+-    MOB_RECON(records)
++    def helper=Channel.value(file("${moduleDir}/../../bin/mobsuite_preflight.py",checkIfExists:true))
++    MOB_SUITE_ANNOT(records,helper)
++    MOB_RECON(records,helper)
+     MOB_SUITE_ANNOT.out.contig_report.view { meta, report -> "ANNOT_REPORT=${meta.id}" }
+     MOB_RECON.out.contig_report.view { meta, report -> "RECON_REPORT=${meta.id}" }
+ }
+diff --git a/tests/nextflow/resource_consumer_cache.nf b/tests/nextflow/resource_consumer_cache.nf
+--- a/tests/nextflow/resource_consumer_cache.nf
++++ b/tests/nextflow/resource_consumer_cache.nf
+@@ -19,7 +19,7 @@
+     def sequence = Channel.value(tuple([id: 'CACHE_OBSERVER', single_end: true], fasta))
+     def resource = { name -> Channel.value(resourceInput(params.resources[name])) }
+     def tagged = { label, name -> Channel.value(taggedResourceInput(label, params.resources[name])) }
+-    MOB(sequence, resource.call('MOB_db'), [], [], [], [], [], [], [], false, false)
++    MOB(sequence, resource.call('MOB_db'), [], [], [], [], [], [], [], false, false,Channel.value(file("${moduleDir}/../../bin/mobsuite_preflight.py",checkIfExists:true)))
+     BAKTA(sequence, resource.call('BAKTA_db'), [], [], [], [])
+     AMR(sequence, resource.call('AMR_db'))
+     RGI(sequence, resource.call('RGI_card'), resource.call('RGI_wildcard'),
+diff --git a/tests/run_resource_consumers.py b/tests/run_resource_consumers.py
+--- a/tests/run_resource_consumers.py
++++ b/tests/run_resource_consumers.py
+@@ -20,7 +20,9 @@
+     return hashlib.sha256(path.read_bytes()).hexdigest()
+ 
+ 
+-def run(base):
++def run(base, only_resource=None):
++    selected = [only_resource] if only_resource else RESOURCES
++    assert all(name in RESOURCES for name in selected)
+     base.mkdir(parents=True, exist_ok=False)
+     fixture = base / 'fixture'
+     fixture.mkdir()
+@@ -71,7 +73,7 @@
+     records = []
+     session = None
+     cold_hashes = {}
+-    for case in ['cold', 'unchanged'] + [phase + ':' + resource for resource in RESOURCES for phase in ['mutated', 'restored']]:
++    for case in ['cold', 'unchanged'] + [phase + ':' + resource for resource in selected for phase in ['mutated', 'restored']]:
+         folder = base / case.replace(':', '-')
+         folder.mkdir()
+         if ':' in case:
+@@ -111,8 +113,8 @@
+         print(case, 'passed', flush=True)
+     assert hashes == {name: sha(ROOT / name) for name in sources}
+     (base / 'run.json').write_text(json.dumps({
+-        'pass': True, 'runs': records, 'source_sha256': hashes, 'session_uuid': session,
+-        'scope': '15 distinct resource inputs in 13 actual consumers; synthetic LF/hidden byte changes, '
++        'pass': True, 'runs': records, 'source_sha256': hashes, 'session_uuid': session, 'mutated_resource_inputs':selected,
++        'scope': str(len(selected))+' selected mutation inputs across13actual stub consumers; synthetic LF/hidden byte changes, '
+                  'per-node stub/version observers and one PHF CLI observer. No biological classifier/model inference.'
+     }, indent=2) + '\n')
+ 
+@@ -120,4 +122,6 @@
+ if __name__ == '__main__':
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--work-dir', type=Path, required=True)
+-    run(parser.parse_args().work_dir.resolve())
++    parser.add_argument('--only-resource',choices=RESOURCES)
++    args=parser.parse_args()
++    run(args.work_dir.resolve(),args.only_resource)
+diff --git a/tests/test_mobsuite_execution_guard.py b/tests/test_mobsuite_execution_guard.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_mobsuite_execution_guard.py
+@@ -0,0 +1,102 @@
++"""Boundary observers around actual native modules, never biological inference."""
++import importlib
++from pathlib import Path
++import sys
++import tempfile
++import sqlite3
++from types import SimpleNamespace
++import unittest
++from unittest.mock import patch
++
++ROOT=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT/'bin'))
++import mobsuite_preflight as guard
++from ete3 import NCBITaxa
++import mob_suite.mob_init as initializer
++import mob_suite.utils as utils
++
++
++class ExecutionBoundary(unittest.TestCase):
++    def test_typer_uses_real_native_selection(self):
++        with tempfile.TemporaryDirectory() as directory:
++            args,paths=guard.native_resource_paths(['--infile','NO_SEQUENCE_OPENED.fa','--out_file','NO_REPORT.txt','-d',directory],'mob_typer')
++            self.assertEqual(paths['ETE3DBTAXAFILE'],str(Path(directory)/'taxa.sqlite'))
++            self.assertNotIn('plasmid_ref_db',paths)
++            self.assertEqual(len(paths),10)  # includes NCBI metadata alias
++
++    def test_unprepared_execute_refuses_both_before_native_main(self):
++        for tool,output in [('mob_recon','--outdir'),('mob_typer','--out_file')]:
++            module=importlib.import_module('mob_suite.'+tool)
++            with patch.object(module,'main') as native,patch.object(utils,'Popen',side_effect=AssertionError('no child')) as child:
++                with patch.object(sys,'argv',['guard','--tool',tool,'--execute','--','--infile','NO_INPUT.fa',output,'NO_OUTPUT']):
++                    with self.assertRaises(SystemExit) as status:guard.main()
++                self.assertEqual(status.exception.code,2);native.assert_not_called();child.assert_not_called()
++
++    def test_status_disappearance_refused_at_native_boundary(self):
++        for tool in ['mob_recon','mob_typer']:
++            module=importlib.import_module('mob_suite.'+tool)
++            with tempfile.TemporaryDirectory() as directory:
++                def observer():module.verify_init(None,directory)
++                old=module.verify_init
++                with patch.object(module,'main',side_effect=observer),patch.object(utils,'Popen',side_effect=AssertionError('no child')):
++                    with self.assertRaisesRegex(guard.PreparationRequired,'became unprepared'):guard.guarded_main(tool,[])
++                self.assertIs(module.verify_init,old)
++
++    def test_ete3_update_is_denied_and_restored(self):
++        for tool in ['mob_recon','mob_typer']:
++            module=importlib.import_module('mob_suite.'+tool);old=NCBITaxa.update_taxonomy_database
++            def observer():NCBITaxa.update_taxonomy_database(object.__new__(NCBITaxa))
++            with patch.object(module,'main',side_effect=observer):
++                with self.assertRaisesRegex(guard.PreparationRequired,'upgrade is prohibited'):guard.guarded_main(tool,[])
++            self.assertIs(NCBITaxa.update_taxonomy_database,old)
++
++    def test_direct_initializer_is_denied(self):
++        for tool in ['mob_recon','mob_typer']:
++            module=importlib.import_module('mob_suite.'+tool);old=initializer.main
++            with patch.object(module,'main',side_effect=lambda:initializer.main()):
++                with self.assertRaisesRegex(guard.PreparationRequired,'initialization or upgrade'):guard.guarded_main(tool,[])
++            self.assertIs(initializer.main,old)
++
++    def test_prepared_taxonomy_metadata_is_opened_readonly(self):
++        from ete3.ncbi_taxonomy import ncbiquery
++        for tool in ['mob_recon','mob_typer']:
++            module=importlib.import_module('mob_suite.'+tool)
++            with tempfile.TemporaryDirectory() as directory:
++                path=Path(directory)/'CONTROL_METADATA.sqlite'
++                with sqlite3.connect(path) as db:
++                    db.executescript("CREATE TABLE stats(version INTEGER);INSERT INTO stats VALUES(2);CREATE TABLE species(taxid INTEGER,parent INTEGER,spname TEXT,common TEXT,rank TEXT,track TEXT);INSERT INTO species VALUES(1,1,'CONTROL_METADATA','','no rank','1');CREATE TABLE synonym(taxid INTEGER,spname TEXT);CREATE TABLE merged(taxid_old INTEGER,taxid_new INTEGER);")
++                old_connect=NCBITaxa._connect;old_current=ncbiquery.is_taxadb_up_to_date;before=path.read_bytes()
++                def observer():
++                    ncbi=NCBITaxa(dbfile=str(path))
++                    self.assertEqual(ncbi.get_lineage(1),[1])
++                    with self.assertRaisesRegex(sqlite3.OperationalError,'readonly'):ncbi.db.execute('INSERT INTO stats VALUES(99)')
++                    ncbi.db.close()
++                with patch.object(module,'main',side_effect=observer):guard.guarded_main(tool,[])
++                self.assertEqual(path.read_bytes(),before)
++                self.assertIs(NCBITaxa._connect,old_connect);self.assertIs(ncbiquery.is_taxadb_up_to_date,old_current)
++
++    def test_execution_does_not_disable_original_optional_flags(self):
++        with tempfile.TemporaryDirectory() as directory:
++            path=Path(directory)/'CONTROL_METADATA_ONLY';path.write_text('CONTROL')
++            parsed=SimpleNamespace(filter_db='ORIGINAL_FILTER_ARGUMENT',genome_filter_db_prefix=None)
++            with patch.object(guard,'native_resource_paths',return_value=(parsed,{'ETE3DBTAXAFILE':str(path)})),patch.object(guard,'taxonomy_schema',return_value=2):
++                with self.assertRaisesRegex(guard.PreparationRequired,'has not been implemented'):guard.check([])
++                result=guard.check([],allow_optional=True)
++                self.assertTrue(result['optional_filter_validation_deferred'])
++
++    def test_prepared_boundary_preserves_argv_return_and_python_state(self):
++        for tool in ['mob_recon','mob_typer']:
++            module=importlib.import_module('mob_suite.'+tool)
++            with tempfile.TemporaryDirectory() as directory:
++                (Path(directory)/'status.txt').write_text('CONTROL_METADATA_ONLY\n')
++                expected=['--infile','data with spaces.fa','--sample_id','A__1.v1'];saved=sys.argv
++                def observer():
++                    self.assertEqual(sys.argv,[tool]+expected)
++                    module.verify_init(None,directory)
++                    return 17
++                with patch.object(module,'main',side_effect=observer),patch.object(utils,'Popen',side_effect=AssertionError('no child')):
++                    self.assertEqual(guard.guarded_main(tool,expected),17)
++                self.assertIs(sys.argv,saved)
++
++
++if __name__=='__main__':unittest.main()
+diff --git a/tests/nextflow/mobsuite_guard_native.nf b/tests/nextflow/mobsuite_guard_native.nf
+new file mode 100644
+--- /dev/null
++++ b/tests/nextflow/mobsuite_guard_native.nf
+@@ -0,0 +1,16 @@
++nextflow.enable.dsl=2
++include { resourceInput } from '../../lib/resource_inputs'
++include { MOBSUITE_RECON as MOB_RECON } from '../../modules/nf-core/mobsuite/recon'
++include { MOBSUITE_RECON as MOB_SUITE_ANNOT } from '../../modules/nf-core/mobsuite/recon'
++include { MOBSUITE_TYPER as MOB_TYPER } from '../../modules/nf-core/mobsuite/typer'
++workflow {
++    def sequence=Channel.value(tuple([id:'bacterial_control'],file(params.fasta,checkIfExists:true)))
++    def helper=Channel.value(file("${moduleDir}/../../bin/mobsuite_preflight.py",checkIfExists:true))
++    if(params.mode=='typer') {
++        MOB_TYPER(sequence,Channel.value(resourceInput(params.database)),[],[],[],[],[],[],[],false,false,helper)
++    } else if(params.mode=='annotation') {
++        MOB_SUITE_ANNOT(sequence,helper)
++    } else {
++        MOB_RECON(sequence,helper)
++    }
++}
+diff --git a/tests/run_mobsuite_execution_guard.py b/tests/run_mobsuite_execution_guard.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_mobsuite_execution_guard.py
+@@ -0,0 +1,56 @@
++#!/usr/bin/env python3
++"""Real production entrypoint refusals and separate stubs; no native MOB science."""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++
++ROOT=Path(__file__).resolve().parents[1]
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++
++
++def run(base,prefix,fixture):
++    base.mkdir(parents=True,exist_ok=False);empty=base/'EMPTY_UNPREPARED_DATABASE';empty.mkdir()
++    env=dict(os.environ,PATH=str(prefix/'bin')+':'+os.environ['PATH'],PYTHONDONTWRITEBYTECODE='1')
++    sources=['tests/run_mobsuite_execution_guard.py','tests/nextflow/mobsuite_guard_native.nf','bin/mobsuite_preflight.py','lib/mobsuite_runtime.nf','modules/nf-core/mobsuite/recon/main.nf','modules/nf-core/mobsuite/typer/main.nf']
++    before={p:sha(ROOT/p) for p in sources}
++    database=prefix/'lib/python3.10/site-packages/mob_suite/databases'
++    def state():return {str(p.relative_to(database)):sha(p) for p in database.rglob('*') if p.is_file() and '__pycache__' not in p.relative_to(database).parts}
++    original=state();assert sorted(original)==['__init__.py']
++    runs=[]
++    for mode in ['recon','annotation','typer']:
++        for scenario in ['default-refusal','explicit-refusal','stub']:
++            case=base/(mode+'-'+scenario);case.mkdir();config=case/'config'
++            text="process { executor='local';cpus=1;memory='1 GB';errorStrategy='terminate';maxRetries=0 }\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\n"
++            if scenario=='explicit-refusal' and mode!='typer':text+="process { withName: 'MOB_RECON|MOB_SUITE_ANNOT' { ext.args='--database_directory "+str(empty)+"' } }\n"
++            config.write_text(text)
++            cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(ROOT/'tests/nextflow/mobsuite_guard_native.nf'),'--mode',mode,'--fasta',str(fixture),'-work-dir',str(base/'work'),'-with-trace',str(case/'trace.tsv'),'-ansi-log','false']
++            if scenario=='explicit-refusal' and mode=='typer':cmd+=['--database',str(empty)]
++            if scenario=='stub':cmd.append('-stub-run')
++            proc=subprocess.run(cmd,cwd=base,env=env,capture_output=True,text=True,timeout=180);(case/'stdout').write_text(proc.stdout);(case/'stderr').write_text(proc.stderr)
++            tasks=list(csv.DictReader((case/'trace.tsv').open(),delimiter='\t'))
++            record=dict(case=mode+'-'+scenario,command=cmd,exit_code=proc.returncode,tasks=tasks);runs.append(record);(base/'progress.json').write_text(json.dumps(runs,indent=2)+'\n')
++            assert len(tasks)==1,record;task=tasks[0];work=Path(task['workdir'])
++            if scenario=='stub':
++                assert proc.returncode==0 and task['status']=='COMPLETED',record
++                assert not (work/'mobsuite_preflight.json').exists()
++                assert all(p.stat().st_size==0 for p in work.rglob('*.txt') if not p.is_symlink())
++                record['stub_interface_only']=True
++            else:
++                assert proc.returncode!=0 and task['status']=='FAILED' and task['exit']=='2',record
++                log=(work/'.command.log').read_text();reason='automatic initialization is prohibited' if scenario=='default-refusal' else 'Required prepared resources missing/empty'
++                assert reason in log,log
++                assert not (work/'results').exists() and not (work/'bacterial_control.txt').exists() and not (work/'mobsuite_preflight.json').exists()
++                record.update(preparation_refused=True,no_scientific_outputs=True)
++            assert state()==original and not any(empty.iterdir())
++            print(record['case'],task['status'],flush=True)
++    assert before=={p:sha(ROOT/p) for p in sources}
++    result=dict(pass_bounded_execution_guard_checks=True,formal_acceptance=False,source_sha256=before,runs=runs,default_db_files_unchanged=True,explicit_empty_db_unchanged=True,fixture_sha256=sha(fixture),scope='Three actual production aliases, default and explicit unprepared DB refusals:6real FAILED tasks before native scientific main;3separate stubs complete. Complete original bacterial540bp fixture unchanged. No biological DB/virus/model download or MOB science. Cache identity/complete reference/valid scientific positives/OCI/provider remain pending.')
++    (base/'run.json').write_text(json.dumps(result,indent=2)+'\n')
++
++
++if __name__=='__main__':
++    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True);p.add_argument('--prefix',type=Path,required=True);p.add_argument('--fixture',type=Path,required=True);a=p.parse_args();run(a.output.resolve(),a.prefix.resolve(),a.fixture.resolve())

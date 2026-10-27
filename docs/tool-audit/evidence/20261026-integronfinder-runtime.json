@@ -1,0 +1,168 @@
+{
+  "run_id": "20261026-integronfinder-runtime-topology-candidate",
+  "result": "bounded_IntegronFinder_resource_identity_topology_native_cache_framework_pass_TA091_TA093_open",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "artifacts": [
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/native-cache-v4/run.json",
+      "sha256": "a455e54fec6df62708311a3304421822cfdc881d576cd4f451c7c53d1daa38fc",
+      "scope": "12 actual production native/cache/topology/context phases"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/units-v3/run.json",
+      "sha256": "c8445fcf9fd613e5715827a2cb749d31a18747d5f527578e0329fe9aca560385",
+      "scope": "11 actual native parser/readset/topology/interpreter unit methods; fake optional layouts explicitly observers"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/mock-v3-execution.json",
+      "sha256": "04926983d2b63853d6193aa4f1a36f2b4b307c8b602d64f82ae0441165d62309",
+      "scope": "real main/Nextflow/R/report with explicit scientific/resource observers; no native model/topology inference"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/framework-v2/run.json",
+      "sha256": "312372eb21e761bb84292cbdc08c008d5bdc2fa71da80182312ccda0cffb4138",
+      "scope": "2 native/stub nf-test0.9.5 cases with complete original49200bp Ecoli software fixture, original executable --linear reference"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/native-original/run.json",
+      "sha256": "6658cd52f011375c9c66ee07c94f6521c1aeb46414ce3d7fa8bc56966cd5b4c6",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/version.json",
+      "sha256": "8e01cf88307de749582d0d9f3f43c786b9f29bfb56c16386a61630ed3e0e3cb0",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/topology-before-after.json",
+      "sha256": "fb501eceedeb1df9f77e4efa5e881ce85bc35bc6a909fe6d482d6a7b7ac54715",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/source-comparison.json",
+      "sha256": "f580ea7c4c18f55db798e6f3876942bcab39d987c51e1c9aa4d76e67361cc844",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/package-archives.json",
+      "sha256": "733cbdc33c92556d8c885d01d8ec16258d9c5057591c4a021d6fd382e5afef9f",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/packages.json",
+      "sha256": "f4793e960ea40f668f205bf81a5678189f1f90583b65d32f8b94ea795270ee34",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/linux-64.lock",
+      "sha256": "6c123ca3d65948d2389bab4437e2e06118466e52ce7a26d641f5142c820a5ed8",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/source-download.json",
+      "sha256": "9706368c081658fee1bdf802989ec809dc58d3a32927b71b242f85c15f6974e1",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/framework-data/download.json",
+      "sha256": "168f5a274c1502e9005e5c5837f90233850fea2a1e730cc8be8410a46ca03718",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/framework-v2/source-copy.json",
+      "sha256": "1c7c11d1605cb5b714fcc39bb7c1a46ceb372b4c759f4a9d970abfec658058a1",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/framework-v2/verification.json",
+      "sha256": "391377b8df4d1601ad8dbf99acc12e0669b749453559ac30d42aa4691ee55c65",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/mock-main-v3/validation.json",
+      "sha256": "1cf07ad463dd05825916fc3c858ddd40cde0f063cccddb0371fd5beffb34ce16",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/attempts.json",
+      "sha256": "724f8cccbe12586b8f235d10108082376ceca07a2f65a7fe46697c137523564a",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/before-interpreter-guard/integronfinder_runtime_resources.py",
+      "sha256": "a7c7f2e60ee76ff1f7a4d5eb3ddc5bdaea87e78476dfb2ee728b7772f35b4202",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/before-version-fix/main.nf",
+      "sha256": "d5df770e5e750aeb799d1734fe397b8083a41cdf11bf9662647404ca073411ae",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-integronfinder-runtime/patch-roundtrip.json",
+      "sha256": "f28737e15f59a2b219547aa55cb509712a43d368f6c3297190648a199f266696",
+      "scope": "source/fixture/install/role/counterexample/attempt boundary"
+    }
+  ],
+  "source_direct_matches": 26,
+  "candidate_source_paths": 157,
+  "new_delta_paths": [
+    "bin/integronfinder_runtime_resources.py",
+    "bin/integronfinder_topology.py",
+    "conf/nfcore_downstream.config",
+    "lib/integronfinder_runtime.nf",
+    "modules/nf-core/integronfinder/main.nf",
+    "modules/nf-core/integronfinder/meta.yml",
+    "modules/nf-core/integronfinder/tests/main.nf",
+    "modules/nf-core/integronfinder/tests/main.nf.test",
+    "modules/nf-core/integronfinder/tests/nextflow.config",
+    "subworkflows/plasmid_downstream.nf",
+    "tests/integronfinder-native.lock.json",
+    "tests/mock_e2e/mock_python.py",
+    "tests/mock_e2e/run.py",
+    "tests/nextflow/integronfinder_runtime_native.nf",
+    "tests/run_integronfinder_runtime_native.py",
+    "tests/test_integronfinder_runtime_resources.py"
+  ],
+  "patches": {
+    "docs/tool-audit/patches/TA-091-resource-consumers.diff": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+    "docs/tool-audit/patches/TA-016-preserved-report-candidate.diff": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+    "docs/tool-audit/patches/TA-091-resource-root.diff": "b50cb5c15450d7a4b856acd880a86e590e6692520896a3dc7b59c9785f0e9b4e",
+    "docs/tool-audit/patches/TA-091-runtime-resource-pilot.diff": "74f4e758ce846f2050ef609f738b37b8c381f0181d5c9b815e413fbeaab82857",
+    "docs/tool-audit/patches/TA-091-semibin-runtime.diff": "ef097d7faa8f086fc83834fb15383aa4c922da0068781828a0b493651838130e",
+    "docs/tool-audit/patches/TA-091-isescan-runtime.diff": "865acb900581a8f7706b5e7c0a9d2d6ee1a09a6cf59c910eb0d6b18dc281e5da",
+    "docs/tool-audit/patches/TA-091-semibin-fgs-runtime.diff": "b6e568cb76d0653e709813fa61a32b1b1739f6ca638ba72026d4fd65bffb9bb6",
+    "docs/tool-audit/patches/TA-091-abricate-runtime.diff": "5c42d56e0be3a9843cf33c9d526f053c6dd3d477a363b605eb053a1c00c96496",
+    "docs/tool-audit/patches/TA-092-abricate-errors.diff": "40c178138031291e1dbee786a2d8a0a289b9f1a9ea67af88d5befd94d68b6151",
+    "docs/tool-audit/patches/TA-091-abricate-framework.diff": "78bd86b53f39c776be6c2945d5e4d44185d8544f95f1549346a299f2a5f6d19d",
+    "docs/tool-audit/patches/TA-091-TA-093-integronfinder.diff": "363e01d653df36b0c6432b6aa75a26d9307201835d173bb8c5947f78bd08ef67"
+  },
+  "forward_current_bytes_and_modes": true,
+  "reverse_exact_HEAD_bytes": true,
+  "formal_source_manifest_unchanged": true,
+  "formal_source_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d",
+  "native_phases": 12,
+  "native_trace_counts": {
+    "COMPLETED": 16,
+    "CACHED": 5,
+    "FAILED": 1
+  },
+  "unit_methods": 11,
+  "mock_tasks": 172,
+  "framework_cases": 2,
+  "watched_files_restored": 23,
+  "new_finding": "TA093 S0: unmarked single replicon implicitly circular, contradicting already-approved unknown-linear policy; candidate ready/unaccepted",
+  "remaining": [
+    "Four implicit consumers pending: Dorado,Medaka,PlasmidFinder,MOB-recon",
+    "Full optional functional annotation/GemBase/custom-parser native inference and arbitrary imported dependencies not complete; parser/read-set controls not inference",
+    "Complete Python/bytecode/Perl/system libraries/OCI/provider/GPU/when/deployment and immutable resources between probe/cache/exec remain",
+    "Native2.0.5 reported git hash belongs to cwd, not upstream; TA016 broader provenance and other producers remain open",
+    "TA092 independent acceptance, TA031 full GTDB r232,TT003 real shotgun P4, default-real/platform/M0-M4/AWS unchanged"
+  ],
+  "scope": "Unaccepted eleventh joint resource+approved-topology increment. Full original20739-byte20301bp ACBA and all original models: current unknown-linear complete tables match unmodified original explicit --linear; explicit --circ matches original circular1complete result. Models/thresholds/DNA not changed. Real corrupted CM propagates scientific failure; metadata same-stat mutations rerun and restoration caches. Complete original49200bp nf-core Ecoli software fixture not a complete genome; reference/current comparisons are software contracts, not biological truth. Native/ref/stub/observer roles separate. Fixed console interpreter must match probe Python (including Conda long-prefix exec form). Version warning-prefix capture corrected, broad TA016 remains open. Formal718 manifest and99accepted+2user retirements unchanged; new unaccepted TA093 increases current unresolved to6 (3S0+3S2). No commit/push/AWS/upload/charge.",
+  "full_receipt": "results/tool-audit/20261026-integronfinder-runtime/receipt.json",
+  "full_receipt_sha256": "9385cc4aa50ffb8c772eb9d236fa5939d4ae84acfffaaaec2cd681479462ca0c",
+  "snapshot_path_count": 768
+}

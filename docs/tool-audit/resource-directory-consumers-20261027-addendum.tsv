@@ -1,0 +1,2 @@
+process	resource	caller	module	mechanism	next_action	status
+MEDAKA	resolved draft adjacent .fai and .map-ont.mmi	subworkflows/ont.nf	modules/nf-core/medaka/main.nf	implicit-adjacent-index-resource	Fixed native mini_align follows original resolved draft path and reuses existing fai/mmi by existence; two actual index-only cases include valid creation and invalid-existing reuse. Require actual index identity/preparation consistency and real alignment corruption/restoration/cache controls. results/tool-audit/20261027-medaka-nomiss/index-selection-v2/run.json	pending

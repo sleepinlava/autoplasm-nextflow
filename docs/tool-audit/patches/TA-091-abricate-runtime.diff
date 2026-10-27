@@ -1,0 +1,522 @@
+diff --git a/bin/abricate_runtime_resources.pl b/bin/abricate_runtime_resources.pl
+new file mode 100644
+--- /dev/null
++++ b/bin/abricate_runtime_resources.pl
+@@ -0,0 +1,142 @@
++#!/usr/bin/env perl
++use strict;
++use warnings;
++use Cwd qw(abs_path);
++use File::Basename qw(dirname basename);
++use File::Spec;
++use Digest::SHA;
++use JSON::PP;
++use MIME::Base64 qw(decode_base64);
++use Getopt::Long;
++use IPC::Open3;
++use Symbol qw(gensym);
++
++my $json = JSON::PP->new->canonical->ascii;
++sub bytes {
++    my ($path) = @_;
++    open my $f, '<:raw', $path or die "Cannot read resource $path: $!\n";
++    local $/; return <$f>;
++}
++sub resource {
++    my ($root) = @_;
++    my @entries;
++    my $visit;
++    $visit = sub {
++        my ($p, $relative, $ancestors) = @_;
++        my $link = -l $p ? readlink($p) : undef;
++        my @before = stat($p); @before or die "Missing resource $p: $!\n";
++        my $mode = $before[2] & 07777;
++        if (-d _) {
++            my $key = "$before[0]:$before[1]";
++            die "Resource directory symlink cycle: $p\n" if $ancestors->{$key};
++            push @entries, {path=>$relative,kind=>'directory',mode=>$mode,link=>$link};
++            opendir my $d, $p or die "Cannot read directory $p: $!\n";
++            my @names = sort grep { $_ ne '.' && $_ ne '..' } readdir($d); closedir $d;
++            $visit->("$p/$_", "$relative/$_", {%$ancestors,$key=>1}) for @names;
++        } elsif (-f _) {
++            open my $f, '<:raw', $p or die "Cannot hash $p: $!\n";
++            my $sha = Digest::SHA->new(256)->addfile($f)->hexdigest; close $f;
++            my @after = stat($p);
++            die "Resource changed while hashing: $p\n" unless @after &&
++                join(':',@before[0,1,2,7,9]) eq join(':',@after[0,1,2,7,9]);
++            push @entries, {path=>$relative,kind=>'file',mode=>$mode,link=>$link,bytes=>$after[7],sha256=>$sha};
++        } else { die "Resource member is not regular file/directory: $p\n"; }
++    };
++    $visit->($root,'.',{}); return \@entries;
++}
++sub executable {
++    my ($name) = @_;
++    for my $d (File::Spec->path) {
++        my $p = File::Spec->catfile($d,$name);
++        return File::Spec->rel2abs($p) if -f $p && -x $p;
++    }
++    die "Required ABRicate executable not found: $name\n";
++}
++sub command {
++    my (@cmd) = @_;
++    my $err = gensym;
++    my $pid = open3(undef,my $out,$err,@cmd);
++    local $/; my $stdout=<$out> // ''; my $stderr=<$err> // '';
++    waitpid($pid,0);
++    die "Resource command failed (@cmd): $stderr\n" if $?;
++    return $stdout;
++}
++sub native_options {
++    my ($entry,@args) = @_;
++    # Evaluate the trusted installed release in a separate Perl process.
++    # Only insert a return point immediately after its original Getopt::Long
++    # parser/default assignment; no dependency or scientific command executes.
++    my $driver = <<'DRIVER';
++use strict; use JSON::PP;
++$0 = shift @ARGV;
++require FindBin; FindBin::again();
++open my $f, '<', $0 or die $!; local $/; my $source=<$f>;
++$source =~ /my \$VERSION = "1\.0\.1";/ or die "Requires ABRicate1.0.1\n";
++my $replacement=q{setOptions(); print JSON::PP->new->canonical->ascii->encode({version=>$VERSION,datadir=>$datadir,db=>$db,minid=>$minid,mincov=>$mincov,threads=>$threads,noheader=>$noheader,csv=>$csv,nopath=>$nopath,fofn=>$fofn,summary=>$summary,list=>$list,setupdb=>$setupdb,check=>$check,files=>\@ARGV}); exit;};
++my $count=($source =~ s/\bsetOptions\(\);/$replacement/);
++$count==1 or die "Cannot identify native option-parser boundary\n";
++eval $source; die $@ if $@;
++DRIVER
++    return $json->decode(command($^X,'-e',$driver,$entry,@args));
++}
++sub prefix_members {
++    my ($prefix) = @_;
++    my $dir = dirname($prefix); my $name = basename($prefix);
++    opendir my $d,$dir or die "Missing BLAST volume directory $dir: $!\n";
++    my @names = sort grep { $_ eq $name || index($_,"$name.")==0 } readdir($d); closedir $d;
++    @names or die "Missing BLAST prefix members: $prefix\n";
++    return {map { $_ => resource("$dir/$_") } @names};
++}
++sub capture {
++    my ($runtime,@args) = @_;
++    my $entry = executable('abricate');
++    my $parsed = native_options($entry,@args);
++    die "Prepare ABRicate databases with --setupdb before resource lookup\n" if $parsed->{setupdb};
++    my %tools = map { $_ => executable($_) } qw(blastn blastx makeblastdb blastdbcmd any2fasta gzip unzip);
++    my %resources = (entrypoint=>resource($entry),perl=>resource($^X),
++                     executables=>{map { $_=>resource($tools{$_}) } sort keys %tools});
++    my %locations = (entrypoint=>$entry,perl=>$^X,executables=>\%tools);
++    # Respect native --fofn precedence and Path::Tiny's exact line reader.
++    my @files = @{$parsed->{files}};
++    if ($parsed->{fofn}) {
++        require Path::Tiny;
++        $resources{fofn}=resource($parsed->{fofn});
++        @files=Path::Tiny::path($parsed->{fofn})->lines({chomp=>1});
++    }
++    $resources{inputs} = [map {resource($_)} @files];
++    if (!$parsed->{summary} && !$parsed->{check}) {
++        my $datadir = abs_path($parsed->{datadir}) or die "Missing ABRicate datadir\n";
++        $locations{datadir}=$datadir;
++        if ($parsed->{list}) { $resources{database_directory}=resource($datadir); }
++        else {
++            my $selected = "$datadir/$parsed->{db}";
++            $resources{selected_database_directory}=resource($selected);
++            my $prefix="$selected/sequences";
++            my $info=command($tools{blastdbcmd},'-info','-db',$prefix);
++            my @volumes = $info =~ /^\s*Volumes:\s*\n([\s\S]*)/m ? split(/\n/,$1) : ();
++            @volumes=grep {length} map {s/^\s+|\s+$//gr} @volumes;
++            @volumes or die "Cannot identify BLAST database volume read set: $prefix\n";
++            $resources{blast_volumes}={map { $_=>prefix_members($_) } @volumes};
++            $locations{selected_prefix}=$prefix;
++            $locations{blast_volumes}=\@volumes;
++        }
++    }
++    # Threads are in the consumer command/cache key. The probe can hash with
++    # its own CPU quota without differing solely because of that allocation.
++    delete $parsed->{threads};
++    return {schema_version=>1,tool=>'ABRicate',version=>$parsed->{version},runtime=>$runtime,
++            parsed_arguments=>$parsed,resources=>\%resources,resolved_locations=>\%locations};
++}
++my ($runtime64,$output,$verify,$execute);
++Getopt::Long::Configure('require_order','no_auto_abbrev');
++GetOptions('runtime-base64=s'=>\$runtime64,'output=s'=>\$output,'verify=s'=>\$verify,'execute!'=>\$execute) or die "Invalid resolver options\n";
++$runtime64 or die "--runtime-base64 required\n";
++my $identity=capture($json->decode(decode_base64($runtime64)),@ARGV);
++my $encoded=$json->encode($identity);
++die "ABRicate runtime resources or resolved arguments differ from pre-lookup identity\n" if defined($verify) && $json->encode($json->decode(bytes($verify))) ne $encoded;
++if (defined $output) {open my $f,'>:raw',$output or die $!; print $f "$encoded\n"; close $f;}
++if ($execute) {
++    defined($verify) or die "--execute requires verified pre-lookup receipt\n";
++    exec {$identity->{resolved_locations}{entrypoint}} $identity->{resolved_locations}{entrypoint},@ARGV;
++    die "Cannot execute ABRicate: $!\n";
++}
+diff --git a/conf/nfcore_downstream.config b/conf/nfcore_downstream.config
+--- a/conf/nfcore_downstream.config
++++ b/conf/nfcore_downstream.config
+@@ -59,7 +59,7 @@
+         publishDir = [ [path: "${params.outdir}/08_annotation/amrfinderplus", mode: params.publish_dir_mode] ]
+     }
+ 
+-    withName: 'ABRICATE' {
++    withName: 'ABRICATE|ABRICATE_RESOURCE_PROBE' {
+         ext.args   = { "--db ${params.abricate_db}" }
+         ext.prefix = { "${meta.id}.${params.abricate_db}" }
+         publishDir = [ [path: "${params.outdir}/08_annotation/abricate", mode: params.publish_dir_mode] ]
+diff --git a/lib/abricate_runtime.nf b/lib/abricate_runtime.nf
+new file mode 100644
+--- /dev/null
++++ b/lib/abricate_runtime.nf
+@@ -0,0 +1,28 @@
++/* Both script closures run before their task-cache lookup. */
++def abricateRuntime(task, engine, meta, datadir) {
++    def accelerator = task.accelerator
++    return [conda: task.conda?.toString() ?: '', container: task.container?.toString() ?: '',
++            engine: engine?.toString() ?: '',
++            accelerator: accelerator ? [request: accelerator.request, limit: accelerator.limit,
++                                         type: accelerator.type, runtime: accelerator.runtime] : null,
++            before_script: task.beforeScript ?: '', modules: task.module ?: [],
++            container_options: task.containerOptions ?: '', args: task.ext.args?.toString() ?: '',
++            datadir: datadir?.toString() ?: '', output_prefix: task.ext.prefix?.toString() ?: meta.id.toString()]
++}
++
++def abricateRequireRuntime(identity, actual) {
++    if (identity.runtime != actual)
++        throw new IllegalStateException('ABRicate resource probe/consumer runtime mismatch before cache lookup; configure ABRICATE and ABRICATE_RESOURCE_PROBE with matching conda/container/accelerator/beforeScript/modules/containerOptions')
++}
++
++def abricateRuntimeBase64(value) {
++    return groovy.json.JsonOutput.toJson(value).getBytes('UTF-8').encodeBase64().toString()
++}
++
++def abricateQuote(value) {
++    return "'" + value.toString().replace("'", "'\"'\"'") + "'"
++}
++
++def abricateResourceRecord(meta, receipt) {
++    return tuple(meta, new groovy.json.JsonSlurper().parseText(receipt.text), receipt)
++}
+diff --git a/modules/nf-core/abricate/run/main.nf b/modules/nf-core/abricate/run/main.nf
+--- a/modules/nf-core/abricate/run/main.nf
++++ b/modules/nf-core/abricate/run/main.nf
+@@ -1,4 +1,51 @@
++include { abricateRuntime; abricateRequireRuntime; abricateRuntimeBase64; abricateQuote } from '../../../../lib/abricate_runtime'
++
+ process ABRICATE_RUN {
++    cache 'deep'
++    tag "${meta.id}"
++    label 'process_medium'
++
++    conda "${moduleDir}/environment.yml"
++    container "${workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container
++        ? 'https://depot.galaxyproject.org/singularity/abricate%3A1.0.1--ha8f3691_1'
++        : 'quay.io/biocontainers/abricate:1.0.1--ha8f3691_1'}"
++
++    input:
++    tuple val(meta), path(assembly), val(runtime_identity), path(runtime_receipt)
++    path databasedir
++    path(resource_helper, stageAs: 'abricate_runtime_resources.pl')
++
++    output:
++    tuple val(meta), path("*.txt"), emit: report
++    tuple val("${task.process}"), val('abricate'), eval("abricate --version | sed 's/^.* //' "), emit: versions_abricate, topic: versions
++
++    when:
++    task.ext.when == null || task.ext.when
++
++    script:
++    def args = task.ext.args ?: ''
++    def prefix = task.ext.prefix ?: "${meta.id}"
++    def datadir = databasedir ? "--datadir ${abricateQuote(databasedir)}" : ''
++    def runtime = abricateRuntime(task, workflow.containerEngine, meta, databasedir)
++    abricateRequireRuntime(runtime_identity, runtime)
++    def runtime64 = abricateRuntimeBase64(runtime)
++    """
++    if [[ ${abricateQuote(assembly)} != ${abricateQuote(prefix + '.fasta')} ]]; then
++        ln -s ${abricateQuote(assembly)} ${abricateQuote(prefix + '.fasta')}
++    fi
++    perl abricate_runtime_resources.pl --runtime-base64 '${runtime64}' --verify ${abricateQuote(runtime_receipt)} --execute -- ${abricateQuote(prefix + '.fasta')} ${args} ${datadir} --threads ${task.cpus} > ${abricateQuote(prefix + '.txt')}
++    """
++
++    stub:
++    abricateRequireRuntime(runtime_identity, abricateRuntime(task, workflow.containerEngine, meta, databasedir))
++    def prefix = task.ext.prefix ?: "${meta.id}"
++    """
++    touch ${abricateQuote(prefix + '.txt')}
++    """
++}
++
++process ABRICATE_RESOURCE_PROBE {
++    cache false
+     tag "${meta.id}"
+     label 'process_medium'
+ 
+@@ -10,37 +57,29 @@
+     input:
+     tuple val(meta), path(assembly)
+     path databasedir
++    path(resource_helper, stageAs: 'abricate_runtime_resources.pl')
+ 
+     output:
+-    tuple val(meta), path("*.txt"), emit: report
+-    tuple val("${task.process}"), val('abricate'), eval("abricate --version | sed 's/^.* //' "), emit: versions_abricate, topic: versions
+-
++    tuple val(meta), path('abricate_runtime_identity.json'), emit: identity
+ 
+     when:
+     task.ext.when == null || task.ext.when
+ 
+     script:
+-    def args    = task.ext.args   ?: ''
+-    def prefix  = task.ext.prefix ?: "${meta.id}"
+-    def datadir = databasedir ? "--datadir ${databasedir}" : ''
++    def args = task.ext.args ?: ''
++    def prefix = task.ext.prefix ?: "${meta.id}"
++    def datadir = databasedir ? "--datadir ${abricateQuote(databasedir)}" : ''
++    def runtime64 = abricateRuntimeBase64(abricateRuntime(task, workflow.containerEngine, meta, databasedir))
+     """
+-    ## Symlink when necessary to rename the file to allow specifying the prefix variable inside report
+-    ## As the variable is what is used as the sample ID in the report file
+-    if [[ "${assembly}" != "${prefix}.fasta" ]]; then
+-        ln -s ${assembly} ${prefix}.fasta
++    if [[ ${abricateQuote(assembly)} != ${abricateQuote(prefix + '.fasta')} ]]; then
++        ln -s ${abricateQuote(assembly)} ${abricateQuote(prefix + '.fasta')}
+     fi
+-
+-    abricate \\
+-        ${prefix}.fasta \\
+-        ${args} \\
+-        ${datadir} \\
+-        --threads ${task.cpus} \\
+-        > ${prefix}.txt
++    perl abricate_runtime_resources.pl --runtime-base64 '${runtime64}' --output abricate_runtime_identity.json -- ${abricateQuote(prefix + '.fasta')} ${args} ${datadir} --threads ${task.cpus}
+     """
+ 
+     stub:
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    def encoded = abricateRuntimeBase64([schema_version:1, stub:true, runtime:abricateRuntime(task, workflow.containerEngine, meta, databasedir)])
+     """
+-    touch ${prefix}.txt
++    printf '%s' '${encoded}' | base64 -d > abricate_runtime_identity.json
+     """
+ }
+diff --git a/subworkflows/plasmid_downstream.nf b/subworkflows/plasmid_downstream.nf
+--- a/subworkflows/plasmid_downstream.nf
++++ b/subworkflows/plasmid_downstream.nf
+@@ -1,4 +1,5 @@
+ include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
++include { abricateResourceRecord } from '../lib/abricate_runtime'
+ include { isescanResourceRecord } from '../lib/isescan_runtime'
+ include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+@@ -23,7 +24,7 @@
+ include { MACSYFINDER_SEARCH as MACSYFINDER } from '../modules/nf-core/macsyfinder/search'
+ include { BAKTA_BAKTA as BAKTA } from '../modules/nf-core/bakta/bakta'
+ include { AMRFINDERPLUS_RUN as AMRFINDERPLUS } from '../modules/nf-core/amrfinderplus/run'
+-include { ABRICATE_RUN as ABRICATE } from '../modules/nf-core/abricate/run'
++include { ABRICATE_RUN as ABRICATE; ABRICATE_RESOURCE_PROBE } from '../modules/nf-core/abricate/run'
+ include { ISESCAN; ISESCAN_RESOURCE_PROBE } from '../modules/annotation/isescan'
+ include { INTEGRONFINDER } from '../modules/nf-core/integronfinder'
+ include { PRODIGAL } from '../modules/nf-core/prodigal'
+@@ -126,7 +127,11 @@
+     }
+     if (selectedTools(params.annotation_tools).contains('abricate') || selectedTools(params.annotation_optional_tools).contains('abricate')) {
+         // optional --datadir left empty; --db selected via ext.args
+-        ABRICATE(ch_plasmids, [])
++        ch_abricate_resource_helper = Channel.value(file("${moduleDir}/../bin/abricate_runtime_resources.pl", checkIfExists: true))
++        ABRICATE_RESOURCE_PROBE(ch_plasmids, [], ch_abricate_resource_helper)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: ABRICATE_RESOURCE_PROBE.out], '08_annotation', 'ABRICATE_RESOURCE_PROBE'))
++        ch_abricate_identity = ABRICATE_RESOURCE_PROBE.out.identity.map { meta, receipt -> abricateResourceRecord(meta, receipt) }
++        ABRICATE(ch_plasmids.join(ch_abricate_identity, failOnDuplicate: true, failOnMismatch: true), [], ch_abricate_resource_helper)
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: ABRICATE.out], '08_annotation', 'ABRICATE'))
+     }
+     if (selectedTools(params.annotation_tools).contains('isescan')) {
+diff --git a/tests/nextflow/abricate_runtime_native.nf b/tests/nextflow/abricate_runtime_native.nf
+new file mode 100644
+--- /dev/null
++++ b/tests/nextflow/abricate_runtime_native.nf
+@@ -0,0 +1,11 @@
++nextflow.enable.dsl=2
++include { abricateResourceRecord } from '../../lib/abricate_runtime'
++include { ABRICATE_RUN as ABRICATE; ABRICATE_RESOURCE_PROBE } from '../../modules/nf-core/abricate/run'
++workflow {
++    def sequence = Channel.value(tuple([id:'sample'],file(params.fasta,checkIfExists:true)))
++    def helper = Channel.value(file("${moduleDir}/../../bin/abricate_runtime_resources.pl",checkIfExists:true))
++    def database = params.datadir ? Channel.value(file(params.datadir,checkIfExists:true)) : Channel.value([])
++    ABRICATE_RESOURCE_PROBE(sequence, database, helper)
++    def identity = ABRICATE_RESOURCE_PROBE.out.identity.map { meta, receipt -> abricateResourceRecord(meta, receipt) }
++    ABRICATE(sequence.join(identity,failOnDuplicate:true,failOnMismatch:true),database,helper)
++}
+diff --git a/tests/run_abricate_runtime_native.py b/tests/run_abricate_runtime_native.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_abricate_runtime_native.py
+@@ -0,0 +1,174 @@
++#!/usr/bin/env python3
++"""Full original ABRicate fixture: production runtime identity and cache controls."""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++from module_harness import run_session_uuid
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def sha(p):
++    return hashlib.sha256(p.read_bytes()).hexdigest()
++
++
++def records(p):
++    return list(csv.DictReader(p.open(), delimiter='\t'))
++
++
++def run(base, prefix, fixture, golden):
++    base.mkdir(parents=True, exist_ok=False)
++    private = base / 'private'
++    (private / 'bin').mkdir(parents=True)
++    shutil.copy2(prefix / 'bin/abricate', private / 'bin/abricate')
++    for name in ['ncbi', 'plasmidfinder']:
++        shutil.copytree(prefix / 'db' / name, private / 'db' / name)
++    alias = private / 'db/alias'
++    alias.mkdir()
++    subprocess.run([str(prefix / 'bin/blastdb_aliastool'), '-dblist', str(private / 'db/ncbi/sequences'),
++                    '-dbtype', 'nucl', '-out', str(alias / 'sequences'), '-title', 'original full ncbi alias'], check=True,
++                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
++    watched = [private / 'bin/abricate', *sorted((private / 'db/ncbi').iterdir()),
++               *sorted((private / 'db/plasmidfinder').iterdir())]
++    originals = {p: (p.read_bytes(), p.stat()) for p in watched}
++    for p in watched:
++        original = prefix / p.relative_to(private)
++        assert sha(p) == sha(original)
++        assert (p.stat().st_dev, p.stat().st_ino) != (original.stat().st_dev, original.stat().st_ino)
++    header = private / 'db/ncbi/sequences.nhr'
++    original = header.read_bytes()
++    target = b'penicillinase repressor BlaI'
++    assert original.count(target) == 1
++    changed = original.replace(target, b'Penicillinase repressor BlaI')
++    assert len(original) == len(changed)
++    sources = ['tests/run_abricate_runtime_native.py', 'tests/nextflow/abricate_runtime_native.nf',
++               'bin/abricate_runtime_resources.pl', 'lib/abricate_runtime.nf',
++               'modules/nf-core/abricate/run/main.nf', 'conf/nfcore_downstream.config']
++    before = {p: sha(ROOT / p) for p in sources}
++    env = dict(os.environ, PATH=str(private / 'bin') + ':' + str(prefix / 'bin') + ':' + os.environ['PATH'])
++    params = dict(fasta=str(fixture), datadir=None, abricate_db='ncbi', outdir=str(base / 'out'), publish_dir_mode='copy')
++    config = base / 'config'
++    positive = "includeConfig '" + str(ROOT / 'conf/nfcore_downstream.config') + "'\nprocess { executor='local'; cpus=2; memory='2 GB'; errorStrategy='terminate'; maxRetries=0 }\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\n"
++    config.write_text(positive)
++    expected = records(golden)
++    assert len(expected) == 5
++    runs = []
++    session = None
++
++    def execute(name, status, modified=False):
++        nonlocal session
++        case = base / name
++        case.mkdir()
++        (base / 'params.json').write_text(json.dumps(params))
++        trace = case / 'trace.tsv'
++        cmd = [str(ROOT / 'results/tool-audit/runtime/bin/nextflow'), '-C', str(config), 'run',
++               str(ROOT / 'tests/nextflow/abricate_runtime_native.nf'), '-params-file', str(base / 'params.json'),
++               '-work-dir', str(base / 'work'), '-with-trace', str(trace), '-ansi-log', 'false']
++        cmd += ['-name', 'abricate_runtime_native'] if session is None else ['-resume', session]
++        result = subprocess.run(cmd, cwd=base, env=env, capture_output=True, text=True, timeout=180)
++        (case / 'stdout').write_text(result.stdout)
++        (case / 'stderr').write_text(result.stderr)
++        tasks = records(trace) if trace.exists() else []
++        row = dict(case=name, command=cmd, exit_code=result.returncode, tasks=tasks,
++                   private_header_sha256=sha(header) if header.exists() else None)
++        runs.append(row)
++        (base / 'progress.json').write_text(json.dumps(runs, indent=2) + '\n')
++        if status in ['PROBE_FAILED', 'CONTEXT_REFUSED']:
++            assert result.returncode != 0 and len(tasks) == 1, row
++            assert tasks[0]['name'].startswith('ABRICATE_RESOURCE_PROBE'), row
++            assert tasks[0]['status'] == ('FAILED' if status == 'PROBE_FAILED' else 'COMPLETED'), row
++            if status == 'CONTEXT_REFUSED':
++                assert 'runtime mismatch before cache lookup' in result.stdout + result.stderr
++            row['no_consumer_submitted'] = True
++        else:
++            assert result.returncode == 0 and len(tasks) == 2, row
++            probe = next(t for t in tasks if t['name'].startswith('ABRICATE_RESOURCE_PROBE'))
++            consumer = next(t for t in tasks if t['name'].startswith('ABRICATE ('))
++            assert probe['status'] == 'COMPLETED' and consumer['status'] == status, row
++            identity_path = Path(probe['workdir']) / 'abricate_runtime_identity.json'
++            identity = json.loads(identity_path.read_text())
++            assert identity['resolved_locations']['datadir'] == str(private / 'db')
++            assert identity['resolved_locations']['blast_volumes'] == [str(private / 'db/ncbi/sequences')]
++            if params['abricate_db'] == 'alias':
++                assert identity['resolved_locations']['selected_prefix'] == str(alias / 'sequences')
++                row['external_alias_volume_recorded'] = True
++            row.update(consumer_hash=consumer['hash'], identity_sha256=sha(identity_path))
++            report = Path(consumer['workdir']) / ('sample.' + params['abricate_db'] + '.txt')
++            observed = records(report)
++            wanted = [dict(r) for r in expected]
++            for r in wanted:
++                r['#FILE'] = 'sample.' + params['abricate_db'] + '.fasta'
++                if modified and r['PRODUCT'] == 'penicillinase repressor BlaI':
++                    r['PRODUCT'] = 'Penicillinase repressor BlaI'
++            assert observed == wanted, (name, observed, wanted)
++            row.update(full_native_report_equal_expected=True, hits=len(observed), native_report_sha256=sha(report))
++        if session is None:
++            session = run_session_uuid('abricate_runtime_native', base)
++        print(name, status, flush=True)
++
++    def restore():
++        for p, (data, st) in originals.items():
++            p.write_bytes(data)
++            p.chmod(st.st_mode & 0o7777)
++            os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
++
++    def mutate():
++        header.write_bytes(changed)
++        st = originals[header][1]
++        os.utime(header, ns=(st.st_atime_ns, st.st_mtime_ns))
++        assert header.stat().st_size == st.st_size and header.stat().st_mtime_ns == st.st_mtime_ns
++
++    try:
++        execute('cold', 'COMPLETED')
++        execute('unchanged', 'CACHED')
++        mutate()
++        execute('header-change', 'COMPLETED', True)
++        restore()
++        execute('header-restored', 'CACHED')
++        params['datadir'] = str(private / 'db')
++        execute('explicit-datadir', 'COMPLETED')
++        execute('explicit-datadir-unchanged', 'CACHED')
++        params['datadir'] = None
++        params['abricate_db'] = 'alias'
++        execute('alias-cold', 'COMPLETED')
++        mutate()
++        execute('external-alias-header-change', 'COMPLETED', True)
++        restore()
++        execute('external-alias-restored', 'CACHED')
++        header.unlink()
++        execute('external-alias-missing-header', 'PROBE_FAILED')
++    finally:
++        restore()
++    execute('all-restored', 'CACHED')
++    for field, override in [('args', "ext.args='--db plasmidfinder'"), ('beforeScript', "beforeScript='export ABRICATE_CONTEXT_ONLY=1'")]:
++        config.write_text(positive + "\nprocess { withName: 'ABRICATE' { " + override + " } }\n")
++        execute('mismatch-' + field, 'CONTEXT_REFUSED')
++    config.write_text(positive)
++    assert runs[0]['consumer_hash'] == runs[1]['consumer_hash'] == runs[3]['consumer_hash']
++    assert runs[6]['consumer_hash'] == runs[8]['consumer_hash'] == runs[10]['consumer_hash']
++    for p in watched:
++        actual = prefix / p.relative_to(private)
++        assert sha(p) == sha(actual)
++        assert (p.stat().st_mode & 0o7777) == (actual.stat().st_mode & 0o7777)
++    assert before == {p: sha(ROOT / p) for p in sources}
++    receipt = dict(pass_checks=True, runs=runs, session_uuid=session, source_sha256=before, source_unchanged=True,
++                   resources_restored=True, original_resource_sha256={str(p.relative_to(private)):sha(p) for p in watched},
++                   fixture_sha256=sha(fixture), native_original_report_sha256=sha(golden),
++                   scope='Actual production ABRicate1.0.1+actual production config selector, full original2521797-byte fixture/full original5386 ncbi DB. Real header annotation equal-size/mtime change modifies precisely expected PRODUCT; restore/cache and external BLAST alias volume, explicit datadir, context controls. Native software-output baseline; no biological accuracy/full environment/OCI/provider/full-main certification.')
++    (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
++    print('PASS: production ABRicate database resources/cache', flush=True)
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--out', type=Path, required=True)
++    parser.add_argument('--prefix', type=Path, required=True)
++    parser.add_argument('--fixture', type=Path, required=True)
++    parser.add_argument('--golden', type=Path, required=True)
++    args = parser.parse_args()
++    run(args.out.resolve(), args.prefix.resolve(), args.fixture.resolve(), args.golden.resolve())

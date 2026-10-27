@@ -1,0 +1,100 @@
+{
+  "run_id": "20261026-resource-identity-enumeration",
+  "result": "bounded_candidate_pass_not_accepted",
+  "git_head": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "source_sha256": {
+    "lib/ResourceIdentity.groovy": "4a419d37d9d6df00afa5462576471d7b6625a1ed31488eaaaade67ed246959ce",
+    "subworkflows/plasmid_detection.nf": "b740171e5e30c90ad544803c37eec911de40c9680fe8dbf54e0b081a035efa0f",
+    "subworkflows/plasmid_downstream.nf": "360cb20af72673a8b4b61729970255d2e5d0dd9068cb5c4f0c8d72246452f397",
+    "modules/nf-core/genomad/endtoend/main.nf": "7931deef22b31fbd0a49e8dea0a39ab2a486e14be8fd294e439d63c94ea026ce",
+    "modules/detection/plasme.nf": "5a1fda006ad4f31de113300b1b15bbc7e85bf3eed1ce541b6a42b3736ccae365",
+    "modules/typing/copla.nf": "a6045bdf8fc6d22b318cc93fa4c6065f80898435167c5e9020ee0e54c16f5632",
+    "tests/nextflow/resource_identity.nf": "b1b71faf95c13dc82b970f070dd20de12387ca2db1a770d70656c80fffe495ec",
+    "tests/nextflow/plasme_native.nf": "5f475fc733932884ada74797257f0bf962acf965291010e220db65a59ea17981",
+    "tests/nextflow/copla_native.nf": "16d4619d6645b9b53ceb90570bc0d100d53389369a6c56eca57c9663d022b766",
+    "tests/run_resource_identity.py": "c5a506efccf75b0ddfb4ee9de0baf70236557ff036d68ba3a01e3b3ec91d5c01",
+    "tests/run_detection_selection.py": "e852598843d42d9468e1d14bffad1a8a9b535532db7e6b3806817994e6f38720",
+    "tests/nextflow/detection_selection.nf": "b687ca64be8b834ff00a95ec0e3c962a96a49795722a694ed81421c63ffa6427",
+    "docs/tool-audit/resource-directory-consumers.tsv": "1f859ce8ff69beb3679e55e39aa5b89fe83eb17326718a5f9880e940fabfab92",
+    "results/tool-audit/20261026-resource-identity/run-genomad.py": "bbfb3c3b141adca5112300fe4ce22e586aae4ac8c5c8504400c2e5ef04272d9e",
+    "results/tool-audit/20261026-resource-identity/run-tool.py": "77f8709141088991fac7bd3e3d4211b6e4d8cc6144591b16de40045eecdef627"
+  },
+  "checks": {
+    "final-controls": {
+      "path": "results/tool-audit/20261026-resource-identity/final-controls/run.json",
+      "sha256": "81f9c3db2074d51b0ec44d68a841f901339d440e1d5894b1548b9af64e7191e6",
+      "trace_counts": {
+        "COMPLETED": 9,
+        "CACHED": 7
+      },
+      "cases": 16,
+      "scope": "Actual Groovy fingerprint implementation vs independent Python oracle; synthetic byte fixtures and native cat cache observer only, not biological tools/model accuracy/OCI/cloud.",
+      "property_cases": 22
+    },
+    "genomad-native": {
+      "path": "results/tool-audit/20261026-resource-identity/genomad-native/run.json",
+      "sha256": "6c75e851a3fe1daea9875eb6403dd79276fef1e797062a2d4451223ad04aa86c",
+      "trace_counts": {
+        "COMPLETED": 1,
+        "CACHED": 2,
+        "FAILED": 1
+      },
+      "cases": 4,
+      "scope": "Current geNomad module with compact pre-lookup recursive content fingerprints; genuine1.12.0/fullDB1.9/default neural inference plus explicit16 resource splits. Same-size/mtime invalid version reruns and real CLI fails; restoration reuses the valid original cache. No shared resource mutation, no accuracy/OCI/platform certification."
+    },
+    "plasme-native": {
+      "path": "results/tool-audit/20261026-resource-identity/plasme-native/run.json",
+      "sha256": "1f66ba02007e30b9dc1d0633c221656c2bbe5939cd33c95a528d819121741f3c",
+      "trace_counts": {
+        "COMPLETED": 1,
+        "CACHED": 2,
+        "FAILED": 1
+      },
+      "cases": 4,
+      "scope": "Real current full-model classifier; explicit pre-lookup recursive content fingerprints. Same-size/mtime private source corruption reruns and fails; original valid cache restored. No shared installation changed; no accuracy/full platform/OCI certification."
+    },
+    "detection-routing-v2": {
+      "path": "results/tool-audit/20261026-resource-identity/detection-routing-v2/run.json",
+      "sha256": "fb8725e07114c8138952a7777d1aa42ae7b7e95ea7cc95f9adef9aa9df30faff",
+      "trace_counts": {
+        "COMPLETED": 28
+      },
+      "cases": 3,
+      "scope": [
+        "classifier CLI observers including explicit Platon and both PlasX stages checked-runtime/validator Python transport; production annotation, auditor, classifier, and format validation are NOT evaluated by this routing test",
+        "native original full detection subworkflow and R consumers; no classifier inference, real DB/models, image or scientific accuracy"
+      ]
+    }
+  },
+  "copla_inspection": {
+    "path": "results/tool-audit/20261026-resource-identity/copla-timeout-inspection.json",
+    "sha256": "5143fd5e033614be42ce940eda101fdedf218d0881e50fa2a0c892591edc703d",
+    "reference_count": 9894,
+    "partial_ani_status_count_candidate_2": 2091,
+    "completed_task": false,
+    "retry_started": false
+  },
+  "consumer_resource_pairs": 39,
+  "scope": "POSIX content/layout/cache diagnostic. Current compact callers only; other declared and implicit consumers remain pending. Not a scientific accuracy, OCI, AWS or whole-pipeline acceptance.",
+  "attempts": [
+    {
+      "path": "results/tool-audit/20261026-resource-identity/initial-controls/run.json",
+      "result": "passed-v1-intermediate-not-current-source"
+    },
+    {
+      "path": "results/tool-audit/20261026-resource-identity/boundary-controls/run.json",
+      "result": "passed-20-properties-intermediate-test-source"
+    },
+    {
+      "path": "results/tool-audit/20261026-resource-identity/detection-routing",
+      "result": "not-launched",
+      "error": "FileNotFoundError: nextflow not present in default PATH",
+      "resolution": "Retry in detection-routing-v2 with existing pinned Nextflow runtime/bin in PATH"
+    }
+  ],
+  "remaining": [
+    "COPLA full two-candidate cold and mutation/restoration controls with longer budget",
+    "Other directory consumers and implicit model/environment identities",
+    "Independent whole-TA-091 acceptance; all S2/full workflow/platform/OCI/AWS goals unchanged"
+  ]
+}

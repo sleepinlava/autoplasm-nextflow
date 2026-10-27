@@ -1,0 +1,1364 @@
+diff --git a/bin/isescan_runtime_resources.py b/bin/isescan_runtime_resources.py
+new file mode 100644
+--- /dev/null
++++ b/bin/isescan_runtime_resources.py
+@@ -0,0 +1,156 @@
++#!/usr/bin/env python3
++"""ISEScan1.7.3 runtime read-set identity; fixed default scientific arguments."""
++import argparse
++import ast
++import base64
++import ctypes
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import stat
++import sys
++
++
++def resource(path):
++    """Content/layout identity; reject incomplete, cyclic or special resources."""
++    root = Path(path)
++    entries = []
++
++    def visit(p, relative, ancestors):
++        link = os.readlink(p) if p.is_symlink() else None
++        before = p.stat()
++        mode = stat.S_IMODE(before.st_mode)
++        if stat.S_ISDIR(before.st_mode):
++            key = (before.st_dev, before.st_ino)
++            if key in ancestors:
++                raise ValueError('Resource directory symlink cycle: ' + str(p))
++            entries.append(dict(path=relative, kind='directory', mode=mode, link=link))
++            for child in sorted(p.iterdir(), key=lambda x: x.name):
++                visit(child, relative + '/' + child.name, ancestors | {key})
++        elif stat.S_ISREG(before.st_mode):
++            digest = hashlib.sha256()
++            with p.open('rb') as stream:
++                for block in iter(lambda: stream.read(1024 * 1024), b''):
++                    digest.update(block)
++            after = p.stat()
++            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
++                    before.st_mode) != (after.st_dev, after.st_ino, after.st_size,
++                                        after.st_mtime_ns, after.st_mode):
++                raise ValueError('Resource changed while hashing: ' + str(p))
++            entries.append(dict(path=relative, kind='file', bytes=after.st_size,
++                                sha256=digest.hexdigest(), mode=mode, link=link))
++        else:
++            raise ValueError('Resource member is not regular file/directory: ' + str(p))
++
++    visit(root, '.', set())
++    return entries
++
++
++ISESCAN_SOURCE = ['isescan.py', 'constants.py', 'isPredict.py', 'is_analysis.py',
++                  'pred.py', 'tools.py', 'ssw_wrap.py', 'pyssw.py']
++
++
++def executable(name):
++    value = shutil.which(name)
++    if value is None:
++        raise ValueError('Required ISEScan executable not found: ' + name)
++    return Path(value).absolute()
++
++
++def loaded_ssw_path():
++    # Resolve the object containing the same symbol used by ssw_wrap.Aligner.
++    # Ask the dynamic loader; do not assume prefix/lib, procfs paths, or
++    # that LD_LIBRARY_PATH wins over an interpreter RPATH.
++    library = ctypes.CDLL('libssw.so')
++    class DlInfo(ctypes.Structure):
++        _fields_ = [('filename',ctypes.c_char_p),('base',ctypes.c_void_p),
++                    ('symbol',ctypes.c_char_p),('address',ctypes.c_void_p)]
++    loader = ctypes.CDLL(None)
++    function = loader.dladdr
++    function.argtypes = [ctypes.c_void_p,ctypes.POINTER(DlInfo)]
++    function.restype = ctypes.c_int
++    info = DlInfo()
++    address = ctypes.cast(library.ssw_init,ctypes.c_void_p)
++    if function(address,ctypes.byref(info)) == 0 or info.filename is None:
++        raise ValueError('Cannot identify the loaded ISEScan SSW object')
++    return Path(os.fsdecode(info.filename)).resolve(strict=True)
++
++
++def capture(runtime, seqfile, result_prefix):
++    entry = executable('isescan.py')
++    source_root = entry.resolve().parent
++    version = None
++    for node in ast.parse(entry.read_text()).body:
++        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'version' for t in node.targets):
++            version = ast.literal_eval(node.value)
++    if version != '1.7.3':
++        raise ValueError('ISEScan runtime resolver requires native1.7.3, found ' + str(version))
++    # constants derives pHMM locations from sys.argv[0], not __file__.
++    original_argv = sys.argv
++    try:
++        sys.argv = [str(entry)]
++        constants_path = source_root / 'constants.py'
++        constants = {'__file__': str(constants_path), '__name__': 'isescan_resource_constants'}
++        # runpy.run_path temporarily overwrites argv[0] with constants.py.
++        # Execute this trusted fixed-tool module with the actual CLI argv[0].
++        exec(compile(constants_path.read_bytes(), str(constants_path), 'exec'), constants)
++    finally:
++        sys.argv = original_argv
++    wrapper = executable(constants['FragGeneScan'])
++    # Fixed FragGeneScan1.32 Perl wrapper and C run_hmm.c derive train/ from
++    # argv[0]. Include all17 files, covering both illumina_5 and shared tables.
++    frag = wrapper.parent / 'FragGeneScan'
++    ssw = loaded_ssw_path()
++    tools = {key: executable(constants[key]) for key in ['phmmer','hmmsearch','blastn','blastp','makeblastdb']}
++    interpreters = {name: executable(name) for name in ['python3','perl']}
++    resources = dict(
++        source={name: resource(source_root / name) for name in ISESCAN_SOURCE},
++        sequence=resource(seqfile),
++        phmmer_sequences=resource(constants['file4clusterSeqFile4phmmer']),
++        hmm_profiles=resource(constants['file4clusterHMM']),
++        fraggenescan_wrapper=resource(wrapper),
++        fraggenescan_binary=resource(frag),
++        fraggenescan_training=resource(wrapper.parent / 'train'),
++        ssw_loaded_object=resource(ssw),
++        executables={key: resource(path) for key,path in tools.items()},
++        interpreters={name: resource(path) for name,path in interpreters.items()})
++    return dict(schema_version=1, tool='ISEScan', version=version, runtime=runtime,
++                scientific_arguments=dict(seqfile=str(seqfile), output=str(result_prefix)),
++                resolved_locations=dict(entrypoint=str(entry), source_directory=str(source_root),
++                    phmmer_sequences=constants['file4clusterSeqFile4phmmer'],
++                    hmm_profiles=constants['file4clusterHMM'],
++                    fraggenescan_wrapper=str(wrapper), fraggenescan_binary=str(frag),
++                    fraggenescan_training=str(wrapper.parent/'train'), ssw_loaded_object=str(ssw),
++                    executables={key:str(path) for key,path in tools.items()},
++                    interpreters={key:str(path) for key,path in interpreters.items()}),
++                resources=resources)
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--runtime-base64', required=True)
++    parser.add_argument('--seqfile', required=True)
++    parser.add_argument('--result-prefix', required=True)
++    parser.add_argument('--threads', type=int, required=True)
++    parser.add_argument('--output', type=Path)
++    parser.add_argument('--verify', type=Path)
++    parser.add_argument('--execute', action='store_true')
++    args = parser.parse_args()
++    runtime = json.loads(base64.b64decode(args.runtime_base64).decode('utf-8'))
++    identity = capture(runtime, args.seqfile, args.result_prefix)
++    if args.verify is not None and json.loads(args.verify.read_text()) != identity:
++        raise ValueError('ISEScan runtime resources differ from pre-lookup identity')
++    if args.output is not None:
++        args.output.write_text(json.dumps(identity, sort_keys=True, ensure_ascii=True, separators=(',', ':')) + '\n')
++    if args.execute:
++        if args.verify is None:
++            raise ValueError('--execute requires verified pre-lookup identity')
++        entry = executable('isescan.py')
++        os.execv(str(entry), [str(entry), '--seqfile', args.seqfile,
++                             '--output', args.result_prefix, '--nthread', str(args.threads)])
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/envs/isescan.yml b/envs/isescan.yml
+new file mode 100644
+--- /dev/null
++++ b/envs/isescan.yml
+@@ -0,0 +1,7 @@
++name: autoplasm-isescan
++channels:
++  - conda-forge
++  - bioconda
++dependencies:
++  - bioconda::isescan=1.7.3
++  - bioconda::fraggenescan=1.32
+diff --git a/lib/isescan_runtime.nf b/lib/isescan_runtime.nf
+new file mode 100644
+--- /dev/null
++++ b/lib/isescan_runtime.nf
+@@ -0,0 +1,27 @@
++/* Both script closures run before their task-cache lookup. */
++def isescanRuntime(task, engine, meta) {
++    def accelerator = task.accelerator
++    return [conda: task.conda?.toString() ?: '', container: task.container?.toString() ?: '',
++            engine: engine?.toString() ?: '',
++            accelerator: accelerator ? [request: accelerator.request, limit: accelerator.limit,
++                                         type: accelerator.type, runtime: accelerator.runtime] : null,
++            before_script: task.beforeScript ?: '', modules: task.module ?: [],
++            container_options: task.containerOptions ?: '', output_prefix: "${meta.id}.isescan_out".toString()]
++}
++
++def isescanRequireRuntime(identity, actual) {
++    if (identity.runtime != actual)
++        throw new IllegalStateException('ISEScan resource probe/consumer runtime mismatch before cache lookup; configure ISESCAN and ISESCAN_RESOURCE_PROBE with matching conda/container/accelerator/beforeScript/modules/containerOptions')
++}
++
++def isescanRuntimeBase64(value) {
++    return groovy.json.JsonOutput.toJson(value).getBytes('UTF-8').encodeBase64().toString()
++}
++
++def isescanQuote(value) {
++    return "'" + value.toString().replace("'", "'\"'\"'") + "'"
++}
++
++def isescanResourceRecord(meta, receipt) {
++    return tuple(meta, new groovy.json.JsonSlurper().parseText(receipt.text), receipt)
++}
+diff --git a/modules/annotation/isescan.nf b/modules/annotation/isescan.nf
+--- a/modules/annotation/isescan.nf
++++ b/modules/annotation/isescan.nf
+@@ -1,24 +1,66 @@
+-/*
+- * ISEScan insertion sequence detection (pipeline step: annotation_isescan;
+- * enabled by default).
+- */
++include { isescanRuntime; isescanRequireRuntime; isescanRuntimeBase64; isescanQuote } from '../../lib/isescan_runtime'
++
++/* Fixed native1.7.3; resources are resolved before the scientific cache lookup. */
+ process ISESCAN {
++    cache 'deep'
+     tag { meta.id }
+     label 'process_medium'
+-    conda "${projectDir}/envs/annotation.yml"
++    conda "${projectDir}/envs/isescan.yml"
+     container 'quay.io/biocontainers/isescan:1.7.3--hab16a5f_1'
+-
+     publishDir "${params.outdir}/08_annotation/isescan", mode: params.publish_dir_mode
+ 
+     input:
+-    tuple val(meta), path(plasmid_contigs)
++    tuple val(meta), path(plasmid_contigs), val(runtime_identity), path(runtime_receipt)
++    path(resource_helper, stageAs: 'isescan_runtime_resources.py')
+ 
+     output:
+     tuple val(meta), path("${meta.id}.isescan_out", type: 'dir'), emit: results
+ 
+     script:
++    def runtime = isescanRuntime(task, workflow.containerEngine, meta)
++    isescanRequireRuntime(runtime_identity, runtime)
++    def runtime64 = isescanRuntimeBase64(runtime)
++    def seqfile = isescanQuote(plasmid_contigs)
++    def prefix = isescanQuote("${meta.id}.isescan_out")
+     """
+-    isescan.py --seqfile ${plasmid_contigs} --output ${meta.id}.isescan_out \\
+-        --nthread ${task.cpus}
++    python3 isescan_runtime_resources.py --runtime-base64 '${runtime64}' --seqfile ${seqfile} --result-prefix ${prefix} --threads ${task.cpus} --verify ${runtime_receipt} --execute
++    """
++
++    stub:
++    isescanRequireRuntime(runtime_identity, isescanRuntime(task, workflow.containerEngine, meta))
++    def prefix = isescanQuote("${meta.id}.isescan_out")
++    """
++    mkdir -p ${prefix}
++    printf '%s\n' '{"state":"stub_not_validated","inference":false}' > ${prefix}/isescan_stub.json
+     """
+ }
++
++process ISESCAN_RESOURCE_PROBE {
++    cache false
++    tag { meta.id }
++    label 'process_medium'
++    conda "${projectDir}/envs/isescan.yml"
++    container 'quay.io/biocontainers/isescan:1.7.3--hab16a5f_1'
++
++    input:
++    tuple val(meta), path(plasmid_contigs)
++    path(resource_helper, stageAs: 'isescan_runtime_resources.py')
++
++    output:
++    tuple val(meta), path('isescan_runtime_identity.json'), emit: identity
++
++    script:
++    def runtime64 = isescanRuntimeBase64(isescanRuntime(task, workflow.containerEngine, meta))
++    def seqfile = isescanQuote(plasmid_contigs)
++    def prefix = isescanQuote("${meta.id}.isescan_out")
++    """
++    python3 isescan_runtime_resources.py --runtime-base64 '${runtime64}' --seqfile ${seqfile} --result-prefix ${prefix} --threads ${task.cpus} --output isescan_runtime_identity.json
++    """
++
++    stub:
++    def identity = [schema_version: 1, stub: true, runtime: isescanRuntime(task, workflow.containerEngine, meta)]
++    def encoded = isescanRuntimeBase64(identity)
++    """
++    printf '%s' '${encoded}' | base64 -d > isescan_runtime_identity.json
++    """
++}
+diff --git a/subworkflows/plasmid_downstream.nf b/subworkflows/plasmid_downstream.nf
+--- a/subworkflows/plasmid_downstream.nf
++++ b/subworkflows/plasmid_downstream.nf
+@@ -1,4 +1,5 @@
+ include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
++include { isescanResourceRecord } from '../lib/isescan_runtime'
+ include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+@@ -23,7 +24,7 @@
+ include { BAKTA_BAKTA as BAKTA } from '../modules/nf-core/bakta/bakta'
+ include { AMRFINDERPLUS_RUN as AMRFINDERPLUS } from '../modules/nf-core/amrfinderplus/run'
+ include { ABRICATE_RUN as ABRICATE } from '../modules/nf-core/abricate/run'
+-include { ISESCAN } from '../modules/annotation/isescan'
++include { ISESCAN; ISESCAN_RESOURCE_PROBE } from '../modules/annotation/isescan'
+ include { INTEGRONFINDER } from '../modules/nf-core/integronfinder'
+ include { PRODIGAL } from '../modules/nf-core/prodigal'
+ include { PROTEIN_INPUTS } from '../modules/annotation/protein_inputs'
+@@ -129,7 +130,11 @@
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: ABRICATE.out], '08_annotation', 'ABRICATE'))
+     }
+     if (selectedTools(params.annotation_tools).contains('isescan')) {
+-        ISESCAN(ch_plasmids)
++        ch_isescan_resource_helper = Channel.value(file("${moduleDir}/../bin/isescan_runtime_resources.py", checkIfExists: true))
++        ISESCAN_RESOURCE_PROBE(ch_plasmids, ch_isescan_resource_helper)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: ISESCAN_RESOURCE_PROBE.out], '08_annotation', 'ISESCAN_RESOURCE_PROBE'))
++        ch_isescan_identity = ISESCAN_RESOURCE_PROBE.out.identity.map { meta, receipt -> isescanResourceRecord(meta, receipt) }
++        ISESCAN(ch_plasmids.join(ch_isescan_identity, failOnDuplicate: true, failOnMismatch: true), ch_isescan_resource_helper)
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: ISESCAN.out], '08_annotation', 'ISESCAN'))
+     }
+     if (selectedTools(params.annotation_tools).contains('integronfinder')) {
+diff --git a/tests/isescan-native.lock.json b/tests/isescan-native.lock.json
+new file mode 100644
+--- /dev/null
++++ b/tests/isescan-native.lock.json
+@@ -0,0 +1,687 @@
++{
++  "schema_version": 1,
++  "platform": "linux-64",
++  "scope": "Exact local native test installation and full unmodified upstream fixture; not a universal environment lock or biological truth.",
++  "packages": [
++    {
++      "name": "libgomp",
++      "version": "16.2.0",
++      "build": "he0feb66_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libgomp-16.2.0-he0feb66_7.conda",
++      "sha256": "92a0bb350c7be6a4eedcb4e111c60aefd176018e6b1c009a6e025dbe9bbcd758",
++      "md5": "d904c7ddd95e026254b4b80808ee9e12"
++    },
++    {
++      "name": "libzlib",
++      "version": "1.3.2",
++      "build": "h25fd6f3_3",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda",
++      "sha256": "eb8a0db0aa570124f7d2a93d7c7f596e3390df5e047818d873baad32985fc736",
++      "md5": "0de0122d9570a8ab637c6b73db268389"
++    },
++    {
++      "name": "mpi",
++      "version": "1.0",
++      "build": "openmpi",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/mpi-1.0-openmpi.tar.bz2",
++      "sha256": "54cf44ee2c122bce206f834a825af06e3b14fc4fd58c968ae9329715cc281d1e",
++      "md5": "1dcc49e16749ff79ba2194fa5d4ca5e7"
++    },
++    {
++      "name": "_openmp_mutex",
++      "version": "4.5",
++      "build": "20_gnu",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda",
++      "sha256": "1dd3fffd892081df9726d7eb7e0dea6198962ba775bd88842135a4ddb4deb3c9",
++      "md5": "a9f577daf3de00bca7c3c76c0ecbd1de"
++    },
++    {
++      "name": "zstd",
++      "version": "1.5.7",
++      "build": "hb78ec9c_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_7.conda",
++      "sha256": "47d682b9f6d6ec9eb1a6e6c3e75ea6273e899e78fb7fc59f81d39745009fbc60",
++      "md5": "aa459086047c0e5e27023ab19f8cb86a"
++    },
++    {
++      "name": "zlib",
++      "version": "1.3.2",
++      "build": "h25fd6f3_3",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/zlib-1.3.2-h25fd6f3_3.conda",
++      "sha256": "16080a1c7724f7d25727cdc23c7658e0cec2db52448c1dc0c33467ee2c6e1c62",
++      "md5": "6acb86426229f96f93e5468d1df3a5e8"
++    },
++    {
++      "name": "libgcc",
++      "version": "16.2.0",
++      "build": "ha9f2e26_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda",
++      "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea",
++      "md5": "735629b400b70eeab21a2ba8f5b1c2ce"
++    },
++    {
++      "name": "ld_impl_linux-64",
++      "version": "2.46.1",
++      "build": "default_hbd61a6d_103",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.46.1-default_hbd61a6d_103.conda",
++      "sha256": "901649b1edbe841fd4ee7e2d491a05184ed540eb01cdae506872f344babc1d28",
++      "md5": "2362c70e7e79827c32db35547d9c179b"
++    },
++    {
++      "name": "tk",
++      "version": "8.6.13",
++      "build": "noxft_h1df4ec4_4",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h1df4ec4_4.conda",
++      "sha256": "a1a241d172c1ccab067ba245206dd048bc3c2d1b84504b53c9468e99adfc16a1",
++      "md5": "676a2f9b1c4fcf57b70aa5c65f6c60d0"
++    },
++    {
++      "name": "libmpdec",
++      "version": "4.0.0",
++      "build": "hb03c661_2",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libmpdec-4.0.0-hb03c661_2.conda",
++      "sha256": "46820b4a835e175940ae20bec00fdddaff804cda27a1408ab1b95e77a2196437",
++      "md5": "fcfed1dc5053eb1901b66e7b1fc32588"
++    },
++    {
++      "name": "liblzma",
++      "version": "5.8.3",
++      "build": "hb03c661_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/liblzma-5.8.3-hb03c661_1.conda",
++      "sha256": "9787df8c22a59c9a70d3e5a10db9ad663485e75e9ccc3f09bd092cb7b95e0dab",
++      "md5": "1390b7c5ac0b1d8e447bc5efa6d3c8c2"
++    },
++    {
++      "name": "libffi",
++      "version": "3.7.0",
++      "build": "h81df57d_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libffi-3.7.0-h81df57d_1.conda",
++      "sha256": "c8c7583ef063bc3c430f1d48298e5ad24f796a35c22ed5b14183325825a61106",
++      "md5": "6525a0b06aa4fd390795f0740636a9dd"
++    },
++    {
++      "name": "ncurses",
++      "version": "6.6",
++      "build": "hdb14827_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda",
++      "sha256": "5d46557214ed184381dafe835b7c94a474a1c3b307a08a250b1ea4779b44ffb3",
++      "md5": "ee6c0cd80a60961a1f48aa3e0b91f986"
++    },
++    {
++      "name": "libev",
++      "version": "4.33",
++      "build": "h280c20c_3",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libev-4.33-h280c20c_3.conda",
++      "sha256": "e4418f68d01a6307c4431b585c71b584f40189877364e542ee87deb777f5e85b",
++      "md5": "7bc31538d6e3fb349e897353969237ec"
++    },
++    {
++      "name": "c-ares",
++      "version": "1.34.9",
++      "build": "hebe6cf0_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/c-ares-1.34.9-hebe6cf0_0.conda",
++      "sha256": "bd95dd25b80b5c4faf5349542377bf89b2794e23d0f7aa7f1c431e4f3b633f3c",
++      "md5": "78b505af04bf7a87ca957ef0cb5946f5"
++    },
++    {
++      "name": "keyutils",
++      "version": "1.6.3",
++      "build": "h7cc23a3_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/keyutils-1.6.3-h7cc23a3_1.conda",
++      "sha256": "dd053c96dcb0dcfd59422aefea9d2fe937a190167f34fba7893ec1e10a7e8963",
++      "md5": "ba55d1b89fd7775e67de8291029b4059"
++    },
++    {
++      "name": "libuuid",
++      "version": "2.42.4",
++      "build": "hcfc3c73_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.42.4-hcfc3c73_0.conda",
++      "sha256": "f34b8d1de9a2bf62476d8608057d9b8a918d97444236dc53a47128f2fae79041",
++      "md5": "54a948337e66706380ff24d6b5fde63f"
++    },
++    {
++      "name": "libpython",
++      "version": "3.14.9",
++      "build": "hd51c5da_100_cp314",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libpython-3.14.9-hd51c5da_100_cp314.conda",
++      "sha256": "a35534ec7cd9bb4b287954338ac9119c25400eae6c824fc82c2d4e0bd9d3b6ea",
++      "md5": "e5a312eb1871eac00a7222b6c585a8dd"
++    },
++    {
++      "name": "libexpat",
++      "version": "2.8.5",
++      "build": "hd2095e1_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libexpat-2.8.5-hd2095e1_0.conda",
++      "sha256": "6de73033a7c5f712c9c5a54124e4581e025691029835e5bceaf10a333a7e7bc0",
++      "md5": "72cfd2b95b0540247220b42f58a148d7"
++    },
++    {
++      "name": "libgfortran5",
++      "version": "16.2.0",
++      "build": "h6b99dfc_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libgfortran5-16.2.0-h6b99dfc_7.conda",
++      "sha256": "04dbab12c925b92977bb835dd2f5eda413607afa79f95a554e5a04b07a380322",
++      "md5": "7719ed7be38ad8c492c4bd5cc2bce0c4"
++    },
++    {
++      "name": "bzip2",
++      "version": "1.0.8",
++      "build": "hda65f42_10",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_10.conda",
++      "sha256": "1a0d382c515ebf55f8ee1f38c8b81bc95af5c2acc42ad53b66bc5df932032f96",
++      "md5": "e675fabcf81499adc7edf58124fb1e01"
++    },
++    {
++      "name": "libxcrypt",
++      "version": "4.4.38",
++      "build": "h280c20c_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libxcrypt-4.4.38-h280c20c_0.conda",
++      "sha256": "f7e9292dd219a6435bbb1223da9586c3e70d66d169c5a92f08db3f2127df04e9",
++      "md5": "f7a7ff5a6ab331e037abd34f379a631d"
++    },
++    {
++      "name": "libstdcxx",
++      "version": "16.2.0",
++      "build": "h934c35e_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda",
++      "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745",
++      "md5": "9b6707e0caca917fa6ea9ee473f37a5d"
++    },
++    {
++      "name": "libgcc-ng",
++      "version": "16.2.0",
++      "build": "h69a702a_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-16.2.0-h69a702a_7.conda",
++      "sha256": "03b54d7008de080a17cc2174b0e4acd6d06e1c981b2eb19846f46d8f59966034",
++      "md5": "2005515ac9340f816fb2ac7e83afe553"
++    },
++    {
++      "name": "readline",
++      "version": "8.3",
++      "build": "hd6e31c0_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-hd6e31c0_1.conda",
++      "sha256": "01b3fe073a66e321970d09e04b388708f8cbdca5cdfbfcb7c9eeb470ad10383d",
++      "md5": "69c01c781e7c8190bbdaf79e3848c5ca"
++    },
++    {
++      "name": "libedit",
++      "version": "3.1.20260512",
++      "build": "pl5321h373387f_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libedit-3.1.20260512-pl5321h373387f_0.conda",
++      "sha256": "45301f14f4eb66da57cfaf2d265f3eeee73f8b07e99614ee3afc5b26eea91126",
++      "md5": "27dbd7e2984b8fe48e069379636ccfdd"
++    },
++    {
++      "name": "libgfortran",
++      "version": "16.2.0",
++      "build": "h69a702a_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libgfortran-16.2.0-h69a702a_7.conda",
++      "sha256": "9682ae4dd11487e10b904b3cb3ab6379cad25233d45fdfdf90d54349df244494",
++      "md5": "3a8d285f5f22138ef826ad54cf267e73"
++    },
++    {
++      "name": "pcre2",
++      "version": "10.47",
++      "build": "h8b3dc9c_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/pcre2-10.47-h8b3dc9c_1.conda",
++      "sha256": "9ebb10a4eb3be51ae67d85c679f5a7a50cb040ed25c783e6331a225ea09991d4",
++      "md5": "06f6113cf1ff4a54b65f87ead132a5f1"
++    },
++    {
++      "name": "perl",
++      "version": "5.32.1",
++      "build": "10_h7cc23a3_perl5",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/perl-5.32.1-10_h7cc23a3_perl5.conda",
++      "sha256": "6ab2c89273347c20144c20691f98c3721e930af38e801ec16c737d2e24406010",
++      "md5": "dfa988f7a513f0f441ba36d128b5d327"
++    },
++    {
++      "name": "icu",
++      "version": "78.3",
++      "build": "py310h44b86e0_2",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/icu-78.3-py310h44b86e0_2.conda",
++      "sha256": "9f07834f0c546ab14d885ce0366285f61f44e326c0edd1fc63b8294e113ae432",
++      "md5": "72a381cbad04f24b1c2a43ef707f45b4"
++    },
++    {
++      "name": "libstdcxx-ng",
++      "version": "16.2.0",
++      "build": "hdf11a46_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-16.2.0-hdf11a46_7.conda",
++      "sha256": "337f481db36cc357884f05f404ccd1b3a7e0fc1ee48ec5c884e4281d213bc863",
++      "md5": "25a23bde5e26d548374f3e02b4669670"
++    },
++    {
++      "name": "libunistring",
++      "version": "0.9.10",
++      "build": "h7f98852_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libunistring-0.9.10-h7f98852_0.tar.bz2",
++      "sha256": "e88c45505921db29c08df3439ddb7f771bbff35f95e7d3103bf365d5d6ce2a6d",
++      "md5": "7245a044b4a1980ed83196176b78b73a"
++    },
++    {
++      "name": "libgfortran-ng",
++      "version": "16.2.0",
++      "build": "h69a702a_7",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libgfortran-ng-16.2.0-h69a702a_7.conda",
++      "sha256": "d5c80029e15b2e4c404a9a7189b607be566c7ea6142d43291c81648958ffe1f0",
++      "md5": "a31f744c0c83d31dacf9c01b2e3c12a2"
++    },
++    {
++      "name": "libopenblas",
++      "version": "0.3.34",
++      "build": "pthreads_hf13c14d_2",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libopenblas-0.3.34-pthreads_hf13c14d_2.conda",
++      "sha256": "69a722751e14eab2eb3bfdcb9acb1187afbd962b0c49b48d829341e0f6787f60",
++      "md5": "7e19fcd73d7f0997d3cb3326d2586a86"
++    },
++    {
++      "name": "perl-storable",
++      "version": "3.15",
++      "build": "pl5321hb9d3cd8_2",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/perl-storable-3.15-pl5321hb9d3cd8_2.conda",
++      "sha256": "25beba40154a394189d0ff2afd31683d79c9106d47e77e12d20900d053dffaf6",
++      "md5": "212f63a5c7c753ecf0a74c349b9270c5"
++    },
++    {
++      "name": "perl-scalar-list-utils",
++      "version": "1.70",
++      "build": "pl5321hb03c661_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/perl-scalar-list-utils-1.70-pl5321hb03c661_0.conda",
++      "sha256": "00678b34a57df53fa31585ff1579f42a6dfc8b1b059fd1b386c6e89573959a9f",
++      "md5": "046486011bf7674e3c2f2a1513ac4f3d"
++    },
++    {
++      "name": "perl-compress-raw-zlib",
++      "version": "2.214",
++      "build": "pl5321h4dac143_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/perl-compress-raw-zlib-2.214-pl5321h4dac143_0.conda",
++      "sha256": "4fd3a11f8dbd2c9d1a1c5547e344ad20412a3f0d36967502d9764e1b2734dd47",
++      "md5": "943e7033e6f709adf0d89a3af51ab81b"
++    },
++    {
++      "name": "perl-compress-raw-bzip2",
++      "version": "2.214",
++      "build": "pl5321hda65f42_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/perl-compress-raw-bzip2-2.214-pl5321hda65f42_0.conda",
++      "sha256": "2cbd3fcb7028415654057ab3142cee1e5cc4cf9bdd0e590f072e8ecd29cb6382",
++      "md5": "1ec33b9f74a71c17cc5579e35027832a"
++    },
++    {
++      "name": "libpsl",
++      "version": "0.23.1",
++      "build": "hd9e3e90_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libpsl-0.23.1-hd9e3e90_1.conda",
++      "sha256": "09e8effdc89bc5d021349318d32b85594f5b8d8e3ab8f90a85b81f8fe695a566",
++      "md5": "77be60417aa572afcb48cbe0f967401d"
++    },
++    {
++      "name": "libsqlite",
++      "version": "3.54.1",
++      "build": "h13e7031_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libsqlite-3.54.1-h13e7031_0.conda",
++      "sha256": "07b3c98282022f05781122d073f84e944bfb4299946e8457ece3ce6c384ff78e",
++      "md5": "8f15f0ec9b69344df5c3bb5cce1751a1"
++    },
++    {
++      "name": "libidn2",
++      "version": "2.3.8",
++      "build": "hfac485b_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libidn2-2.3.8-hfac485b_1.conda",
++      "sha256": "cc38c900b9a20fe75e61cbb594e749c57a06d96510722f5ddfa309682062b065",
++      "md5": "842a81de672ddcf476337c8bde3cad33"
++    },
++    {
++      "name": "openmpi",
++      "version": "4.1.6",
++      "build": "hc5af2df_101",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/openmpi-4.1.6-hc5af2df_101.conda",
++      "sha256": "f0769dd891e1735be4606ec8643951e5cbca199f774e58c7d933f70a70134ce4",
++      "md5": "f9a2ad0088ee38f396350515fa37d243"
++    },
++    {
++      "name": "libblas",
++      "version": "3.11.0",
++      "build": "11_h4a7cf45_openblas",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libblas-3.11.0-11_h4a7cf45_openblas.conda",
++      "sha256": "d942e0c820d60a613a6f786d074f0820fb6343e3f1ccfb110b1d98b44fb75968",
++      "md5": "b8cce1486f3c62f33291d6318c193d0d"
++    },
++    {
++      "name": "liblapack",
++      "version": "3.11.0",
++      "build": "11_h47877c9_openblas",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/liblapack-3.11.0-11_h47877c9_openblas.conda",
++      "sha256": "1ad3f43c9319ef398a8ef45989f4903a06e3965b51e77fc669a4c894168a8411",
++      "md5": "5622a13917855ce4b953b9e655cf9262"
++    },
++    {
++      "name": "libcblas",
++      "version": "3.11.0",
++      "build": "11_h0358290_openblas",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libcblas-3.11.0-11_h0358290_openblas.conda",
++      "sha256": "f7d1bbdea61cf94ba219d17b2cb571a29830f8025385af799bff5a7ad1ef45e6",
++      "md5": "73a248c30811075059b5aeda766c2624"
++    },
++    {
++      "name": "gsl",
++      "version": "2.7",
++      "build": "he838d99_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/gsl-2.7-he838d99_0.tar.bz2",
++      "sha256": "132a918b676dd1f533d7c6f95e567abf7081a6ea3251c3280de35ef600e0da87",
++      "md5": "fec079ba39c9cca093bf4c00001825de"
++    },
++    {
++      "name": "ca-certificates",
++      "version": "2026.10.23",
++      "build": "hbd8a1cb_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.10.23-hbd8a1cb_0.conda",
++      "sha256": "95619b9c1184be7175392eeb0ee7eeb5ccf25d280951f4225f2d62e725790be3",
++      "md5": "3fd02989038a1e1cee627c14c2d73f29"
++    },
++    {
++      "name": "python_abi",
++      "version": "3.14",
++      "build": "9_cp314",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-9_cp314.conda",
++      "sha256": "e7f8e965bbfb98e08feb2365cacdad8bb218fa5b5a0a2752f747287f425f213c",
++      "md5": "350d89b50d7de805abf2e63e29dee451"
++    },
++    {
++      "name": "tzdata",
++      "version": "2026e",
++      "build": "h5d301ff_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/tzdata-2026e-h5d301ff_0.conda",
++      "sha256": "2b7ca858879f183ce2dcc65b300f48a0133d5430550f35b23d80d405a0788dbf",
++      "md5": "abccc3810d2b97e570dee487f2b46e38"
++    },
++    {
++      "name": "perl-parent",
++      "version": "0.243",
++      "build": "pl5321hd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/perl-parent-0.243-pl5321hd8ed1ab_0.conda",
++      "sha256": "ec57d9e56ba86d840d5a9e65c665365fb6a290851cd13e6719628f3295eabf34",
++      "md5": "314caa3b72d65f8078d426c6721dcacc"
++    },
++    {
++      "name": "perl-exporter",
++      "version": "5.74",
++      "build": "pl5321hd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/perl-exporter-5.74-pl5321hd8ed1ab_0.tar.bz2",
++      "sha256": "42271d0b79043a10a89044acb5febea50046b745dd2fc37e02943bc3bc75bf8e",
++      "md5": "fd2eac4e35f8c970870a3961c1df3e29"
++    },
++    {
++      "name": "perl-extutils-makemaker",
++      "version": "7.70",
++      "build": "pl5321hd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/perl-extutils-makemaker-7.70-pl5321hd8ed1ab_0.conda",
++      "sha256": "1d3f342ca74cf2948c3edcfe0d3367b1db0fc64bb163393a2e025336dec3a40c",
++      "md5": "ec3e57ed34f7765bfc7054a05868ce5d"
++    },
++    {
++      "name": "perl-common-sense",
++      "version": "3.75",
++      "build": "pl5321hd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/perl-common-sense-3.75-pl5321hd8ed1ab_0.tar.bz2",
++      "sha256": "38ef218e9b9d55b9fbdce6b31cf81bcf6f1b16f21b8e7cb9279b41399522a320",
++      "md5": "ef70dc77e8b10bbb62f5e843b401ef0e"
++    },
++    {
++      "name": "perl-exporter-tiny",
++      "version": "1.002002",
++      "build": "pl5321hd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/perl-exporter-tiny-1.002002-pl5321hd8ed1ab_0.tar.bz2",
++      "sha256": "abdf86828a12a389d0feb0d70501b267842557bae11820e266526aeb6ab2bebe",
++      "md5": "48d709826875be1f2c108d3d1d8efec7"
++    },
++    {
++      "name": "perl-carp",
++      "version": "1.50",
++      "build": "pl5321hd8ed1ab_0",
++      "url": "https://conda.anaconda.org/conda-forge/noarch/perl-carp-1.50-pl5321hd8ed1ab_0.tar.bz2",
++      "sha256": "1981e31113e1e77a2cdc13db657c636f047cd3be2a64d9a0bffac03c5427c1bd",
++      "md5": "bdddc03e28019b902da71b722f2288d7"
++    },
++    {
++      "name": "ncbi-vdb",
++      "version": "3.4.1",
++      "build": "hd63eeec_0",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/ncbi-vdb-3.4.1-hd63eeec_0.conda",
++      "sha256": "1c876e74214ef7269de12286e1b9b370e3167c0825d215de3b81bf46f3956072",
++      "md5": "70de9f284c305131b458cf69676f1b2f"
++    },
++    {
++      "name": "perl-list-moreutils-xs",
++      "version": "0.430",
++      "build": "pl5321h7b50bb2_5",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/perl-list-moreutils-xs-0.430-pl5321h7b50bb2_5.tar.bz2",
++      "sha256": "fe2d360770fe5b856ee1e625eac6b07cea386c64b0866e323c6535eb62b9ceee",
++      "md5": "9192770eb08524038c3fcf24e915b10c"
++    },
++    {
++      "name": "fraggenescan",
++      "version": "1.32",
++      "build": "h7b50bb2_1",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/fraggenescan-1.32-h7b50bb2_1.conda",
++      "sha256": "64ad97d56cba1347249944e668884b469832625415055586738a2ee19784c0ed",
++      "md5": "af437ea81e5d02a58f4904bdaa622f6e"
++    },
++    {
++      "name": "hmmer",
++      "version": "3.4",
++      "build": "h7d74f8d_5",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/hmmer-3.4-h7d74f8d_5.conda",
++      "sha256": "b0ea2115beb20bbd3fe63dd8e41bfc29eab42a0c3982f91f0e018840567f37b6",
++      "md5": "7e252dc47eda3426c7a2a87122b1a3fa"
++    },
++    {
++      "name": "perl-io-zlib",
++      "version": "1.15",
++      "build": "pl5321hdfd78af_1",
++      "url": "https://conda.anaconda.org/bioconda/noarch/perl-io-zlib-1.15-pl5321hdfd78af_1.tar.bz2",
++      "sha256": "771a44b338cac68a22893897450222b886e24bbb291b014897d561f2ba3b588f",
++      "md5": "db92645dabe9467115729e4479841b5d"
++    },
++    {
++      "name": "perl-types-serialiser",
++      "version": "1.01",
++      "build": "pl5321hdfd78af_0",
++      "url": "https://conda.anaconda.org/bioconda/noarch/perl-types-serialiser-1.01-pl5321hdfd78af_0.tar.bz2",
++      "sha256": "20f61217b16235d0161ad6fa0a234585afcc04ec5a6142c65b5867e26216dfe3",
++      "md5": "cfc65753e827bbef80c00eaa395f6ae7"
++    },
++    {
++      "name": "perl-list-moreutils",
++      "version": "0.430",
++      "build": "pl5321hdfd78af_0",
++      "url": "https://conda.anaconda.org/bioconda/noarch/perl-list-moreutils-0.430-pl5321hdfd78af_0.tar.bz2",
++      "sha256": "2190cc8430bb218ea80f5fc5e2bf75e4e20a27fb83e8c3cb789a18c32854a56c",
++      "md5": "7f04c79d216d0f8e7b6d5a51de4aafa0"
++    },
++    {
++      "name": "openssl",
++      "version": "3.6.5",
++      "build": "h781a0a9_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.5-h781a0a9_0.conda",
++      "sha256": "9c1533f1cf784f0e250919c0c9762d0b0e6bc727a79290ffb7cea1ceca1d038c",
++      "md5": "5a51a2ea653f120240b1a9bf76e0aae9"
++    },
++    {
++      "name": "perl-encode",
++      "version": "3.24",
++      "build": "pl5321hb03c661_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/perl-encode-3.24-pl5321hb03c661_0.conda",
++      "sha256": "c83d8de38ce43ca15af05f76bc933ff76894aef84baed47300e463dae0c11857",
++      "md5": "35776d4c5766e9d98754d1e7530c2961"
++    },
++    {
++      "name": "perl-pathtools",
++      "version": "3.75",
++      "build": "pl5321hb9d3cd8_2",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/perl-pathtools-3.75-pl5321hb9d3cd8_2.conda",
++      "sha256": "a80bc265aa749ae03fdd6d5f2098312ea6f43cc193ea7aba0e6e4304d84ce8c0",
++      "md5": "03d88c89dfac8a26adcdeff242f94007"
++    },
++    {
++      "name": "python",
++      "version": "3.14.9",
++      "build": "hcd007b5_100_cp314",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/python-3.14.9-hcd007b5_100_cp314.conda",
++      "sha256": "87874d825447bb21759c6378cbbc4ce380b2b639609bfd4cb67dc864641ac759",
++      "md5": "49fa41f5beb11c375c11af461301d74c"
++    },
++    {
++      "name": "libssh2",
++      "version": "1.11.1",
++      "build": "h6154650_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libssh2-1.11.1-h6154650_1.conda",
++      "sha256": "7e463000fa1cba3f3a6597b776f6ab301d425a96e3bc20d0d9d76a3b9f237aa3",
++      "md5": "5c526561e1d2a2e071941174eae84557"
++    },
++    {
++      "name": "libnghttp2",
++      "version": "1.68.1",
++      "build": "h74cf4be_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libnghttp2-1.68.1-h74cf4be_1.conda",
++      "sha256": "11a2f54a6f391e25738bce0023e6ef499600147bbcf21c1fa69d2e251b03cc6a",
++      "md5": "75d211f04ac87506f1f43420712a69fe"
++    },
++    {
++      "name": "krb5",
++      "version": "1.22.2",
++      "build": "hbc21106_2",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/krb5-1.22.2-hbc21106_2.conda",
++      "sha256": "2a5c38c85e63df84c4e69ee71439841ce570d259ae3060627bb9a49a938d66f4",
++      "md5": "53318d715316929a574f83591308b1f8"
++    },
++    {
++      "name": "wget",
++      "version": "1.25.0",
++      "build": "h653f8fd_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/wget-1.25.0-h653f8fd_1.conda",
++      "sha256": "66a5a05e0e44fd7a57e24d77665d5d6672646a7b316575b2f679108966d9124e",
++      "md5": "3b97a15e7345c7f6c51bb57bffad7c93"
++    },
++    {
++      "name": "numpy",
++      "version": "2.5.4",
++      "build": "py314hd3a7d6b_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/numpy-2.5.4-py314hd3a7d6b_0.conda",
++      "sha256": "7533361a15ff1d4c1e7069b9410d32a602a6a9350d717a43731b07e3565a6689",
++      "md5": "533d72030f9dbe5f9a439c7f9673940b"
++    },
++    {
++      "name": "libcurl",
++      "version": "8.23.0",
++      "build": "ha042cf0_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/libcurl-8.23.0-ha042cf0_0.conda",
++      "sha256": "d2db14d80efb4f2e76e76561c633f1767f7543987f2bcb54a067a9d264d432ab",
++      "md5": "0ad16151226df493aed967f0efce0e80"
++    },
++    {
++      "name": "fastcluster",
++      "version": "1.3.0",
++      "build": "np2py314hbf8ec49_2",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/fastcluster-1.3.0-np2py314hbf8ec49_2.conda",
++      "sha256": "27a955c38a0a964b929d2731383816dd7982706988973c3b75d5ff63598268a0",
++      "md5": "508cf81dfd1204ec459c2b16980887bb"
++    },
++    {
++      "name": "biopython",
++      "version": "1.88",
++      "build": "py314h89acca1_1",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/biopython-1.88-py314h89acca1_1.conda",
++      "sha256": "200beaa20289d11b64c47730382c7cfbec3900e9fe93670f5e5125229b3b24dc",
++      "md5": "b9e55d6ecc9b7384f1ca773faaa51e4f"
++    },
++    {
++      "name": "scipy",
++      "version": "1.18.1",
++      "build": "py314h36f0660_2",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/scipy-1.18.1-py314h36f0660_2.conda",
++      "sha256": "d58b13b6714f1688b04e6ff83eed2d8a917316bb2f40315d2856a356f3987486",
++      "md5": "940e979e9bd79bd52ed6acdb79894f6a"
++    },
++    {
++      "name": "curl",
++      "version": "8.23.0",
++      "build": "ha042cf0_0",
++      "url": "https://conda.anaconda.org/conda-forge/linux-64/curl-8.23.0-ha042cf0_0.conda",
++      "sha256": "c34fd476d8ad5eede00a3742f33bf52400e01b35bc2777ab2306d6fc21121949",
++      "md5": "ae85b19bbac7336f4efc4802c351effa"
++    },
++    {
++      "name": "perl-json-xs",
++      "version": "4.04",
++      "build": "pl5321h9948957_0",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/perl-json-xs-4.04-pl5321h9948957_0.conda",
++      "sha256": "f16cf35917a5d75fb55cfc69d8651dc72ff4e06370142b447a4864f5de7d97c6",
++      "md5": "7916b2e794393b3389535ba750f489da"
++    },
++    {
++      "name": "perl-io-compress",
++      "version": "2.216",
++      "build": "pl5321h503566f_0",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/perl-io-compress-2.216-pl5321h503566f_0.conda",
++      "sha256": "5241c33cf55ba0cbfc0ccab96b4a31123761db00310eab4fedd7a95226c4fca7",
++      "md5": "0784cb3c120f934a5fe61961c8238330"
++    },
++    {
++      "name": "entrez-direct",
++      "version": "26.0",
++      "build": "h1079eea_0",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/entrez-direct-26.0-h1079eea_0.conda",
++      "sha256": "611734d6067084d12a4f5e2a3376ff1a47737d7e563d53677e7ee7d9e6472640",
++      "md5": "eb37fd2fbf2bc8192c550999a3bbc5c3"
++    },
++    {
++      "name": "perl-json",
++      "version": "4.11",
++      "build": "pl5321hdfd78af_0",
++      "url": "https://conda.anaconda.org/bioconda/noarch/perl-json-4.11-pl5321hdfd78af_0.conda",
++      "sha256": "1c1649f491c76f4ae2984b547701df91c8abfda2e3b7b44e0c007f5e78a87c08",
++      "md5": "56411755d21870a9ec16c76fd7b66dba"
++    },
++    {
++      "name": "perl-archive-tar",
++      "version": "3.14",
++      "build": "pl5321hcbfc158_0",
++      "url": "https://conda.anaconda.org/bioconda/noarch/perl-archive-tar-3.14-pl5321hcbfc158_0.conda",
++      "sha256": "66f693e7c2d4ef756ca640b5eede9e76ef98b5b97a7b36e3d194dbdda7b8ecff",
++      "md5": "290aa04cc6fe79133433eb72de48edc0"
++    },
++    {
++      "name": "blast",
++      "version": "2.17.0",
++      "build": "hb02a186_1",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/blast-2.17.0-hb02a186_1.conda",
++      "sha256": "d506d022ca8ab1346dc816cbcbe3e798d7f104714e14dea1d750db9dec47c205",
++      "md5": "8e5e0c669b39ab1c7c46aea1fda0a495"
++    },
++    {
++      "name": "isescan",
++      "version": "1.7.3",
++      "build": "hab16a5f_1",
++      "url": "https://conda.anaconda.org/bioconda/linux-64/isescan-1.7.3-hab16a5f_1.conda",
++      "sha256": "502f23c0594984078dab76900eab067485ffc0df66079a66ddf50088a5290044",
++      "md5": "900bba97828b4e050680d808958d3a26"
++    }
++  ],
++  "ISEScan_release_commit": "83a74eccb0eef89674e1e49fba31cb4cab29018f",
++  "source_archives": [
++    {
++      "path": "results/tool-audit/20261026-isescan-runtime/source.tar.gz",
++      "sha256": "cf3d7f0c272aa3527dd14565e8c7b29b8fed23a3bf880b10eda0fdfee0873fd9"
++    },
++    {
++      "path": "results/tool-audit/20261026-isescan-runtime/FragGeneScan1.32.tar.gz",
++      "sha256": "54db8dab643f791aae7b05c310fe0d88ecb07db306211185c4c8524734f334c4"
++    }
++  ],
++  "fixture": {
++    "path": "NC_012624.fna",
++    "sha256": "c7dad29361be86cb0fbbe2e251b4392dfaa5825a8d83db9d8aa7be7e16a71135"
++  },
++  "native_original_TSV_sha256": "5d31fa72fef3904ccd184eeb43aef77778b9cf7a41dd7b1a60e3a65e615f4440"
++}
+diff --git a/tests/mock_e2e/mock_python.py b/tests/mock_e2e/mock_python.py
+new file mode 100644
+--- /dev/null
++++ b/tests/mock_e2e/mock_python.py
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python3
++"""Explicit resource-scan observer for mock integration; no model inference."""
++import argparse
++import base64
++import hashlib
++import json
++import os
++from pathlib import Path
++import sys
++
++args = sys.argv[1:]
++if not args or Path(args[0]).name != 'isescan_runtime_resources.py':
++    os.execv(sys.executable, [sys.executable] + args)
++
++parser = argparse.ArgumentParser()
++parser.add_argument('--runtime-base64', required=True)
++parser.add_argument('--seqfile', required=True)
++parser.add_argument('--result-prefix', required=True)
++parser.add_argument('--threads', required=True)
++parser.add_argument('--output', type=Path)
++parser.add_argument('--verify', type=Path)
++parser.add_argument('--execute', action='store_true')
++request = parser.parse_args(args[1:])
++runtime = json.loads(base64.b64decode(request.runtime_base64))
++identity = dict(schema_version=1, runtime=runtime,
++                scope='EXPLICIT_MOCK_RESOURCE_SCAN_NO_NATIVE_MODEL',
++                sequence_sha256=hashlib.sha256(Path(request.seqfile).read_bytes()).hexdigest(),
++                output=request.result_prefix)
++if request.verify is not None:
++    assert json.loads(request.verify.read_text()) == identity
++if request.output is not None:
++    request.output.write_text(json.dumps(identity,sort_keys=True)+'\n')
++if request.execute:
++    assert request.verify is not None
++    os.execvp('isescan.py',['isescan.py','--seqfile',request.seqfile,
++                          '--output',request.result_prefix,'--nthread',request.threads])
+diff --git a/tests/mock_e2e/run.py b/tests/mock_e2e/run.py
+--- a/tests/mock_e2e/run.py
++++ b/tests/mock_e2e/run.py
+@@ -19,7 +19,7 @@
+             'bowtie2-build', 'bowtie2', 'samtools', 'coverm', 'plasmidfinder.py', 'mob_typer',
+             'bakta', 'amrfinder', 'isescan.py', 'integron_finder', 'metaphlan', 'mmseqs',
+             'NanoPlot', 'filtlong', 'hifiadapterfilt.sh', 'flye', 'hifiasm', 'hifiasm_meta',
+-            'minimap2', 'OPERA-MS.pl', 'spades.py', 'dorado', 'pigz', 'perl']
++            'minimap2', 'OPERA-MS.pl', 'spades.py', 'dorado', 'pigz', 'perl', 'python3']
+ 
+ 
+ def rows(path):
+@@ -101,7 +101,7 @@
+         counts[name] = counts.get(name, 0) + 1
+     expected = {name: 6 for name in ['QUAST', 'GENOMAD', 'PLASMID_CONSENSUS', 'PLASMID_STRUCTURE']}
+     if not empty:
+-        expected.update({name: 6 for name in ['PLASMIDFINDER', 'MOB_TYPER', 'BAKTA', 'AMRFINDERPLUS', 'ISESCAN', 'INTEGRONFINDER']})
++        expected.update({name: 6 for name in ['PLASMIDFINDER', 'MOB_TYPER', 'BAKTA', 'AMRFINDERPLUS', 'ISESCAN', 'ISESCAN_RESOURCE_PROBE', 'INTEGRONFINDER']})
+         expected.update(PLASMID_CATALOG_PREPARE=1, MMSEQS2=1)
+     expected['REPORT'] = 1
+     assert counts == expected, (counts, expected)
+@@ -222,7 +222,7 @@
+         expected['DORADO_BASECALL'] = 6 if long_input == 'pod5' else 2
+     if not empty:
+         expected.update({name: 6 for name in ['PLASMIDFINDER', 'MOB_TYPER', 'BAKTA',
+-            'AMRFINDERPLUS', 'ISESCAN', 'INTEGRONFINDER']})
++            'AMRFINDERPLUS', 'ISESCAN', 'ISESCAN_RESOURCE_PROBE', 'INTEGRONFINDER']})
+         if platform in ['illumina', 'hybrid']:
+             expected.update(BOWTIE2_BUILD_ABUNDANCE=6, BOWTIE2_ALIGN_ABUNDANCE=6,
+                             COVERM_ABUNDANCE=6)
+@@ -371,7 +371,8 @@
+     # Use a wrapper so executable permissions on source files are not required.
+     for command in COMMANDS:
+         target = bindir / command
+-        target.write_text('#!' + sys.executable + '\n' + mock.read_text().split('\n', 1)[1])
++        source = Path(__file__).with_name('mock_python.py') if command == 'python3' else mock
++        target.write_text('#!' + sys.executable + '\n' + source.read_text().split('\n', 1)[1])
+         target.chmod(0o755)
+     database = fixture / 'mock-db'
+     database.mkdir()
+diff --git a/tests/nextflow/isescan_runtime_native.nf b/tests/nextflow/isescan_runtime_native.nf
+new file mode 100644
+--- /dev/null
++++ b/tests/nextflow/isescan_runtime_native.nf
+@@ -0,0 +1,12 @@
++nextflow.enable.dsl=2
++include { isescanResourceRecord } from '../../lib/isescan_runtime'
++include { ISESCAN; ISESCAN_RESOURCE_PROBE } from '../../modules/annotation/isescan'
++
++workflow {
++    def sequence = Channel.value(tuple([id:'S.1', group:'FIXED_SOFTWARE_FIXTURE'],file(params.fasta,checkIfExists:true)))
++    def helper = Channel.value(file("${moduleDir}/../../bin/isescan_runtime_resources.py",checkIfExists:true))
++    ISESCAN_RESOURCE_PROBE(sequence,helper)
++    def identity = ISESCAN_RESOURCE_PROBE.out.identity.map { meta,receipt -> isescanResourceRecord(meta,receipt) }
++    ISESCAN(sequence.join(identity,failOnDuplicate:true,failOnMismatch:true),helper)
++    ISESCAN.out.results.view { meta, result -> 'ISESCAN_RESULT=' + groovy.json.JsonOutput.toJson([meta:meta,directory:result.toString()]) }
++}
+diff --git a/tests/run_isescan_runtime_native.py b/tests/run_isescan_runtime_native.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_isescan_runtime_native.py
+@@ -0,0 +1,159 @@
++#!/usr/bin/env python3
++"""Actual fixed ISEScan/FragGeneScan/SSW cache controls, never accuracy truth."""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++
++from module_harness import run_session_uuid
++
++ROOT = Path(__file__).resolve().parents[1]
++SCRIPTS = ['isescan.py','constants.py','isPredict.py','is_analysis.py','pred.py','tools.py','ssw_wrap.py','pyssw.py']
++
++
++def sha(p):
++    return hashlib.sha256(p.read_bytes()).hexdigest()
++
++
++def fasta(p):
++    records = {}
++    for line in p.read_text().splitlines():
++        if line.startswith('>'):
++            name = line[1:].split()[0]
++            assert name not in records
++            records[name] = ''
++        elif line.strip():
++            records[name] += line.strip()
++    assert records and all(records.values())
++    return records
++
++
++def check_output(directory, input_fasta, golden):
++    tsvs = list(directory.rglob('*.tsv'))
++    assert len(tsvs) == 1, tsvs
++    rows = list(csv.DictReader(tsvs[0].open(),delimiter='\t'))
++    assert rows == list(csv.DictReader(golden.open(),delimiter='\t'))
++    assert len(rows)==1 and rows[0]['family']=='IS5' and rows[0]['cluster']=='IS5_222'
++    sequence = fasta(input_fasta)
++    row = rows[0]
++    selected = sequence[row['seqID']]
++    begin,end = int(row['isBegin']),int(row['isEnd'])
++    assert (begin,end,int(row['isLen']))==(30355,31343,989)
++    actual = fasta(next(directory.rglob('*.is.fna')))
++    assert len(actual)==1 and next(iter(actual.values()))==selected[begin-1:end]
++    orf = fasta(next(directory.rglob('*.orf.fna')))
++    assert len(orf)==1 and next(iter(orf.values()))==selected[int(row['orfBegin'])-1:int(row['orfEnd'])]
++    assert row['strand']=='+' and len(next(iter(orf.values())))==900
++    return dict(original_native_TSV_equal=True,independent_IS_and_ORF_DNA_equal=True,IS_count=1,IS_length=989)
++
++
++def run(base,prefix,input_fasta,golden):
++    base.mkdir(parents=True,exist_ok=False)
++    private = base/'private-install'
++    # A thin PATH/LD_LIBRARY_PATH overlay does not override every Conda RPATH.
++    # Materialize the exact locked environment at its own prefix; always-copy
++    # prevents model mutations from touching original/cache hard links.
++    lock=base/'native.lock'
++    packages=[json.loads(p.read_text()) for p in sorted((prefix/'conda-meta').glob('*.json'))]
++    assert packages and all(p.get('url') and p.get('md5') for p in packages)
++    lock.write_text('@EXPLICIT\n'+'\n'.join(p['url']+'#'+p['md5'] for p in packages)+'\n')
++    command=['/home/sleepinlava/.local/bin/micromamba','--root-prefix',str(ROOT/'results/tool-audit/runtime/mamba-root'),
++             'create','--prefix',str(private),'--file',str(lock),'--offline','--always-copy','--json','-y']
++    with (base/'private-install.json').open('w') as out,(base/'private-install.stderr').open('w') as err:
++        install=subprocess.run(command,stdout=out,stderr=err)
++    assert install.returncode==0,install.returncode
++    mutable=[private/'bin/pHMMs/clusters.faa.hmm',private/'bin/train/illumina_5',private/'lib/libssw.so']
++    originals={p:p.read_bytes() for p in mutable}
++    stats={p:p.stat() for p in mutable}
++    watched=[private/'bin'/name for name in SCRIPTS+['FragGeneScan','run_FragGeneScan.pl']] + list((private/'bin/pHMMs').iterdir()) + list((private/'bin/train').iterdir()) + [private/'lib/libssw.so']
++    original_package={str(p.relative_to(private)):sha(p) for p in watched if p.is_file()}
++    for p in mutable:
++        shared=prefix/p.relative_to(private)
++        assert (p.stat().st_dev,p.stat().st_ino)!=(shared.stat().st_dev,shared.stat().st_ino),p
++        assert sha(p)==sha(shared),p
++    env=dict(os.environ,PATH=str(private/'bin')+':'+str(prefix/'bin')+':'+os.environ['PATH'],
++             LD_LIBRARY_PATH=str(private/'lib')+':'+str(prefix/'lib'),PYTHONDONTWRITEBYTECODE='1',OPENBLAS_NUM_THREADS='2',OMP_NUM_THREADS='2')
++    config=base/'config'
++    config.write_text("process { executor='local'; cpus=2; memory='2 GB'; errorStrategy='terminate'; maxRetries=0 }\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\nparams.publish_dir_mode='copy'\nparams.outdir="+repr(str(base/'out'))+"\ntrace.fields='task_id,hash,name,status,exit,workdir'\n")
++    positive_config=config.read_text()
++    (base/'params.json').write_text(json.dumps(dict(fasta=str(input_fasta))))
++    sources=['modules/annotation/isescan.nf','lib/isescan_runtime.nf','bin/isescan_runtime_resources.py','envs/isescan.yml','tests/nextflow/isescan_runtime_native.nf','tests/run_isescan_runtime_native.py']
++    before={p:sha(ROOT/p) for p in sources}
++    runs=[]
++    session=None
++
++    def execute(name,expected):
++        nonlocal session
++        case=base/name;case.mkdir()
++        cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(ROOT/'tests/nextflow/isescan_runtime_native.nf'),'-params-file',str(base/'params.json'),'-work-dir',str(base/'work'),'-with-trace',str(case/'trace.tsv'),'-ansi-log','false']
++        cmd+=['-resume',session] if session else ['-name','isescan_runtime_native']
++        result=subprocess.run(cmd,cwd=base,env=env,capture_output=True,text=True,timeout=600)
++        (case/'stdout').write_text(result.stdout);(case/'stderr').write_text(result.stderr)
++        tasks=list(csv.DictReader((case/'trace.tsv').open(),delimiter='\t')) if (case/'trace.tsv').exists() else []
++        record=dict(case=name,command=cmd,exit_code=result.returncode,tasks=tasks,resource_sha256={str(p.relative_to(private)):sha(p) for p in mutable})
++        runs.append(record);(base/'progress.json').write_text(json.dumps(runs,indent=2)+'\n')
++        assert len(tasks)==2,record
++        probe=next(t for t in tasks if t['name'].startswith('ISESCAN_RESOURCE_PROBE'))
++        consumer=next(t for t in tasks if t['name'].startswith('ISESCAN ('))
++        assert probe['status']=='COMPLETED' and consumer['status']==expected,record
++        assert (result.returncode==0)==(expected!='FAILED'),record
++        work=Path(consumer['workdir'])
++        if expected=='COMPLETED':
++            record['output_checks']=check_output(work/'S.1.isescan_out',input_fasta,golden)
++            assert 'ISESCAN_RESULT=' in result.stdout and 'FIXED_SOFTWARE_FIXTURE' in result.stdout
++        if expected=='FAILED':
++            log=(work/'.command.log').read_text()
++            assert 'hmmsearch' in log.lower() or 'format' in log.lower(),log[-2500:]
++        record['consumer_hash']=consumer['hash']
++        record['identity_sha256']=sha(Path(probe['workdir'])/'isescan_runtime_identity.json')
++        if session is None:session=run_session_uuid('isescan_runtime_native',base)
++        print(name,expected,flush=True)
++
++    def set_bytes(p,data):
++        assert len(data)==len(originals[p])
++        p.write_bytes(data)
++        os.utime(p,ns=(stats[p].st_atime_ns,stats[p].st_mtime_ns))
++        assert p.stat().st_size==stats[p].st_size and p.stat().st_mtime_ns==stats[p].st_mtime_ns
++
++    try:
++        execute('cold','COMPLETED')
++        execute('unchanged','CACHED')
++        p=mutable[0];data=bytearray(originals[p]);i=originals[p].index(b'DATE  ');i=originals[p].index(b'2017',i)+3;data[i]=ord('8');set_bytes(p,bytes(data))
++        execute('HMM-DATE-metadata-change','COMPLETED');set_bytes(p,originals[p]);execute('HMM-restored','CACHED')
++        p=mutable[1];data=bytearray(originals[p]);i=originals[p].index(b'GG      ')+2;data[i]=ord('\t');set_bytes(p,bytes(data))
++        execute('FGS-model-whitespace-change','COMPLETED');set_bytes(p,originals[p]);execute('FGS-restored','CACHED')
++        p=mutable[2];data=bytearray(originals[p]);i=originals[p].index(b'GCC:');data[i+2]=ord('D');set_bytes(p,bytes(data))
++        execute('SSW-nonalloc-comment-change','COMPLETED');set_bytes(p,originals[p]);execute('SSW-restored','CACHED')
++        p=mutable[0];data=bytearray(originals[p]);data[0]=ord('X');set_bytes(p,bytes(data));execute('corrupt-HMM','FAILED')
++    finally:
++        for p,data in originals.items():set_bytes(p,data)
++    execute('all-restored','CACHED')
++    cold_hash=runs[0]['consumer_hash']
++    assert all(runs[i]['consumer_hash']==cold_hash for i in [1,3,5,7,9])
++    assert all(runs[i]['consumer_hash']!=cold_hash for i in [2,4,6,8])
++    for name,override in [('container',"container='TEST_ONLY_OTHER_IMAGE'"),('beforeScript',"beforeScript='export TEST_ONLY_ISESCAN_CONTEXT=1'")]:
++        case=base/('mismatch-'+name);case.mkdir();config.write_text(positive_config+"\nprocess { withName:'ISESCAN' { "+override+" } }\n")
++        cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(ROOT/'tests/nextflow/isescan_runtime_native.nf'),'-params-file',str(base/'params.json'),'-work-dir',str(base/'work'),'-with-trace',str(case/'trace.tsv'),'-ansi-log','false','-resume',session]
++        result=subprocess.run(cmd,cwd=base,env=env,capture_output=True,text=True,timeout=120)
++        (case/'stdout').write_text(result.stdout);(case/'stderr').write_text(result.stderr)
++        tasks=list(csv.DictReader((case/'trace.tsv').open(),delimiter='\t')) if (case/'trace.tsv').exists() else []
++        assert result.returncode!=0 and 'runtime mismatch before cache lookup' in result.stdout+result.stderr
++        assert len(tasks)==1 and tasks[0]['name'].startswith('ISESCAN_RESOURCE_PROBE') and tasks[0]['status']=='COMPLETED',tasks
++        runs.append(dict(case='mismatch-'+name,command=cmd,exit_code=result.returncode,tasks=tasks,consumer_not_submitted=True))
++        print('mismatch-'+name,'REFUSED_BEFORE_CACHE',flush=True)
++    config.write_text(positive_config)
++    assert before=={p:sha(ROOT/p) for p in sources}
++    assert original_package=={str(p.relative_to(private)):sha(p) for p in watched if p.is_file()}
++    receipt=dict(pass_checks=True,runs=runs,session_uuid=session,source_sha256=before,source_unchanged=True,private_package_restored=True,original_package_sha256=original_package,input_sha256=sha(input_fasta),golden_sha256=sha(golden),scope='Full always-copy independent locked environment; full original NC_012624 fixture/default1.7.3+FGS1.32 illumina_5; private same-size/mtime changes only DATE metadata/whitespace/nonallocated ELF comment, native HMM failure/restore/context guards. Exact native golden plus independent IS/ORF DNA; software contract, not biological accuracy, OCI/provider or full-pipeline certification.')
++    (base/'run.json').write_text(json.dumps(receipt,indent=2)+'\n')
++    print('PASS: ISEScan native runtime-resource controls',flush=True)
++
++
++if __name__=='__main__':
++    parser=argparse.ArgumentParser(description=__doc__)
++    for name in ['out','prefix','fasta','golden']:parser.add_argument('--'+name,type=Path,required=True)
++    args=parser.parse_args();run(args.out.resolve(),args.prefix.resolve(),args.fasta.resolve(),args.golden.resolve())
+diff --git a/tests/test_isescan_runtime_resources.py b/tests/test_isescan_runtime_resources.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_isescan_runtime_resources.py
+@@ -0,0 +1,90 @@
++"""Native runtime read-set controls; these methods perform no IS inference."""
++import base64
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import sys
++import tempfile
++import unittest
++from unittest.mock import patch
++
++ROOT=Path(__file__).resolve().parents[1]
++spec=importlib.util.spec_from_file_location('isescan_resource_test',ROOT/'bin/isescan_runtime_resources.py')
++resolver=importlib.util.module_from_spec(spec)
++spec.loader.exec_module(resolver)
++
++
++class RuntimeResources(unittest.TestCase):
++    def setUp(self):
++        self.temp=tempfile.TemporaryDirectory()
++        self.root=Path(self.temp.name)
++        self.sequence=self.root/'sequence [1].fna'
++        self.sequence.write_text('>EXPLICIT_READSET_CONTROL\nACGT\n')
++        self.runtime={'scope':'EXPLICIT_READSET_CONTROL_NO_INFERENCE'}
++        self.entry=resolver.executable('isescan.py')
++
++    def tearDown(self):
++        self.temp.cleanup()
++
++    def capture(self):
++        return resolver.capture(self.runtime,str(self.sequence),'sample.isescan_out')
++
++    def test_fixed_source_profiles_and_all_training_members(self):
++        value=self.capture()
++        self.assertEqual(value['version'],'1.7.3')
++        self.assertEqual(len(value['resources']['source']),8)
++        model=value['resources']['fraggenescan_training']
++        self.assertEqual(len(model),18)  # root directory plus17regular resources
++        self.assertTrue({'./illumina_5','./complete','./gene','./rgene','./pwm'}<=set(p['path'] for p in model))
++        self.assertEqual(value['resources']['sequence'][0]['sha256'],hashlib.sha256(self.sequence.read_bytes()).hexdigest())
++
++    def test_loaded_ssw_path_and_bytes_are_explicit(self):
++        value=self.capture()
++        path=Path(value['resolved_locations']['ssw_loaded_object'])
++        self.assertEqual(path.name,'libssw.so')
++        self.assertEqual(value['resources']['ssw_loaded_object'][0]['sha256'],hashlib.sha256(path.read_bytes()).hexdigest())
++
++    def test_source_version_mismatch_refused_before_import_or_execution(self):
++        binary=self.root/'isescan.py'
++        binary.write_text("#!/usr/bin/env python3\nversion='1.7.2'\n")
++        binary.chmod(0o755)
++        with patch.dict(os.environ,PATH=str(self.root)+':'+os.environ['PATH']):
++            with self.assertRaisesRegex(ValueError,'requires native1.7.3'):
++                self.capture()
++
++    def test_profile_location_follows_argv0_not_source_file_realpath(self):
++        (self.root/'isescan.py').symlink_to(self.entry)
++        with patch.dict(os.environ,PATH=str(self.root)+':'+os.environ['PATH']):
++            with self.assertRaises(FileNotFoundError) as error:
++                self.capture()
++        self.assertIn(str(self.root/'pHMMs'),str(error.exception))
++
++    def test_fraggenescan_models_follow_invoked_wrapper_directory(self):
++        wrapper=resolver.executable('run_FragGeneScan.pl')
++        (self.root/'run_FragGeneScan.pl').symlink_to(wrapper)
++        (self.root/'FragGeneScan').symlink_to(wrapper.parent/'FragGeneScan')
++        with patch.dict(os.environ,PATH=str(self.root)+':'+os.environ['PATH']):
++            with self.assertRaises(FileNotFoundError) as error:
++                self.capture()
++        self.assertIn(str(self.root/'train'),str(error.exception))
++
++    def test_tampered_receipt_prevents_actual_exec(self):
++        output=self.root/'should-not-exist'
++        value=resolver.capture(self.runtime,str(self.sequence),str(output))
++        value['version']='UNTRUSTED_EDIT'
++        receipt=self.root/'identity.json'
++        receipt.write_text(json.dumps(value))
++        cmd=[sys.executable,str(ROOT/'bin/isescan_runtime_resources.py'),'--runtime-base64',base64.b64encode(json.dumps(self.runtime).encode()).decode(),
++             '--seqfile',str(self.sequence),'--result-prefix',str(output),'--threads','1','--verify',str(receipt),'--execute']
++        result=subprocess.run(cmd,capture_output=True,text=True)
++        self.assertNotEqual(result.returncode,0)
++        self.assertIn('differ from pre-lookup identity',result.stderr)
++        self.assertFalse(output.exists())
++
++
++if __name__=='__main__':
++    unittest.main()

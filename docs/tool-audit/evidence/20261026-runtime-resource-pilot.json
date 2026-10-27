@@ -1,0 +1,63 @@
+{
+  "run_id": "20261026-runtime-resource-pilot",
+  "result": "native_default_runtime_probe_pilot_pass_production_wiring_open",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "patches": {
+    "docs/tool-audit/patches/TA-091-resource-consumers.diff": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+    "docs/tool-audit/patches/TA-016-preserved-report-candidate.diff": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+    "docs/tool-audit/patches/TA-091-resource-root.diff": "b50cb5c15450d7a4b856acd880a86e590e6692520896a3dc7b59c9785f0e9b4e",
+    "docs/tool-audit/patches/TA-091-runtime-resource-pilot.diff": "74f4e758ce846f2050ef609f738b37b8c381f0181d5c9b815e413fbeaab82857"
+  },
+  "candidate_source_paths": 106,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "forward_current_bytes": true,
+  "reverse_HEAD_bytes": true,
+  "temporary_roundtrip_directory": "/tmp/autoplasm-runtime-pilot-7liey2sp",
+  "artifacts": [
+    {
+      "path": "results/tool-audit/20261026-runtime-resources/semibin-pilot-v2/run.json",
+      "sha256": "814403b54f4c8c8d3b36bb04b1c8aa9c77a1cc3b7ab61c2565dcc5718af8c2e1"
+    },
+    {
+      "path": "results/tool-audit/20261026-runtime-resources/private-package-restoration.json",
+      "sha256": "6c60d3d0eca08c0cc9df400fd0fd1da6e53edf69c528d10d5eca6ea5b98d7915"
+    },
+    {
+      "path": "results/tool-audit/20261026-runtime-resources/generated-consumer.diff",
+      "sha256": "85da5007c4a389ac1b8f278473d713de85bdfc9b1e15cbfa8bd9c03885273333"
+    },
+    {
+      "path": "results/tool-audit/20261026-runtime-resources/readset-review.json",
+      "sha256": "419f6822df0db8e4dd56a15c3ec745b3d6f00cca05aa343d0eec12f97943bebc"
+    },
+    {
+      "path": "results/tool-audit/20261026-runtime-resources/driver-attempts.json",
+      "sha256": "b8ab02180e67fcaaf2b43b8ecb484cf631bd94ae089aecd9f776c661fa97b5ca"
+    }
+  ],
+  "trace_status_counts": {
+    "COMPLETED": 8,
+    "CACHED": 3,
+    "FAILED": 1
+  },
+  "runtime_probe_completed": 6,
+  "native_consumer_completed": 2,
+  "native_consumer_cached": 3,
+  "native_consumer_expected_failed": 1,
+  "previous_candidate_sources_unchanged": true,
+  "remaining": [
+    "Production resource-probe/consumer environment and accelerator selection must match",
+    "Custom task.ext arguments, conditional models and external databases need full read-set contracts",
+    "Other7 implicit consumers need fixed native resource resolution and cache/native verification",
+    "TA091 and3 S2 findings plus full M0-M4/P4/default-real/platform/OCI/AWS remain open"
+  ],
+  "scope": "Scientific process copied from current production module; only receipt/probe path inputs and pre-CLI verification added. Fixed2.4.1 nativeCPU15epochs on full official40contig800000bp/seed0; no stub classifier, no scientific accuracy claim. This validates runtime probe mechanism, not production wiring or all environment consumers.",
+  "full_receipt": "results/tool-audit/20261026-runtime-resources/receipt.json",
+  "full_receipt_sha256": "8b5df4b8e3410f78920aa7942e07bb2c6d629c527821c730521b61866a013939",
+  "additional_driver_dependencies_sha256": {
+    "tests/run_semibin_states.py": "ddec6d3b291671998ec0a7357d9a943f34bea6befb6db6e656b8f55a2baf3c69",
+    "tests/module_harness.py": "377b9aa468cef923e97f1be90a4bcedbbde9c823cba313dc81d9838d6d1091a6"
+  },
+  "dependency_scope": "DNA oracle helper matches formal accepted manifest; module harness included among candidate source hashes. No source was changed by this dependency review."
+}

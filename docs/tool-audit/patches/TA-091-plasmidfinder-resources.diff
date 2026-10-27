@@ -1,0 +1,829 @@
+diff --git a/bin/plasmidfinder_runtime_resources.py b/bin/plasmidfinder_runtime_resources.py
+new file mode 100644
+--- /dev/null
++++ b/bin/plasmidfinder_runtime_resources.py
+@@ -0,0 +1,158 @@
++#!/usr/bin/env python3
++"""Fixed PlasmidFinder2.1.6 native parser and runtime resource identity."""
++import argparse
++import ast
++import re
++import base64
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import shlex
++import stat
++import sys
++
++def resource(path):
++    """Content/layout identity; reject incomplete, cyclic or special resources."""
++    root = Path(path)
++    entries = []
++
++    def visit(p, relative, ancestors):
++        link = os.readlink(p) if p.is_symlink() else None
++        before = p.stat()
++        mode = stat.S_IMODE(before.st_mode)
++        if stat.S_ISDIR(before.st_mode):
++            key = (before.st_dev, before.st_ino)
++            if key in ancestors:
++                raise ValueError('Resource directory symlink cycle: ' + str(p))
++            entries.append(dict(path=relative, kind='directory', mode=mode, link=link))
++            for child in sorted(p.iterdir(), key=lambda x: x.name):
++                visit(child, relative + '/' + child.name, ancestors | {key})
++        elif stat.S_ISREG(before.st_mode):
++            digest = hashlib.sha256()
++            with p.open('rb') as stream:
++                for block in iter(lambda: stream.read(1024 * 1024), b''):
++                    digest.update(block)
++            after = p.stat()
++            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
++                    before.st_mode) != (after.st_dev, after.st_ino, after.st_size,
++                                        after.st_mtime_ns, after.st_mode):
++                raise ValueError('Resource changed while hashing: ' + str(p))
++            entries.append(dict(path=relative, kind='file', bytes=after.st_size,
++                                sha256=digest.hexdigest(), mode=mode, link=link))
++        else:
++            raise ValueError('Resource member is not regular file/directory: ' + str(p))
++
++    visit(root, '.', set())
++    return entries
++
++
++
++def verify_entrypoint_interpreter(entry):
++    lines=Path(entry).read_text().splitlines()
++    command=shlex.split(lines[0][2:]) if lines and lines[0].startswith('#!') else []
++    if command and Path(command[0]).name in ['sh','bash']:
++        # Conda's long-prefix console entry point uses this exact exec form.
++        command=shlex.split(lines[1],comments=True) if len(lines)>1 and lines[1].startswith(chr(39)*3+"exec' ") else []
++        if len(command)!=4 or command[0]!='exec' or command[2:]!=['$0','$@']:
++            raise ValueError('Unsupported PlasmidFinder console entry point')
++        interpreter=command[1]
++    elif command and Path(command[0]).name=='env':
++        interpreter=shutil.which(command[1]) if len(command)==2 else None
++    else:
++        interpreter=command[0] if len(command)==1 else None
++    if not interpreter or Path(interpreter).resolve()!=Path(sys.executable).resolve():
++        raise ValueError('PlasmidFinder entry point interpreter differs from resource probe Python')
++    return str(interpreter)
++
++
++# Fixed upstream source hash, after reversing only the Bioconda database-path
++# assignment/default substitution. Do not execute a different monolithic CLI.
++SOURCE_SHA256 = 'df9f23b382f8851daa2dcdbabcc1a5956e93a2f51760ffa4f1bbc81abccf1811'
++
++
++def native_configuration(entry, native_args):
++    source = Path(entry).read_text()
++    normal = re.sub(r'^PLASMIDFINDER_SHARE="[^"\n]+"\n\n', '', source, flags=re.M)
++    normal = normal.replace('default=PLASMIDFINDER_SHARE)', "default='/database')")
++    if hashlib.sha256(normal.encode()).hexdigest() != SOURCE_SHA256:
++        raise ValueError('PlasmidFinder resolver requires exact native2.1.6 source with packaging-only DB relocation')
++    tree = ast.parse(source, filename=str(entry))
++    stop = [i for i, n in enumerate(tree.body) if isinstance(n, ast.Assign)
++            and any(isinstance(t, ast.Name) and t.id == 'file_format' for t in n.targets)]
++    if len(stop) != 1:
++        raise ValueError('Unexpected native2.1.6 file-format parser boundary')
++    tree.body = tree.body[:stop[0] + 1]
++    namespace = dict(__name__='plasmidfinder_native_configuration', __file__=str(entry))
++    original_argv, original_stdout = sys.argv, sys.stdout
++    try:
++        sys.argv = [str(entry)] + list(native_args)
++        # Runs the original argparse, config/taxonomy selection, validation and
++        # file-format detection, stopping before any BLAST/KMA scientific call.
++        exec(compile(tree, str(entry), 'exec'), namespace)
++    finally:
++        sys.argv = original_argv
++        if sys.stdout is not original_stdout:
++            redirected = sys.stdout
++            sys.stdout = original_stdout
++            redirected.close()
++    return namespace
++
++
++def capture(runtime, native_args):
++    import cgecore
++    entry = shutil.which('plasmidfinder.py')
++    if not entry:
++        raise ValueError('PlasmidFinder executable not found')
++    interpreter = verify_entrypoint_interpreter(entry)
++    cfg = native_configuration(entry, native_args)
++    args = cfg['args']
++    kind = cfg['file_format']
++    if kind not in ['fasta', 'fastq']:
++        raise ValueError('Native PlasmidFinder input must be fasta or fastq: ' + kind)
++    method = args.method_path or ('blastn' if kind == 'fasta' else 'kma')
++    executable = cfg['find_executable'](method)
++    if executable is None:
++        raise ValueError('Native PlasmidFinder method executable not found: ' + method)
++    if kind == 'fasta' and len(args.infile) != 1:
++        raise ValueError('Native PlasmidFinder accepts only one assembled FASTA')
++    if kind == 'fastq' and len(args.infile) > 2:
++        raise ValueError('Native PlasmidFinder accepts at most two read files')
++    package = Path(cgecore.__file__).parent
++    return dict(schema_version=1, tool='PlasmidFinder', version='2.1.6',
++                version_basis='Exact fixed upstream source after packaging-only normalization, not CLI version output',
++                runtime=runtime, parsed_arguments=vars(args), file_format=kind,
++                selected_databases=list(cfg['databases']),
++                resolved_locations=dict(entrypoint=entry, declared_interpreter=interpreter,
++                                        database=args.db_path, method=executable, cgecore=str(package)),
++                resources=dict(entrypoint=resource(entry), interpreter=resource(sys.executable),
++                               resolver=resource(__file__), database=resource(args.db_path),
++                               method=resource(executable),
++                               cgecore_code={str(p.relative_to(package)): resource(p)
++                                             for p in sorted(package.rglob('*.py'))},
++                               inputs=[resource(p) for p in args.infile]))
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--runtime-base64', required=True)
++    parser.add_argument('--output', type=Path)
++    parser.add_argument('--verify', type=Path)
++    parser.add_argument('--execute', action='store_true')
++    parser.add_argument('native_args', nargs=argparse.REMAINDER)
++    args = parser.parse_args()
++    native = args.native_args[1:] if args.native_args[:1] == ['--'] else args.native_args
++    identity = capture(json.loads(base64.b64decode(args.runtime_base64)), native)
++    if args.verify is not None and json.loads(args.verify.read_text()) != identity:
++        raise ValueError('PlasmidFinder runtime resources/arguments differ from pre-lookup identity')
++    if args.output is not None:
++        args.output.write_text(json.dumps(identity, sort_keys=True, separators=(',', ':')) + '\n')
++    if args.execute:
++        if args.verify is None:
++            raise ValueError('--execute requires verified pre-lookup receipt')
++        os.execvp('plasmidfinder.py', ['plasmidfinder.py'] + native)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/lib/plasmidfinder_runtime.nf b/lib/plasmidfinder_runtime.nf
+new file mode 100644
+--- /dev/null
++++ b/lib/plasmidfinder_runtime.nf
+@@ -0,0 +1,28 @@
++/* Both script closures run before their task-cache lookup. */
++def plasmidfinderRuntime(task, engine, meta) {
++    def accelerator = task.accelerator
++    return [conda: task.conda?.toString() ?: '', container: task.container?.toString() ?: '',
++            engine: engine?.toString() ?: '',
++            accelerator: accelerator ? [request: accelerator.request, limit: accelerator.limit,
++                                         type: accelerator.type, runtime: accelerator.runtime] : null,
++            before_script: task.beforeScript ?: '', modules: task.module ?: [],
++            container_options: task.containerOptions ?: '', args: task.ext.args?.toString() ?: '',
++            output_prefix: task.ext.prefix?.toString() ?: meta.id.toString()]
++}
++
++def plasmidfinderRequireRuntime(identity, actual) {
++    if (identity.runtime != actual)
++        throw new IllegalStateException('PlasmidFinder resource probe/consumer runtime mismatch before cache lookup; configure PLASMIDFINDER and PLASMIDFINDER_RESOURCE_PROBE with matching conda/container/accelerator/beforeScript/modules/containerOptions')
++}
++
++def plasmidfinderRuntimeBase64(value) {
++    return groovy.json.JsonOutput.toJson(value).getBytes('UTF-8').encodeBase64().toString()
++}
++
++def plasmidfinderQuote(value) {
++    return "'" + value.toString().replace("'", "'\"'\"'") + "'"
++}
++
++def plasmidfinderResourceRecord(meta, receipt) {
++    return tuple(meta, new groovy.json.JsonSlurper().parseText(receipt.text), receipt)
++}
+diff --git a/conf/nfcore_downstream.config b/conf/nfcore_downstream.config
+--- a/conf/nfcore_downstream.config
++++ b/conf/nfcore_downstream.config
+@@ -15,7 +15,7 @@
+ process {
+ 
+     // ---------------- typing (06) ----------------
+-    withName: 'PLASMIDFINDER' {
++    withName: 'PLASMIDFINDER|PLASMIDFINDER_RESOURCE_PROBE' {
+         // 2.1.6 already writes data.json; its native parser has no --legacy flag.
+         // -x (extended output) is supplied by the module.
+         ext.args   = ''
+diff --git a/modules/nf-core/plasmidfinder/main.nf b/modules/nf-core/plasmidfinder/main.nf
+--- a/modules/nf-core/plasmidfinder/main.nf
++++ b/modules/nf-core/plasmidfinder/main.nf
+@@ -1,4 +1,7 @@
++include { plasmidfinderRuntime; plasmidfinderRequireRuntime; plasmidfinderRuntimeBase64; plasmidfinderQuote } from '../../../lib/plasmidfinder_runtime'
++
+ process PLASMIDFINDER {
++    cache 'deep'
+     tag "$meta.id"
+     label 'process_low'
+ 
+@@ -9,7 +12,8 @@
+         'quay.io/biocontainers/plasmidfinder:2.1.6--py310hdfd78af_1' }"
+ 
+     input:
+-    tuple val(meta), path(fasta)
++    tuple val(meta), path(fasta), val(runtime_identity), path(runtime_receipt)
++    path(resource_helper, stageAs: 'plasmidfinder_runtime_resources.py')
+ 
+     output:
+     tuple val(meta), path("*.json")                 , emit: json
+@@ -28,17 +32,14 @@
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     def is_compressed = fasta.getName().endsWith(".gz") ? true : false
+     def fasta_name = fasta.getName().replace(".gz", "")
++    def runtime = plasmidfinderRuntime(task,workflow.containerEngine,meta)
++    plasmidfinderRequireRuntime(runtime_identity,runtime)
++    def encoded = plasmidfinderRuntimeBase64(runtime)
+     """
+-    # Decompress input FASTA if needed
+     if [ "$is_compressed" == "true" ]; then
+-        gzip -c -d $fasta > $fasta_name
++        gzip -c -d ${plasmidfinderQuote(fasta)} > ${plasmidfinderQuote(fasta_name)}
+     fi
+-
+-    plasmidfinder.py \\
+-        $args \\
+-        -i $fasta_name \\
+-        -o ./ \\
+-        -x
++    python3 plasmidfinder_runtime_resources.py --runtime-base64 '${encoded}' --verify ${plasmidfinderQuote(runtime_receipt)} --execute -- ${args} -i ${plasmidfinderQuote(fasta_name)} -o ./ -x
+ 
+     # Rename hard-coded outputs with prefix to avoid name collisions
+     mv data.json ${prefix}.json
+@@ -50,6 +51,7 @@
+     """
+ 
+     stub:
++    plasmidfinderRequireRuntime(runtime_identity,plasmidfinderRuntime(task,workflow.containerEngine,meta))
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
+     touch ${prefix}.json
+@@ -59,3 +61,42 @@
+     touch ${prefix}-plasmid_seqs.fsa
+     """
+ }
++
++process PLASMIDFINDER_RESOURCE_PROBE {
++    cache false
++    tag "${meta.id}"
++    label 'process_low'
++
++    conda "${moduleDir}/environment.yml"
++    container "${ workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container ?
++        'https://depot.galaxyproject.org/singularity/plasmidfinder:2.1.6--py310hdfd78af_1':
++        'quay.io/biocontainers/plasmidfinder:2.1.6--py310hdfd78af_1' }"
++
++    input:
++    tuple val(meta), path(fasta)
++    path(resource_helper, stageAs: 'plasmidfinder_runtime_resources.py')
++
++    output:
++    tuple val(meta), path('plasmidfinder_runtime_identity.json'), emit: identity
++
++    when:
++    task.ext.when == null || task.ext.when
++
++    script:
++    def args = task.ext.args ?: ''
++    def compressed = fasta.getName().endsWith('.gz')
++    def name = fasta.getName().replace('.gz','')
++    def encoded = plasmidfinderRuntimeBase64(plasmidfinderRuntime(task,workflow.containerEngine,meta))
++    """
++    if [ '${compressed}' == 'true' ]; then
++        gzip -c -d ${plasmidfinderQuote(fasta)} > ${plasmidfinderQuote(name)}
++    fi
++    python3 plasmidfinder_runtime_resources.py --runtime-base64 '${encoded}' --output plasmidfinder_runtime_identity.json -- ${args} -i ${plasmidfinderQuote(name)} -o ./ -x
++    """
++
++    stub:
++    def encoded = plasmidfinderRuntimeBase64([schema_version:1,stub:true,runtime:plasmidfinderRuntime(task,workflow.containerEngine,meta)])
++    """
++    printf '%s' '${encoded}' | base64 -d > plasmidfinder_runtime_identity.json
++    """
++}
+diff --git a/modules/nf-core/plasmidfinder/meta.yml b/modules/nf-core/plasmidfinder/meta.yml
+--- a/modules/nf-core/plasmidfinder/meta.yml
++++ b/modules/nf-core/plasmidfinder/meta.yml
+@@ -26,6 +26,17 @@
+         description: Input FASTA or FASTQ formatted genome sequences
+         pattern: "*.{fastq.gz,fq.gz,fastq.gz,fna.gz,fa.gz}"
+         ontologies: []
++    - runtime_identity:
++        type: map
++        description: Native pre-cache database/code/argv identity
++    - runtime_receipt:
++        type: file
++        description: JSON verified before actual native execution
++        pattern: "plasmidfinder_runtime_identity.json"
++  - resource_helper:
++      type: file
++      description: Fixed2.1.6 native parser resource resolver and verified argv runner
++      pattern: "plasmidfinder_runtime_resources.py"
+ output:
+   json:
+     - - meta:
+diff --git a/modules/nf-core/plasmidfinder/tests/main.nf b/modules/nf-core/plasmidfinder/tests/main.nf
+new file mode 100644
+--- /dev/null
++++ b/modules/nf-core/plasmidfinder/tests/main.nf
+@@ -0,0 +1,19 @@
++nextflow.enable.dsl=2
++include { PLASMIDFINDER; PLASMIDFINDER_RESOURCE_PROBE } from '../main'
++include { plasmidfinderResourceRecord } from '../../../../lib/plasmidfinder_runtime'
++workflow PLASMIDFINDER_RUNTIME_TEST {
++    take:
++    sequence
++    main:
++    def helper=Channel.value(file("${moduleDir}/../../../../bin/plasmidfinder_runtime_resources.py",checkIfExists:true))
++    PLASMIDFINDER_RESOURCE_PROBE(sequence,helper)
++    def identity=PLASMIDFINDER_RESOURCE_PROBE.out.identity.map { meta,receipt -> plasmidfinderResourceRecord(meta,receipt) }
++    PLASMIDFINDER(sequence.join(identity,failOnDuplicate:true,failOnMismatch:true),helper)
++    emit:
++    json=PLASMIDFINDER.out.json
++    txt=PLASMIDFINDER.out.txt
++    tsv=PLASMIDFINDER.out.tsv
++    genome_seq=PLASMIDFINDER.out.genome_seq
++    plasmid_seq=PLASMIDFINDER.out.plasmid_seq
++    versions_plasmidfinder=PLASMIDFINDER.out.versions_plasmidfinder
++}
+diff --git a/modules/nf-core/plasmidfinder/tests/main.nf.test b/modules/nf-core/plasmidfinder/tests/main.nf.test
+--- a/modules/nf-core/plasmidfinder/tests/main.nf.test
++++ b/modules/nf-core/plasmidfinder/tests/main.nf.test
+@@ -1,65 +1,57 @@
+-
+-nextflow_process {
+-
+-    name "Test Process PLASMIDFINDER"
+-    script "../main.nf"
+-    process "PLASMIDFINDER"
+-
++nextflow_workflow {
++    name "PlasmidFinder native resources with bacterial input only"
++    script "./main.nf"
++    workflow "PLASMIDFINDER_RUNTIME_TEST"
++    config "./nextflow.config"
+     tag "modules"
+     tag "modules_nfcore"
+     tag "plasmidfinder"
+ 
+-    test("test-plasmidfinder") {
+-
++    // User excludes viral elements. Use the complete original fixed bacterial
++    // genome; retain the original native zero-hit TSV oracle and five outputs.
++    test("bacteroides_fragilis - native negative") {
+         when {
+-            process {
++            workflow {
+                 """
+-                input[0] = [
+-                    [ id:'test', single_end:false ], // meta map
+-				    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
+-                ]
+-
++                input[0] = Channel.value([
++                    [id:'test',single_end:false],
++                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz',checkIfExists:true)
++                ])
+                 """
+             }
+         }
+-
+         then {
+-            assertAll(
+-                { assert process.success },
+-                { assert snapshot(
+-					file(process.out.json[0][1]).name, // unstable
+-					file(process.out.txt[0][1]).readLines()[3..7],
+-					process.out.tsv,
+-					file(process.out.genome_seq[0][1]).name, // empty
+-					file(process.out.plasmid_seq[0][1]).name, // empty
+-					process.out.findAll { key, val -> key.startsWith('versions') }
+-					).match()
+-				}
+-            )
++            assert workflow.success
++            assert workflow.out.tsv.size()==1
++            def report=new File(workflow.out.tsv.get(0).get(1).toString())
++            assert java.security.MessageDigest.getInstance('MD5').digest(report.bytes).encodeHex().toString()=='c457f4c5f1eacaa47e8466c01c4a1e7c'
++            assert report.readLines().findAll { it.trim() }.size()==1
++            assert new File(workflow.out.genome_seq.get(0).get(1).toString()).length()==0
++            assert new File(workflow.out.plasmid_seq.get(0).get(1).toString()).length()==0
++            assert new File(workflow.out.json.get(0).get(1).toString()).length()>0
++            assert new File(workflow.out.txt.get(0).get(1).toString()).length()>0
++            assert workflow.out.versions_plasmidfinder.get(0).get(2)=='2.1.6'
+         }
+     }
+-
+-    test("test-plasmidfinder-stub") {
++    test("bacteroides_fragilis - stub interface") {
+         options "-stub"
+-
+         when {
+-            process {
++            workflow {
+                 """
+-                input[0] = [
+-                    [ id:'test', single_end:false ], // meta map
+-				    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
+-                ]
+-
++                input[0] = Channel.value([
++                    [id:'test',single_end:false],
++                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz',checkIfExists:true)
++                ])
+                 """
+             }
+         }
+-
+         then {
+-            assertAll(
+-                { assert process.success },
+-                { assert snapshot(process.out).match() }
+-            )
++            assert workflow.success
++            for (key in ['json','txt','tsv','genome_seq','plasmid_seq']) {
++                assert workflow.out[key].size()==1
++                assert new File(workflow.out[key].get(0).get(1).toString()).length()==0
++            }
++            assert workflow.out.versions_plasmidfinder.get(0).get(2)=='2.1.6'
+         }
+     }
+-
+ }
+diff --git a/modules/nf-core/plasmidfinder/tests/nextflow.config b/modules/nf-core/plasmidfinder/tests/nextflow.config
+new file mode 100644
+--- /dev/null
++++ b/modules/nf-core/plasmidfinder/tests/nextflow.config
+@@ -0,0 +1,6 @@
++process {
++    withName: 'PLASMIDFINDER|PLASMIDFINDER_RESOURCE_PROBE' {
++        ext.args = ''
++        ext.prefix = { meta.id }
++    }
++}
+diff --git a/subworkflows/plasmid_downstream.nf b/subworkflows/plasmid_downstream.nf
+--- a/subworkflows/plasmid_downstream.nf
++++ b/subworkflows/plasmid_downstream.nf
+@@ -1,3 +1,4 @@
++include { plasmidfinderResourceRecord } from '../lib/plasmidfinder_runtime'
+ include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
+ include { abricateResourceRecord } from '../lib/abricate_runtime'
+ include { integronfinderResourceRecord } from '../lib/integronfinder_runtime'
+@@ -17,7 +18,7 @@
+  * publishDir replication for the nf-core modules live in
+  * conf/nfcore_downstream.config.
+  */
+-include { PLASMIDFINDER } from '../modules/nf-core/plasmidfinder'
++include { PLASMIDFINDER; PLASMIDFINDER_RESOURCE_PROBE } from '../modules/nf-core/plasmidfinder'
+ include { MOBSUITE_TYPER as MOB_TYPER } from '../modules/nf-core/mobsuite/typer'
+ include { COPLA } from '../modules/typing/copla'
+ include { MACSYFINDER_DOWNLOAD } from '../modules/nf-core/macsyfinder/download'
+@@ -72,7 +73,11 @@
+     // ---------------- typing (06) ----------------
+     if (selectedTools(params.typing_tools).contains('plasmidfinder')) {
+         // nf-core module: bundled PlasmidFinder db (params.plasmidfinder_db no longer used)
+-        PLASMIDFINDER(ch_plasmids)
++        ch_plasmidfinder_helper = Channel.value(file("${moduleDir}/../bin/plasmidfinder_runtime_resources.py",checkIfExists:true))
++        PLASMIDFINDER_RESOURCE_PROBE(ch_plasmids,ch_plasmidfinder_helper)
++        ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMIDFINDER_RESOURCE_PROBE.out], '06_plasmid_typing', 'PLASMIDFINDER_RESOURCE_PROBE'))
++        ch_plasmidfinder_identity = PLASMIDFINDER_RESOURCE_PROBE.out.identity.map { meta,receipt -> plasmidfinderResourceRecord(meta,receipt) }
++        PLASMIDFINDER(ch_plasmids.join(ch_plasmidfinder_identity,failOnDuplicate:true,failOnMismatch:true),ch_plasmidfinder_helper)
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMIDFINDER.out], '06_plasmid_typing', 'PLASMIDFINDER'))
+     }
+     if (selectedTools(params.typing_tools).contains('mob_typer')) {
+diff --git a/tests/mock_e2e/mock_python.py b/tests/mock_e2e/mock_python.py
+--- a/tests/mock_e2e/mock_python.py
++++ b/tests/mock_e2e/mock_python.py
+@@ -9,8 +9,29 @@
+ import sys
+ 
+ args = sys.argv[1:]
+-if not args or Path(args[0]).name not in ['isescan_runtime_resources.py','integronfinder_runtime_resources.py']:
++if not args or Path(args[0]).name not in ['isescan_runtime_resources.py','integronfinder_runtime_resources.py','plasmidfinder_runtime_resources.py']:
+     os.execv(sys.executable, [sys.executable] + args)
++
++if Path(args[0]).name == 'plasmidfinder_runtime_resources.py':
++    parser = argparse.ArgumentParser()
++    parser.add_argument('--runtime-base64', required=True)
++    parser.add_argument('--output', type=Path)
++    parser.add_argument('--verify', type=Path)
++    parser.add_argument('--execute', action='store_true')
++    parser.add_argument('native_args', nargs=argparse.REMAINDER)
++    request = parser.parse_args(args[1:])
++    native = request.native_args[1:] if request.native_args[:1] == ['--'] else request.native_args
++    identity = dict(schema_version=1, runtime=json.loads(base64.b64decode(request.runtime_base64)),
++                    scope='EXPLICIT_MOCK_PLASMIDFINDER_RESOURCE_SCAN_NO_NATIVE_CLASSIFICATION',
++                    native_arguments=native, sequence_sha256=hashlib.sha256(Path(native[native.index('-i')+1]).read_bytes()).hexdigest())
++    if request.verify is not None:
++        assert json.loads(request.verify.read_text()) == identity
++    if request.output is not None:
++        request.output.write_text(json.dumps(identity,sort_keys=True)+'\n')
++    if request.execute:
++        assert request.verify is not None
++        os.execvp('plasmidfinder.py',['plasmidfinder.py']+native)
++    sys.exit(0)
+ 
+ if Path(args[0]).name == 'integronfinder_runtime_resources.py':
+     parser = argparse.ArgumentParser()
+diff --git a/tests/mock_e2e/run.py b/tests/mock_e2e/run.py
+--- a/tests/mock_e2e/run.py
++++ b/tests/mock_e2e/run.py
+@@ -101,7 +101,7 @@
+         counts[name] = counts.get(name, 0) + 1
+     expected = {name: 6 for name in ['QUAST', 'GENOMAD', 'PLASMID_CONSENSUS', 'PLASMID_STRUCTURE']}
+     if not empty:
+-        expected.update({name: 6 for name in ['PLASMIDFINDER', 'MOB_TYPER', 'BAKTA', 'AMRFINDERPLUS', 'ISESCAN', 'ISESCAN_RESOURCE_PROBE', 'INTEGRONFINDER', 'INTEGRONFINDER_RESOURCE_PROBE']})
++        expected.update({name: 6 for name in ['PLASMIDFINDER', 'PLASMIDFINDER_RESOURCE_PROBE', 'MOB_TYPER', 'BAKTA', 'AMRFINDERPLUS', 'ISESCAN', 'ISESCAN_RESOURCE_PROBE', 'INTEGRONFINDER', 'INTEGRONFINDER_RESOURCE_PROBE']})
+         expected.update(PLASMID_CATALOG_PREPARE=1, MMSEQS2=1)
+     expected['REPORT'] = 1
+     assert counts == expected, (counts, expected)
+@@ -221,7 +221,7 @@
+     if long_input == 'pod5' or (long_input == 'mixed' and platform != 'pacbio_hifi'):
+         expected['DORADO_BASECALL'] = 6 if long_input == 'pod5' else 2
+     if not empty:
+-        expected.update({name: 6 for name in ['PLASMIDFINDER', 'MOB_TYPER', 'BAKTA',
++        expected.update({name: 6 for name in ['PLASMIDFINDER', 'PLASMIDFINDER_RESOURCE_PROBE', 'MOB_TYPER', 'BAKTA',
+             'AMRFINDERPLUS', 'ISESCAN', 'ISESCAN_RESOURCE_PROBE', 'INTEGRONFINDER', 'INTEGRONFINDER_RESOURCE_PROBE']})
+         if platform in ['illumina', 'hybrid']:
+             expected.update(BOWTIE2_BUILD_ABUNDANCE=6, BOWTIE2_ALIGN_ABUNDANCE=6,
+diff --git a/tests/nextflow/plasmidfinder_native.nf b/tests/nextflow/plasmidfinder_native.nf
+--- a/tests/nextflow/plasmidfinder_native.nf
++++ b/tests/nextflow/plasmidfinder_native.nf
+@@ -1,5 +1,10 @@
+ nextflow.enable.dsl=2
+-include { PLASMIDFINDER } from '../../modules/nf-core/plasmidfinder'
++include { plasmidfinderResourceRecord } from '../../lib/plasmidfinder_runtime'
++include { PLASMIDFINDER; PLASMIDFINDER_RESOURCE_PROBE } from '../../modules/nf-core/plasmidfinder'
+ workflow {
+-    PLASMIDFINDER(Channel.value(tuple([id:'positive',single_end:false],file(params.fasta,checkIfExists:true))))
++    def sequence=Channel.value(tuple([id:'positive',single_end:false],file(params.fasta,checkIfExists:true)))
++    def helper=Channel.value(file("${moduleDir}/../../bin/plasmidfinder_runtime_resources.py",checkIfExists:true))
++    PLASMIDFINDER_RESOURCE_PROBE(sequence,helper)
++    def identity=PLASMIDFINDER_RESOURCE_PROBE.out.identity.map { meta,receipt -> plasmidfinderResourceRecord(meta,receipt) }
++    PLASMIDFINDER(sequence.join(identity,failOnDuplicate:true,failOnMismatch:true),helper)
+ }
+diff --git a/tests/run_plasmidfinder_native.py b/tests/run_plasmidfinder_native.py
+--- a/tests/run_plasmidfinder_native.py
++++ b/tests/run_plasmidfinder_native.py
+@@ -2,7 +2,7 @@
+ """Fixed 2.1.6 native regression using the complete original upstream positive fixture.
+ 
+ Uses the production module and shared downstream configuration. This bounded
+-regression does not establish resource-aware cache identity or OCI readiness.
++regression does not establish mutation-aware cache identity or OCI readiness.
+ """
+ import argparse
+ import csv
+@@ -41,6 +41,7 @@
+     sources = ['modules/nf-core/plasmidfinder/main.nf',
+                'modules/nf-core/plasmidfinder/environment.yml',
+                'conf/nfcore_downstream.config', 'tests/mock_e2e/mock_tool.py',
++               'lib/plasmidfinder_runtime.nf', 'bin/plasmidfinder_runtime_resources.py',
+                'tests/nextflow/plasmidfinder_native.nf', 'tests/run_plasmidfinder_native.py']
+     before = {p: sha(ROOT / p) for p in sources}
+     assert 'conda-forge::python=3.10' in (ROOT / sources[1]).read_text()
+@@ -64,7 +65,7 @@
+                       "trace.fields='task_id,hash,name,status,exit,workdir'\n")
+     legacy = base / 'legacy.config'
+     legacy.write_text("includeConfig '" + str(config) + "'\n"
+-                      "process { withName: 'PLASMIDFINDER' { ext.args='--legacy' } }\n")
++                      "process { withName: 'PLASMIDFINDER|PLASMIDFINDER_RESOURCE_PROBE' { ext.args='--legacy' } }\n")
+     runs = []
+     suffixes = ['.json', '.txt', '.tsv', '-hit_in_genome_seq.fsa', '-plasmid_seqs.fsa']
+     def execute(name, fasta, expected, resume=None, stub=False, selected_config=config):
+@@ -84,9 +85,16 @@
+         record = dict(case=name, command=cmd, exit_code=proc.returncode, tasks=tasks)
+         runs.append(record)
+         (base / 'progress.json').write_text(json.dumps(runs, indent=2) + '\n')
+-        assert len(tasks) == 1 and tasks[0]['status'] == expected, record
++        if expected == 'FAILED':
++            assert len(tasks) == 1 and tasks[0]['name'].startswith('PLASMIDFINDER_RESOURCE_PROBE') and tasks[0]['status'] == 'FAILED', record
++            consumer = tasks[0]
++        else:
++            assert len(tasks) == 2, record
++            probe = next(t for t in tasks if t['name'].startswith('PLASMIDFINDER_RESOURCE_PROBE'))
++            consumer = next(t for t in tasks if t['name'].startswith('PLASMIDFINDER ('))
++            assert probe['status'] == 'COMPLETED' and consumer['status'] == expected, record
+         assert (proc.returncode == 0) == (expected != 'FAILED'), record
+-        work = Path(tasks[0]['workdir'])
++        work = Path(consumer['workdir'])
+         shell = (work / '.command.sh').read_text()
+         if expected == 'FAILED':
+             assert 'unrecognized arguments: --legacy' in (work / '.command.log').read_text()
+@@ -114,7 +122,7 @@
+                               all_nine_default_database_results_checked=True,
+                               output_sha256={s: sha(p) for s, p in outputs.items()})
+         print(name, expected, flush=True)
+-        return tasks[0]
++        return consumer
+     execute('legacy-cli', fixture, 'FAILED', selected_config=legacy)
+     cold = execute('cold', fixture, 'COMPLETED')
+     session = run_session_uuid('plasmidfinder_cold', base)
+diff --git a/tests/run_plasmidfinder_runtime_native.py b/tests/run_plasmidfinder_runtime_native.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_plasmidfinder_runtime_native.py
+@@ -0,0 +1,112 @@
++#!/usr/bin/env python3
++"""Full original PlasmidFinder2.1.6 positive: private native cache/resource controls."""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import shutil
++import subprocess
++from module_harness import run_session_uuid
++from run_plasmidfinder_native import sequences
++
++ROOT=Path(__file__).resolve().parents[1]
++
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++
++
++def run(base,prefix,upstream):
++    base.mkdir(parents=True,exist_ok=False)
++    source=prefix/'share/plasmidfinder-2.1.6/database';database=base/'private-database'
++    shutil.copytree(source,database)
++    bindir=base/'private-bin';bindir.mkdir();entry=bindir/'plasmidfinder.py'
++    original=(prefix/'bin/plasmidfinder.py').read_text()
++    relocated=re.sub(r'(?m)^PLASMIDFINDER_SHARE="[^"\n]+"$',lambda m:'PLASMIDFINDER_SHARE="'+str(database)+'"',original)
++    assert relocated!=original and relocated.replace(str(database),str(source))==original
++    entry.write_text(relocated);entry.chmod(0o755)
++    watched=[p for p in database.rglob('*') if p.is_file()]
++    originals={p:(p.read_bytes(),p.stat()) for p in watched}
++    for p in watched:
++        old=source/p.relative_to(database)
++        assert sha(old)==sha(p) and (p.stat().st_dev,p.stat().st_ino)!=(old.stat().st_dev,old.stat().st_ino)
++    fixture=upstream/'test/test.fsa';golden=(upstream/'test/test_results.tsv').read_text()
++    assert fixture.stat().st_size==569 and list(map(len,sequences(fixture)))==[540]
++    env=dict(os.environ,PATH=str(bindir)+':'+str(prefix/'bin')+':'+os.environ['PATH'],PYTHONDONTWRITEBYTECODE='1')
++    config=base/'config'
++    common="includeConfig '"+str(ROOT/'conf/nfcore_downstream.config')+"'\nparams.outdir='"+str(base/'out')+"'\nparams.publish_dir_mode='copy'\nprocess { executor='local';cpus=1;memory='1 GB';errorStrategy='terminate';maxRetries=0 }\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\ntrace.fields='task_id,hash,name,status,exit,workdir'\n"
++    config.write_text(common)
++    sources=['tests/run_plasmidfinder_runtime_native.py','tests/nextflow/plasmidfinder_native.nf','modules/nf-core/plasmidfinder/main.nf','modules/nf-core/plasmidfinder/environment.yml','lib/plasmidfinder_runtime.nf','bin/plasmidfinder_runtime_resources.py','conf/nfcore_downstream.config']
++    before={p:sha(ROOT/p) for p in sources};runs=[];session=None
++    def execute(name,status,note='R27',selected=False):
++        nonlocal session
++        case=base/name;case.mkdir();trace=case/'trace.tsv'
++        cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(ROOT/'tests/nextflow/plasmidfinder_native.nf'),'--fasta',str(fixture),'-work-dir',str(base/'work'),'-with-trace',str(trace),'-ansi-log','false']
++        cmd+=['-name','plasmidfinder_runtime_native'] if session is None else ['-resume',session]
++        proc=subprocess.run(cmd,cwd=base,env=env,capture_output=True,text=True,timeout=180)
++        (case/'stdout').write_text(proc.stdout);(case/'stderr').write_text(proc.stderr)
++        tasks=list(csv.DictReader(trace.open(),delimiter='\t'));record=dict(case=name,command=cmd,exit_code=proc.returncode,tasks=tasks);runs.append(record)
++        (base/'progress.json').write_text(json.dumps(runs,indent=2)+'\n')
++        probe=next(t for t in tasks if t['name'].startswith('PLASMIDFINDER_RESOURCE_PROBE'))
++        if status=='PROBE_FAILED':
++            assert probe['status']=='FAILED' and len(tasks)==1 and proc.returncode!=0,record
++            assert 'database file' in (Path(probe['workdir'])/'.command.log').read_text()
++            record['no_consumer_submitted']=True
++            print(name,status,flush=True)
++            return
++        assert probe['status']=='COMPLETED',record
++        identity=Path(probe['workdir'])/'plasmidfinder_runtime_identity.json';resolved=json.loads(identity.read_text())
++        assert resolved['resolved_locations']['database']==str(database)
++        assert resolved['resolved_locations']['entrypoint']==str(entry)
++        assert resolved['selected_databases']==(['enterobacteriaceae'] if selected else ['enterobacteriaceae','Inc18','NT_Rep','Rep1','Rep2','Rep3','RepA_N','RepL','Rep_trans'])
++        record['identity_sha256']=sha(identity)
++        if status=='CONTEXT_REFUSED':
++            assert proc.returncode!=0 and len(tasks)==1,record
++            assert 'runtime mismatch before cache lookup' in proc.stdout+proc.stderr
++            record['no_consumer_submitted']=True
++        else:
++            consumer=next(t for t in tasks if t['name'].startswith('PLASMIDFINDER ('))
++            assert len(tasks)==2 and consumer['status']==status,record
++            assert (proc.returncode==0)==(status!='FAILED'),record
++            record['consumer_hash']=consumer['hash'];work=Path(consumer['workdir'])
++            if status=='FAILED':
++                assert 'BLAST did not run as expected' in (work/'.command.log').read_text()
++            else:
++                report=work/'positive.plasmidfinder.tsv'
++                assert report.read_text()==golden.replace('\tR27\t','\t'+note+'\t')
++                for suffix in ['-hit_in_genome_seq.fsa','-plasmid_seqs.fsa']:
++                    assert sequences(work/('positive.plasmidfinder'+suffix))==sequences(fixture)
++                data=json.loads((work/'positive.plasmidfinder.json').read_text())['plasmidfinder']
++                hit=next(iter(data['results']['Enterobacteriaceae']['enterobacteriaceae'].values()))
++                assert hit['identity']==hit['coverage']==100 and hit['note']==note
++                assert hit['HSP_length']==hit['template_length']==540 and hit['positions_in_contig']=='1..540'
++                assert ('Gram Positive' not in data['results']) if selected else len(data['results']['Gram Positive'])==8
++                record.update(full_original_golden_tsv_equal_except_expected_note=True,full_hit_and_reference_dna_equal=True)
++        if session is None:session=run_session_uuid('plasmidfinder_runtime_native',base)
++        print(name,status,flush=True)
++    def restore():
++        for p,(data,st) in originals.items():
++            p.write_bytes(data);p.chmod(st.st_mode&0o7777);os.utime(p,ns=(st.st_atime_ns,st.st_mtime_ns))
++    def mutate(p,data):
++        st=originals[p][1];assert len(data)==st.st_size;p.write_bytes(data);os.utime(p,ns=(st.st_atime_ns,st.st_mtime_ns));assert p.stat().st_size==st.st_size and p.stat().st_mtime_ns==st.st_mtime_ns
++    try:
++        execute('cold','COMPLETED');execute('unchanged','CACHED')
++        p=database/'enterobacteriaceae.fsa';data=originals[p][0];assert b'IncHI1B(R27)_1_R27_AF250878' in data
++        mutate(p,data.replace(b'IncHI1B(R27)_1_R27_AF250878',b'IncHI1B(R27)_1_R28_AF250878',1));execute('same-stat-note','COMPLETED',note='R28');restore();execute('note-restored','CACHED')
++        sidecar=database/'enterobacteriaceae.comp.b';data=bytearray(originals[sidecar][0]);data[-1]^=1;mutate(sidecar,bytes(data));execute('unused-kma-sidecar','COMPLETED');restore();execute('sidecar-restored','CACHED')
++        p.unlink();execute('missing-selected-fsa','PROBE_FAILED');restore()
++        mutate(p,b'X'*len(originals[p][0]));execute('corrupt-selected-fsa','FAILED');restore();execute('fsa-restored','CACHED')
++        config.write_text(common+"process { withName: 'PLASMIDFINDER|PLASMIDFINDER_RESOURCE_PROBE' { ext.args='-d enterobacteriaceae -q' } }\n");execute('selected-quiet','COMPLETED',selected=True)
++        for label,option in [('args',"ext.args='-d enterobacteriaceae'"),('before-script',"beforeScript='true'")]:
++            config.write_text(common+"process { withName: 'PLASMIDFINDER' { "+option+" } }\n");execute('mismatched-'+label,'CONTEXT_REFUSED')
++        config.write_text(common);execute('final-restored','CACHED')
++    finally:restore()
++    assert all(sha(p)==sha(source/p.relative_to(database)) and (p.stat().st_mode&0o7777)==(st.st_mode&0o7777) for p,(_,st) in originals.items())
++    assert before=={p:sha(ROOT/p) for p in sources}
++    result=dict(pass_bounded_checks=True,formal_acceptance=False,source_sha256=before,runs=runs,private_database_files_restored=len(originals),private_entrypoint_packaging_only_relocation=True,full_original_fixture_sha256=sha(fixture),scope='Actual fixed2.1.6 CLI/CGEcore/BLAST and complete upstream software positive; complete private packaged DB. Scientific header-note mutation, conservative unused KMA sidecar invalidation, restoration caches, real missing FSA failure, native taxonomy/quiet selection, pre-cache context refusal. No all-environment/OCI/scientific accuracy certificate.')
++    (base/'run.json').write_text(json.dumps(result,indent=2)+'\n')
++
++
++if __name__=='__main__':
++    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True);p.add_argument('--prefix',type=Path,required=True);p.add_argument('--upstream',type=Path,required=True);a=p.parse_args();run(a.output.resolve(),a.prefix.resolve(),a.upstream.resolve())
+diff --git a/tests/test_plasmidfinder_runtime_resources.py b/tests/test_plasmidfinder_runtime_resources.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_plasmidfinder_runtime_resources.py
+@@ -0,0 +1,86 @@
++"""Native fixed2.1.6 parser/read-set controls; no classifier accuracy claim."""
++import contextlib
++import io
++import json
++import os
++from pathlib import Path
++import shutil
++import sys
++import tempfile
++import unittest
++from unittest.mock import patch
++
++sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'bin'))
++import plasmidfinder_runtime_resources as helper
++
++ROOT=Path(__file__).resolve().parents[1]
++PREFIX=ROOT/'results/tool-audit/runtime/plasmidfinder-2.1.6-py310'
++
++
++class NativeReadset(unittest.TestCase):
++    def setUp(self):
++        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
++        self.base=Path(self.temp.name)
++        self.db=self.base/'database'
++        shutil.copytree(PREFIX/'share/plasmidfinder-2.1.6/database',self.db)
++        self.entry=PREFIX/'bin/plasmidfinder.py'
++        self.sequence=self.base/'input.fsa';self.sequence.write_text('>control\nACGTACGT\n')
++        self.argv=['-i',str(self.sequence),'-o',str(self.base),'-p',str(self.db),'-x']
++
++    def capture(self,extra=()):
++        return helper.capture({},self.argv+list(extra))
++
++    def test_native_defaults_and_full_directory(self):
++        result=self.capture()
++        self.assertEqual(len(result['selected_databases']),9)
++        self.assertEqual(result['parsed_arguments']['min_cov'],.60)
++        self.assertEqual(result['parsed_arguments']['threshold'],.90)
++        self.assertEqual(result['file_format'],'fasta')
++        self.assertEqual(len(result['resources']['database']),len(helper.resource(self.db)))
++        self.assertTrue(result['resources']['cgecore_code'])
++
++    def test_explicit_database_and_taxonomy_use_native_selection(self):
++        self.assertEqual(self.capture(['-d','enterobacteriaceae'])['selected_databases'],['enterobacteriaceae'])
++        selected=self.capture(['--speciesinfo_json',json.dumps(['bacteria','enterobacteriaceae'])])
++        self.assertEqual(selected['selected_databases'],['enterobacteriaceae'])
++        self.assertEqual(len(self.capture(['--speciesinfo_json','["unmatched"]'])['selected_databases']),9)
++
++    def test_invalid_native_database_and_legacy_refused(self):
++        with self.assertRaises(SystemExit):self.capture(['-d','absent'])
++        with contextlib.redirect_stderr(io.StringIO()):
++            with self.assertRaises(SystemExit):self.capture(['--legacy'])
++
++    def test_quiet_restores_stdout(self):
++        stdout=sys.stdout
++        self.assertTrue(self.capture(['-q'])['parsed_arguments']['quiet'])
++        self.assertIs(sys.stdout,stdout)
++
++    def test_full_directory_sidecar_and_symlink_target_changes(self):
++        external=self.base/'external';external.write_bytes(b'AA')
++        (self.db/'external-sidecar').symlink_to(external)
++        before=self.capture();st=external.stat();external.write_bytes(b'BB');os.utime(external,ns=(st.st_atime_ns,st.st_mtime_ns))
++        self.assertNotEqual(before['resources']['database'],self.capture()['resources']['database'])
++        (self.db/'cycle').symlink_to(self.db,target_is_directory=True)
++        with self.assertRaisesRegex(ValueError,'cycle'):self.capture()
++
++    def test_explicit_method_binary_is_identified(self):
++        binary=self.base/'blastn';shutil.copy2(PREFIX/'bin/blastn',binary)
++        result=self.capture(['-mp',str(binary)])
++        self.assertEqual(result['resolved_locations']['method'],str(binary))
++        self.assertEqual(result['resources']['method'],helper.resource(binary))
++
++    def test_exact_source_and_interpreter_guard(self):
++        bad=self.base/'plasmidfinder.py';bad.write_text(self.entry.read_text()+'\n# changed source\n')
++        with self.assertRaisesRegex(ValueError,'exact native2.1.6'):helper.native_configuration(bad,self.argv)
++        bad.write_text('#!/bin/false\n')
++        with self.assertRaisesRegex(ValueError,'interpreter differs'):helper.verify_entrypoint_interpreter(bad)
++
++    def test_native_fastq_branch_and_inputs(self):
++        self.sequence.write_text('@control\nACGTACGT\n+\nIIIIIIII\n')
++        result=self.capture()
++        self.assertEqual(result['file_format'],'fastq')
++        self.assertTrue(result['resolved_locations']['method'].endswith('/kma'))
++        self.assertEqual(result['resources']['inputs'],[helper.resource(self.sequence)])
++
++
++if __name__=='__main__':unittest.main()

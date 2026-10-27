@@ -2,8 +2,8 @@ path	line	declaration	limitations
 conf/gplas.config	2	withName: '.*:GPLAS_NODE_DETECTION:.*' {	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_detection.config	22	withName: 'GENOMAD' {	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_downstream.config	7	*     includeConfig 'conf/nfcore_downstream.config'	lexical; evaluate profile and selector precedence with Nextflow
-conf/nfcore_downstream.config	18	withName: 'PLASMIDFINDER' {	lexical; evaluate profile and selector precedence with Nextflow
-conf/nfcore_downstream.config	21	ext.args   = '--legacy'	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	18	withName: 'PLASMIDFINDER|PLASMIDFINDER_RESOURCE_PROBE' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	21	ext.args   = ''	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_downstream.config	22	"ext.prefix = { ""${meta.id}.plasmidfinder"" }"	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_downstream.config	26	withName: 'MOB_TYPER' {	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_downstream.config	28	ext.args   = '--multi'	lexical; evaluate profile and selector precedence with Nextflow
@@ -18,10 +18,10 @@ conf/nfcore_downstream.config	50	withName: 'BAKTA' {	lexical; evaluate profile a
 conf/nfcore_downstream.config	52	ext.args   = '--skip-sorf'	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_downstream.config	56	withName: 'AMRFINDERPLUS' {	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_downstream.config	58	"ext.prefix = { ""${meta.id}.amrfinder"" }"	lexical; evaluate profile and selector precedence with Nextflow
-conf/nfcore_downstream.config	62	withName: 'ABRICATE' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	62	withName: 'ABRICATE|ABRICATE_RESOURCE_PROBE' {	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_downstream.config	63	"ext.args   = { ""--db ${params.abricate_db}"" }"	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_downstream.config	64	"ext.prefix = { ""${meta.id}.${params.abricate_db}"" }"	lexical; evaluate profile and selector precedence with Nextflow
-conf/nfcore_downstream.config	68	withName: 'INTEGRONFINDER' {	lexical; evaluate profile and selector precedence with Nextflow
+conf/nfcore_downstream.config	68	withName: 'INTEGRONFINDER|INTEGRONFINDER_RESOURCE_PROBE' {	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_downstream.config	74	withName: 'PRODIGAL' {	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_downstream.config	76	ext.args   = '-p meta'	lexical; evaluate profile and selector precedence with Nextflow
 conf/nfcore_downstream.config	77	"ext.prefix = { ""${meta.id}.prodigal"" }"	lexical; evaluate profile and selector precedence with Nextflow

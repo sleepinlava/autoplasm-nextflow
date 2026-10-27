@@ -1,0 +1,167 @@
+{
+  "run_id": "20261026-abricate-runtime-and-errors-candidate",
+  "result": "bounded_ABRicate_resource_identity_native_cache_and_error_guard_pass_TA091_TA092_open",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "artifacts": [
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/native-v4/run.json",
+      "sha256": "575ed291f90579a2f5e81b49dc873e17ff3c1a6b9ac0826604e69593cfab2c40",
+      "scope": "13 production/config/native/cache/context phases"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/units-v2/run.json",
+      "sha256": "ecdaec226b5ed26e018d3d7afce9f1c964688dcb3b396eb5ca1431f08f91f23e",
+      "scope": "7 native parser/read-set methods, no classifier inference; no skipped methods"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/native-errors/run.json",
+      "sha256": "9f0d1300a7a9f1ddf86be4c1c4ddce9b4b11831df16a386d58e0a460616bc5c1",
+      "scope": "2 explicit late-exit observers passing full real conversion/search output plus synthetic valid zero"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/downstream/run.json",
+      "sha256": "76d77848c08998c8816331a01c278c07a47b185c85e3838e2ca35262c2a951ce",
+      "scope": "actual production PLASMID_DOWNSTREAM optional gate/join/report events and empty channel"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/framework-v2/run.json",
+      "sha256": "a7d09f9e0aec9c59aadb16b4b3838104deafe6a8e3a6f87ff04f8435cf3b23c1",
+      "scope": "actual0.9.5 migrated vendored native/stub framework, original complete Bacteroides gzip/original MD5"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/native-original.json",
+      "sha256": "21ab3bc8897bd83fcc2208b5b8399a99b87e4982d8d344678a107ff792debc64",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/native-original.tsv",
+      "sha256": "b5cfadd1f503c20a3cd2a110b7030a3be28944619a617ad798c7a39c62926430",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/real-error-pair.json",
+      "sha256": "d1d78b6071357912ec23fe9075cb0874e1e57e6bdfb5437ea98b5388a09a1e51",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/native-errors/guarded-source.pl",
+      "sha256": "d7b290ff8059c22fce8f069d8c085a90d8746029616c2ee027a0440580e95578",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/package-archives.json",
+      "sha256": "5dd69fa1c8c885a04c0e4f966db204d499debac8b63380319f9d552f41b87b35",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/packages.json",
+      "sha256": "60958f3c0918aef9f328b5cc7722d29e95ace8690d013a2ea4dce13971a25124",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/linux-64.lock",
+      "sha256": "6cffc2a07a479de8e2f835be61a549233e88b45709f6217200d6db2d085fb85d",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/source-download.json",
+      "sha256": "f37470ed037b5d84118cd41909286783177b809e142c9f3b48d872e6a7f3f755",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/archive-download.json",
+      "sha256": "481b48e3c2d587c6c2bf3b48526c904c825a30a99a3388d287998e0b8530243f",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/attempts.json",
+      "sha256": "d04278cc5b2159d7fe9e04eed4979be4a68072c643b076b274a0494429fbbbeb",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/before-error-guard/patch-roundtrip.json",
+      "sha256": "26b3f816c934caea3396c36c97f581bb7240508116f24933ea4f7b199e6c0789",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/before-framework/receipt.json",
+      "sha256": "6f6672130c39475dacfb9ad4855435bbb2f2b95b8a83e7686e74b1c28e7e222b",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/before-framework/patch-roundtrip.json",
+      "sha256": "8b1cf73d48f3f307de77ac115bc0412bfb990f3d0625d296e0d5d0cc30d7a24d",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/framework-data/download.json",
+      "sha256": "d840b7af807ae1c2c37065a0de97f5097071622fbcabd66ac074679dddedd506",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/framework-v2/source-copy.json",
+      "sha256": "9ba8b082d9355910b98557c674689344b1f2bf9634309bbd5815b8579075faf2",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/framework-v2/verification.json",
+      "sha256": "c12f3e9fc28d64763006f159a3f86656b28dc659c9fa0657a98f9953e4c78634",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-abricate-runtime/patch-roundtrip.json",
+      "sha256": "73e44bc8b9d9ed18099eafac8c59af3dc7dca66aadb1d8b0b936d953e361f554",
+      "scope": "source/install/before-after/attempt/evidence boundary"
+    }
+  ],
+  "source_direct_matches": 22,
+  "candidate_source_paths": 145,
+  "new_delta_paths": [
+    "modules/nf-core/abricate/run/meta.yml",
+    "modules/nf-core/abricate/run/tests/main.nf",
+    "modules/nf-core/abricate/run/tests/main.nf.test",
+    "modules/nf-core/abricate/run/tests/nextflow.config",
+    "tests/abricate-native.lock.json",
+    "tests/test_abricate_runtime_resources.py"
+  ],
+  "patches": {
+    "docs/tool-audit/patches/TA-091-resource-consumers.diff": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+    "docs/tool-audit/patches/TA-016-preserved-report-candidate.diff": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+    "docs/tool-audit/patches/TA-091-resource-root.diff": "b50cb5c15450d7a4b856acd880a86e590e6692520896a3dc7b59c9785f0e9b4e",
+    "docs/tool-audit/patches/TA-091-runtime-resource-pilot.diff": "74f4e758ce846f2050ef609f738b37b8c381f0181d5c9b815e413fbeaab82857",
+    "docs/tool-audit/patches/TA-091-semibin-runtime.diff": "ef097d7faa8f086fc83834fb15383aa4c922da0068781828a0b493651838130e",
+    "docs/tool-audit/patches/TA-091-isescan-runtime.diff": "865acb900581a8f7706b5e7c0a9d2d6ee1a09a6cf59c910eb0d6b18dc281e5da",
+    "docs/tool-audit/patches/TA-091-semibin-fgs-runtime.diff": "b6e568cb76d0653e709813fa61a32b1b1739f6ca638ba72026d4fd65bffb9bb6",
+    "docs/tool-audit/patches/TA-091-abricate-runtime.diff": "5c42d56e0be3a9843cf33c9d526f053c6dd3d477a363b605eb053a1c00c96496",
+    "docs/tool-audit/patches/TA-092-abricate-errors.diff": "40c178138031291e1dbee786a2d8a0a289b9f1a9ea67af88d5befd94d68b6151",
+    "docs/tool-audit/patches/TA-091-abricate-framework.diff": "78bd86b53f39c776be6c2945d5e4d44185d8544f95f1549346a299f2a5f6d19d"
+  },
+  "forward_current_bytes_and_modes": true,
+  "reverse_exact_HEAD_bytes": true,
+  "formal_source_manifest_unchanged": true,
+  "formal_source_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d",
+  "native_phases": 13,
+  "native_trace_counts": {
+    "COMPLETED": 18,
+    "CACHED": 5,
+    "FAILED": 1
+  },
+  "unit_methods": 7,
+  "downstream_cases": 2,
+  "framework_cases": 2,
+  "watched_files_restored": 17,
+  "new_finding": "TA-092 S0 actual native BLAST failure masked as successful zero; candidate guarded, remains unaccepted/ready",
+  "remaining": [
+    "Five other implicit consumers: Dorado,Medaka,PlasmidFinder,MOB-recon,IntegronFinder",
+    "ABRicate full Perl/XS/system/shared-library/OCI/provider/GPU/custom when/multi-input/summary modes not fully certified; setupdb must be prepared before lookup",
+    "Native error adapter supports exact1.0.1 source boundaries only; no other version compatibility inferred",
+    "TA091 explicit optional read sets/executables/SemiBin full branches and immutable deployment/config cache:false constraints remain",
+    "TA016 full provenance/TA031 full GTDB r232/TT003 real shotgun P4/default-real/full platform/M0-M4/AWS unchanged"
+  ],
+  "scope": "Unaccepted8th resource patch plus9th separate TA092 error patch/validation and10th metadata/framework repair. Native Perl needed no Python in existing ABRicate176-package environment. Full original2521797-byte assembly and full original5386 ncbi references, default80/80 thresholds:5 real native successful executions preserve all5 report rows except one deliberately changed header PRODUCT annotation. Equal-size/mtime header mutation and external alias volumes rerun; restoration exact warm-cache reuse. Real missing.nhr BLAST error previously exit0/header-only now FAILED; converter/BLAST late exits7/9 are explicitly controlled observers, not native defective binary claims. Valid-zero control and actual optional downstream/empty-input routes pass. All176 raw package hashes checked, complete environment provenance not inferred. Formal718 manifest and99 accepted fixes+2 retirements unchanged; new unacceptedS0 increases current unresolved from4 to5. No commit/push/AWS/upload/charge.",
+  "full_receipt": "results/tool-audit/20261026-abricate-runtime/receipt.json",
+  "full_receipt_sha256": "b290eee0bd7252c071d407aeacbc212bb86d0b73b9f5d4619d9e6153626ff0bc",
+  "snapshot_path_count": 759
+}

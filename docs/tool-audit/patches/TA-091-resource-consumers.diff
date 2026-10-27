@@ -1,0 +1,3301 @@
+diff --git c/bin/anvio_checked.py w/bin/anvio_checked.py
+index bb8d81c..5270313 100644
+--- c/bin/anvio_checked.py
++++ w/bin/anvio_checked.py
+@@ -14,6 +14,47 @@ import textwrap
+ 
+ SOURCE_DIGEST = '7956da22fe2d89cf113ab0416b9a98e96a6b85db32c36be543158d60ce033004'
+ SOURCE_FILES = 1185
++# Exact Git submodule commits from the pinned anvi'o source tree; hydrated
++# independently so adding their contents does not weaken the primary source lock.
++SOURCE_SUBMODULES = {'anvio/data/interactive/lib/JavaScript-MD5': {'commit': '9756d82db70b0f678bc6cd055e7aa08f5c1a0390',
++                                               'digest': 'ed23a37172d63601928e6ca2a4e38cb79b905b455d40106896cb14298a06e15a',
++                                               'files': 16},
++ 'anvio/data/interactive/lib/bootstrap': {'commit': '16b48259a62f576e52c903c476bd42b90ab22482',
++                                          'digest': '5490896d35904851c6e3f5f040ff7ef88e09a664c1e9e6ca1f4704b4830e50c4',
++                                          'files': 361},
++ 'anvio/data/interactive/lib/bootstrap-markdown': {'commit': '0320bec0bdb3fa49754d8fc26bfe2159c5fbe4d2',
++                                                   'digest': '14150e5032cc01ae771b1eb8d8c7a146cb4a3677ee21f3f5ef765cc53277231c',
++                                                   'files': 32},
++ 'anvio/data/interactive/lib/bootstrap-sortable': {'commit': '159505ae6ad99aefd727e8ffd9dc31cad58905b7',
++                                                   'digest': 'ce51d07097129b25136d4ca36f9a63577d53bdb7b61f01a44e0121f46eeb6d72',
++                                                   'files': 6},
++ 'anvio/data/interactive/lib/bootstrap-waitingfor': {'commit': '6ea63523247fe772bca0e633dc51a62e9dfbc9ce',
++                                                     'digest': '1304a4f3e65c7df9c7e014a46b06ec73b4b864de219309a05145f76496ad0668',
++                                                     'files': 14},
++ 'anvio/data/interactive/lib/d3.js': {'commit': 'b48420930f3848b1498c034387fac2588903d7cf',
++                                      'digest': 'ce0d46a9eb17cb07d48bb6f1d93b23889bccae9f5c51b45b3f8d170fc686b3bb',
++                                      'files': 546},
++ 'anvio/data/interactive/lib/jquery': {'commit': '1472290917f17af05e98007136096784f9051fab',
++                                       'digest': 'fd9c2189760b96519bc6cb53cc53943c49f62f73db214bff889a85cd3f642752',
++                                       'files': 226},
++ 'anvio/data/interactive/lib/jquery-ui': {'commit': 'd6713024e16de90ea71dc0544ba34e1df01b4d8a',
++                                          'digest': '609f745769431803ee0258063671c536cd203fffd598185ac57d9fdf646978a4',
++                                          'files': 663},
++ 'anvio/data/interactive/lib/marked': {'commit': '8f9d0b72f5606ed32057049f387161dd41c36ade',
++                                       'digest': 'dec4c0040f626e0e0a18f997b8c17c03e89fdb7123d7582294f71cac03d08aa3',
++                                       'files': 228},
++ 'anvio/data/interactive/lib/randomColor': {'commit': '455f347ecde2f61f9d32d9d1dbe4f6f28e54fc9e',
++                                            'digest': 'd4b7eb0ed07bf2adbc7f7d7cf20377b81042cbd8e46a8a81ff6e81a86ba1572b',
++                                            'files': 11},
++ 'anvio/data/interactive/lib/toastr': {'commit': 'b957ae9f38e6856346a0200e83281b08ca717a7d',
++                                       'digest': 'dfc5bdda96e1105e55fe8c5a319bb0190a091f59ab7f69275fc69734332dd13c',
++                                       'files': 74},
++ 'anvio/data/static/content/bootstrap-sortable': {'commit': '64e1a43425d3b87605f2bf365d681056a14cd30a',
++                                                  'digest': '7c652716eec427110c8afdcd3dec66025a34b4c181d5b461d3d30e563aaf5f3f',
++                                                  'files': 6},
++ 'anvio/data/static/content/chartsjs': {'commit': 'cc57b9e58192e28e061eec93ec5e646ba9cfd99b',
++                                        'digest': 'cb697fcf716471cfb023d1480169090e25fe15a54be92e5f9556a8088d8fae42',
++                                        'files': 33}}
+ PROGRAMS = {'anvi-gen-contigs-database', 'anvi-export-gene-calls', 'anvi-run-ncbi-cogs',
+             'anvi-run-pfams', 'anvi-export-functions'}
+ 
+@@ -48,6 +89,8 @@ def verify_source(source):
+     for folder in ['anvio', 'bin']:
+         for path in sorted((source / folder).rglob('*')):
+             relative = path.relative_to(source)
++            if any(relative.as_posix().startswith(prefix + '/') for prefix in SOURCE_SUBMODULES):
++                continue
+             if '__pycache__' in relative.parts or path.suffix == '.pyc':
+                 continue
+             if path.is_symlink():
+@@ -61,6 +104,21 @@ def verify_source(source):
+     digest = hashlib.sha256(json.dumps(sorted(rows), separators=(',', ':')).encode()).hexdigest()
+     if len(rows) != SOURCE_FILES or digest != SOURCE_DIGEST:
+         raise ValueError('anvi\'o source differs from fixed 7.1 commit 258991a5bc0f483c958040a55d339e1f447429ac')
++    for relative, expected in SOURCE_SUBMODULES.items():
++        target = source / relative
++        entries = []
++        for member in sorted(target.rglob('*')):
++            if member.is_symlink():
++                member.resolve(strict=True).relative_to(source)
++                data = os.readlink(member).encode()
++            elif member.is_file():
++                data = member.read_bytes()
++            else:
++                continue
++            entries.append((member.relative_to(target).as_posix(), hashlib.sha256(data).hexdigest()))
++        actual = hashlib.sha256(json.dumps(sorted(entries), separators=(',', ':')).encode()).hexdigest()
++        if len(entries) != expected['files'] or actual != expected['digest']:
++            raise ValueError('Missing or changed pinned anvi\'o submodule: ' + relative + '@' + expected['commit'])
+     return digest
+ 
+ 
+@@ -88,6 +146,7 @@ def main():
+ 
+     try:
+         record['source_digest'] = verify_source(source)
++        record['source_submodules'] = SOURCE_SUBMODULES
+         sys.path.insert(0, str(source))
+         # anvi'o's argument documentation resolves its own scripts through PATH.
+         # The verified source bin/ supplies those scripts in a fresh dependency-
+diff --git c/modules/binning/gplas2.nf w/modules/binning/gplas2.nf
+index 40a92a0..c18e3e6 100644
+--- c/modules/binning/gplas2.nf
++++ w/modules/binning/gplas2.nf
+@@ -12,7 +12,7 @@ process GPLAS2 {
+ 
+     input:
+     tuple val(meta), path(assembly_graph), path(node_predictions), path(ready_marker)
+-    tuple path(source, stageAs: 'sources/gplas'), path(source_files, stageAs: 'source-cache/????/*')
++    tuple path(source, stageAs: 'sources/gplas'), val(source_identity)
+     // Explicit regular files: helper changes participate in deep caching.
+     path(autoplasm_helper_0, stageAs: '.gplas_checked.py')
+ 
+diff --git c/modules/binning/plasmaag.nf w/modules/binning/plasmaag.nf
+index a08f34f..77668a6 100644
+--- c/modules/binning/plasmaag.nf
++++ w/modules/binning/plasmaag.nf
+@@ -8,8 +8,8 @@ process PLASMAAG {
+ 
+     input:
+     tuple val(meta), val(samples), path(reads, stageAs: 'cohort_reads/read??/*'), path(assemblies, stageAs: 'cohort_assemblies/assembly??')
+-    tuple path(program, stageAs: 'plasmaag_program'), path(program_files, stageAs: 'source_dependencies/dir??/*')
+-    tuple path(database, stageAs: 'genomad_database'), path(database_files, stageAs: 'database_dependencies/dir??/*')
++    tuple path(program, stageAs: 'plasmaag_program'), val(program_identity)
++    tuple path(database, stageAs: 'genomad_database'), val(database_identity)
+     val assembler
+     val runtime_options
+     tuple path(input_helper, stageAs: 'plasmaag_inputs.py'), path(runtime_helper, stageAs: 'plasmaag_checked.py')
+diff --git c/modules/detection/plasme.nf w/modules/detection/plasme.nf
+index cc65966..34dc066 100644
+--- c/modules/detection/plasme.nf
++++ w/modules/detection/plasme.nf
+@@ -15,8 +15,8 @@ process PLASME {
+ 
+     input:
+     tuple val(meta), path(assembly)
+-    path(plasme_db, stageAs: 'plasme_database')
+-    path(plasme_source, stageAs: 'plasme_source')
++    tuple path(plasme_db, stageAs: 'plasme_database'), val(plasme_db_identity)
++    tuple path(plasme_source, stageAs: 'plasme_source'), val(plasme_source_identity)
+     // Explicit regular files: helper changes participate in deep caching.
+     tuple path(autoplasm_helper_0, stageAs: 'normalize_plasme_outputs.py'), path(autoplasm_helper_1, stageAs: 'plasme_runtime.py')
+ 
+diff --git c/modules/detection/plasx.nf w/modules/detection/plasx.nf
+index b864562..8288158 100644
+--- c/modules/detection/plasx.nf
++++ w/modules/detection/plasx.nf
+@@ -8,9 +8,9 @@ process PLASX_ANNOTATE {
+ 
+     input:
+     tuple val(meta), path(assembly, stageAs: 'assembly_input/*')
+-    tuple path(anvio_source, stageAs: 'anvio_source'), path(anvio_source_files, stageAs: 'anvio_dependencies/dir??/*')
+-    tuple path(cog_db, stageAs: 'cog_database'), path(cog_files, stageAs: 'cog_dependencies/dir??/*')
+-    tuple path(pfam_db, stageAs: 'pfam_database'), path(pfam_files, stageAs: 'pfam_dependencies/dir??/*')
++    tuple path(anvio_source, stageAs: 'anvio_source'), val(anvio_source_identity)
++    tuple path(cog_db, stageAs: 'cog_database'), val(cog_identity)
++    tuple path(pfam_db, stageAs: 'pfam_database'), val(pfam_identity)
+     // Explicit regular files: helper changes participate in deep caching.
+     tuple path(autoplasm_helper_0, stageAs: 'plasx_inputs.py'), path(autoplasm_helper_1, stageAs: 'anvio_checked.py')
+ 
+@@ -51,8 +51,8 @@ process PLASX {
+ 
+     input:
+     tuple val(meta), path(assembly), path(mapping), path(gene_calls), path(annotations)
+-    tuple path(plasx_source, stageAs: 'plasx_source'), path(plasx_source_files, stageAs: 'plasx_dependencies/dir??/*')
+-    tuple path(profiles, stageAs: 'plasx_profiles'), path(profile_files, stageAs: 'profile_dependencies/dir??/*')
++    tuple path(plasx_source, stageAs: 'plasx_source'), val(plasx_source_identity)
++    tuple path(profiles, stageAs: 'plasx_profiles'), val(profile_identity)
+     path plasx_model, stageAs: 'plasx_coefficients.tsv'
+     // Explicit regular files: helper changes participate in deep caching.
+     tuple path(autoplasm_helper_0, stageAs: 'plasx_inputs.py'), path(autoplasm_helper_1, stageAs: 'plasx_checked.py')
+diff --git c/modules/detection/platon.nf w/modules/detection/platon.nf
+index f2e4c00..0541000 100644
+--- c/modules/detection/platon.nf
++++ w/modules/detection/platon.nf
+@@ -13,7 +13,7 @@ process PLATON {
+ 
+     input:
+     tuple val(meta), path(assembly, stageAs: 'assembly_input/*')
+-    tuple path(platon_db, stageAs: 'platon_database'), path(platon_database_files, stageAs: 'platon_database_dependencies/*')
++    tuple path(platon_db, stageAs: 'platon_database'), val(platon_database_identity)
+     // Explicit regular files: helper changes participate in deep caching.
+     path(autoplasm_helper_0, stageAs: 'platon_checked.py')
+ 
+diff --git c/modules/host/plasmidhostfinder.nf w/modules/host/plasmidhostfinder.nf
+index 40cbd9d..de4b67c 100644
+--- c/modules/host/plasmidhostfinder.nf
++++ w/modules/host/plasmidhostfinder.nf
+@@ -1,4 +1,5 @@
+ /*
++    cache 'deep'
+  * PlasmidHostFinder assembly-based host prediction (pipeline step:
+  * host_prediction_plasmidhostfinder; assembly platform).
+  */
+@@ -12,7 +13,7 @@ process PLASMIDHOSTFINDER {
+ 
+     input:
+     tuple val(meta), path(plasmid_contigs)
+-    path phf_db
++    tuple path(phf_db), val(db_identity)
+ 
+     output:
+     tuple val(meta), path("${meta.id}.plasmidhostfinder.tsv"), emit: predictions
+diff --git c/modules/linking/hotspot.nf w/modules/linking/hotspot.nf
+index 95b0b85..50adee5 100644
+--- c/modules/linking/hotspot.nf
++++ w/modules/linking/hotspot.nf
+@@ -19,8 +19,8 @@ process LINK_HOTSPOT {
+     input:
+     tuple val(meta), path(plasmid_contigs, stageAs: 'plasmid_input.fasta')
+     path hotspot_program, stageAs: 'hotspot_program/*'
+-    path hotspot_database, stageAs: 'hotspot_database/*'
+-    tuple path(hotspot_models, stageAs: 'hotspot_models'), path(hotspot_model_dependencies, stageAs: 'hotspot_model_dependencies/*')
++    tuple path(hotspot_database, stageAs: 'hotspot_database'), val(database_identity)
++    tuple path(hotspot_models, stageAs: 'hotspot_models'), val(models_identity)
+     // Explicit regular files: helper changes participate in deep caching.
+     tuple path(autoplasm_helper_0, stageAs: 'convert_hotspot_lineage.py'), path(autoplasm_helper_1, stageAs: 'hotspot_runtime.py')
+ 
+diff --git c/modules/nf-core/amrfinderplus/run/main.nf w/modules/nf-core/amrfinderplus/run/main.nf
+index 21032b4..6a81c7f 100644
+--- c/modules/nf-core/amrfinderplus/run/main.nf
++++ w/modules/nf-core/amrfinderplus/run/main.nf
+@@ -1,4 +1,5 @@
+ process AMRFINDERPLUS_RUN {
++    cache 'deep'
+     tag "$meta.id"
+     label 'process_medium'
+ 
+@@ -9,7 +10,7 @@ process AMRFINDERPLUS_RUN {
+ 
+     input:
+     tuple val(meta), path(fasta)
+-    path db
++    tuple path(db), val(db_identity)
+ 
+     output:
+     tuple val(meta), path("${prefix}.tsv")          , emit: report
+diff --git c/modules/nf-core/amrfinderplus/run/meta.yml w/modules/nf-core/amrfinderplus/run/meta.yml
+index a2e47f8..8c61e9c 100644
+--- c/modules/nf-core/amrfinderplus/run/meta.yml
++++ w/modules/nf-core/amrfinderplus/run/meta.yml
+@@ -26,13 +26,16 @@ input:
+         pattern: "*.{fasta,fasta.gz,fa,fa.gz,fna,fna.gz,faa,faa.gz}"
+         ontologies:
+           - edam: "http://edamontology.org/format_1929" # FASTA
+-  - db:
+-      type: file
+-      description: A compressed tarball of the AMRFinderPlus database to query
+-      pattern: "*.tar.gz"
+-      ontologies:
+-        - edam: "http://edamontology.org/format_3981" # TAR format
+-        - edam: http://edamontology.org/format_3989 # GZIP format
++  - - db:
++        type: file
++        description: A compressed tarball of the AMRFinderPlus database to query
++        pattern: "*.tar.gz"
++        ontologies:
++          - edam: "http://edamontology.org/format_3981" # TAR format
++          - edam: http://edamontology.org/format_3989 # GZIP format
++    - db_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+ output:
+   report:
+     - - meta:
+diff --git c/modules/nf-core/amrfinderplus/run/tests/main.nf.test w/modules/nf-core/amrfinderplus/run/tests/main.nf.test
+index 6898c98..2c2c33a 100644
+--- c/modules/nf-core/amrfinderplus/run/tests/main.nf.test
++++ w/modules/nf-core/amrfinderplus/run/tests/main.nf.test
+@@ -26,11 +26,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [
+                     [ id:'test' ],
+                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/haemophilus_influenzae/genome/genome.fna.gz', checkIfExists: true)
+                 ]
+-                input[1] = AMRFINDERPLUS_UPDATE.out.db
++                input[1] = AMRFINDERPLUS_UPDATE.out.db.map { resource.call(it) }
+                 """
+             }
+         }
+@@ -50,11 +57,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [
+                     [ id:'test' ],
+                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/haemophilus_influenzae/genome/genome.fna.gz', checkIfExists: true)
+                 ]
+-                input[1] = AMRFINDERPLUS_UPDATE.out.db
++                input[1] = AMRFINDERPLUS_UPDATE.out.db.map { resource.call(it) }
+                 """
+             }
+         }
+diff --git c/modules/nf-core/bakta/bakta/main.nf w/modules/nf-core/bakta/bakta/main.nf
+index 14bf078..a1d74a7 100644
+--- c/modules/nf-core/bakta/bakta/main.nf
++++ w/modules/nf-core/bakta/bakta/main.nf
+@@ -1,4 +1,5 @@
+ process BAKTA_BAKTA {
++    cache 'deep'
+     tag "${meta.id}"
+     label 'process_medium'
+ 
+@@ -9,7 +10,7 @@ process BAKTA_BAKTA {
+ 
+     input:
+     tuple val(meta), path(fasta)
+-    path db
++    tuple path(db), val(db_identity)
+     path proteins
+     path prodigal_tf
+     path regions
+diff --git c/modules/nf-core/bakta/bakta/meta.yml w/modules/nf-core/bakta/bakta/meta.yml
+index 0ab8ecd..a89f971 100644
+--- c/modules/nf-core/bakta/bakta/meta.yml
++++ w/modules/nf-core/bakta/bakta/meta.yml
+@@ -27,12 +27,15 @@ input:
+         pattern: "*.{fa,fas,fna,fasta}"
+         ontologies:
+           - edam: http://edamontology.org/format_1929
+-  - db:
+-      type: file
+-      description: |
+-        Path to the Bakta database directory. Must have amrfinderplus database directory already installed within it (in a directory called 'amrfinderplus-db/').
+-      ontologies:
+-        - edam: http://edamontology.org/data_1049
++  - - db:
++        type: file
++        description: |
++          Path to the Bakta database directory. Must have amrfinderplus database directory already installed within it (in a directory called 'amrfinderplus-db/').
++        ontologies:
++          - edam: http://edamontology.org/data_1049
++    - db_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+   - proteins:
+       type: file
+       description: FASTA/GenBank file of trusted proteins to first annotate from (optional)
+diff --git c/modules/nf-core/bakta/bakta/tests/main.nf.test w/modules/nf-core/bakta/bakta/tests/main.nf.test
+index faa696d..08d1a54 100644
+--- c/modules/nf-core/bakta/bakta/tests/main.nf.test
++++ w/modules/nf-core/bakta/bakta/tests/main.nf.test
+@@ -26,11 +26,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [
+                     [ id:'test', single_end:false ], // meta map
+                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/illumina/fasta/test1.contigs.fa.gz', checkIfExists: true)
+                 ]
+-                input[1] = BAKTA_BAKTADBDOWNLOAD.out.db
++                input[1] = BAKTA_BAKTADBDOWNLOAD.out.db.map { resource.call(it) }
+                 input[2] = []
+                 input[3] = []
+                 input[4] = []
+@@ -66,8 +73,15 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [[id: 'stub'],file('stub')]
+-                input[1] = []
++                input[1] = resource.call([])
+                 input[2] = []
+                 input[3] = []
+                 input[4] = []
+diff --git c/modules/nf-core/blast/blastn/main.nf w/modules/nf-core/blast/blastn/main.nf
+index 49d1dc6..fb8f354 100644
+--- c/modules/nf-core/blast/blastn/main.nf
++++ w/modules/nf-core/blast/blastn/main.nf
+@@ -1,4 +1,5 @@
+ process BLAST_BLASTN {
++    cache 'deep'
+     tag "$meta.id"
+     label 'process_medium'
+ 
+@@ -9,7 +10,7 @@ process BLAST_BLASTN {
+ 
+     input:
+     tuple val(meta) , path(fasta)
+-    tuple val(meta2), path(db)
++    tuple val(meta2), path(db), val(db_identity)
+     path taxidlist
+     val taxids
+     val negative_tax
+diff --git c/modules/nf-core/blast/blastn/meta.yml w/modules/nf-core/blast/blastn/meta.yml
+index 62b591d..4d6961f 100644
+--- c/modules/nf-core/blast/blastn/meta.yml
++++ w/modules/nf-core/blast/blastn/meta.yml
+@@ -36,6 +36,9 @@ input:
+         type: directory
+         description: Directory containing the blast database
+         pattern: "*"
++    - db_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+   - taxidlist:
+       type: file
+       description: File containing NCBI taxon ids, one per line, for filtering the
+diff --git c/modules/nf-core/blast/blastn/tests/main.nf.test w/modules/nf-core/blast/blastn/tests/main.nf.test
+index 8712a03..66cb929 100644
+--- c/modules/nf-core/blast/blastn/tests/main.nf.test
++++ w/modules/nf-core/blast/blastn/tests/main.nf.test
+@@ -30,8 +30,15 @@ nextflow_process {
+             }
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true) ]
+-                input[1] = BLAST_MAKEBLASTDB.out.db
++                input[1] = BLAST_MAKEBLASTDB.out.db.map { meta, db -> resource.call(db).with { value -> tuple(meta, value[0], value[1]) } }
+                 input[2] = []
+                 input[3] = []
+                 input[4] = []
+@@ -57,8 +64,15 @@ nextflow_process {
+             }
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta.gz', checkIfExists: true) ]
+-                input[1] = BLAST_MAKEBLASTDB.out.db
++                input[1] = BLAST_MAKEBLASTDB.out.db.map { meta, db -> resource.call(db).with { value -> tuple(meta, value[0], value[1]) } }
+                 input[2] = []
+                 input[3] = []
+                 input[4] = []
+@@ -79,8 +93,15 @@ nextflow_process {
+             }
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta.gz', checkIfExists: true) ]
+-                input[1] = BLAST_MAKEBLASTDB.out.db
++                input[1] = BLAST_MAKEBLASTDB.out.db.map { meta, db -> resource.call(db).with { value -> tuple(meta, value[0], value[1]) } }
+                 input[2] = []
+                 input[3] = []
+                 input[4] = []
+@@ -107,8 +128,15 @@ nextflow_process {
+             }
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta.gz', checkIfExists: true) ]
+-                input[1] = BLAST_MAKEBLASTDB.out.db
++                input[1] = BLAST_MAKEBLASTDB.out.db.map { meta, db -> resource.call(db).with { value -> tuple(meta, value[0], value[1]) } }
+                 input[2] = []
+                 input[3] = []
+                 input[4] = []
+diff --git c/modules/nf-core/checkm2/predict/main.nf w/modules/nf-core/checkm2/predict/main.nf
+index 2988eb4..c487c2a 100644
+--- c/modules/nf-core/checkm2/predict/main.nf
++++ w/modules/nf-core/checkm2/predict/main.nf
+@@ -1,4 +1,5 @@
+ process CHECKM2_PREDICT {
++    cache 'deep'
+     tag "${meta.id}"
+     label 'process_medium'
+ 
+@@ -9,7 +10,7 @@ process CHECKM2_PREDICT {
+ 
+     input:
+     tuple val(meta), path(fasta, stageAs: "input_bins/*")
+-    tuple val(dbmeta), path(db)
++    tuple val(dbmeta), path(db), val(db_identity)
+ 
+     output:
+     tuple val(meta), path("${prefix}")                   , emit: checkm2_output
+diff --git c/modules/nf-core/checkm2/predict/meta.yml w/modules/nf-core/checkm2/predict/meta.yml
+index 5e162d7..b730c81 100644
+--- c/modules/nf-core/checkm2/predict/meta.yml
++++ w/modules/nf-core/checkm2/predict/meta.yml
+@@ -35,6 +35,9 @@ input:
+         type: file
+         description: CheckM2 database
+         ontologies: []
++    - db_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+ output:
+   checkm2_output:
+     - - meta:
+diff --git c/modules/nf-core/checkm2/predict/tests/main.nf.test w/modules/nf-core/checkm2/predict/tests/main.nf.test
+index d137d54..7e1ae06 100644
+--- c/modules/nf-core/checkm2/predict/tests/main.nf.test
++++ w/modules/nf-core/checkm2/predict/tests/main.nf.test
+@@ -16,8 +16,15 @@ nextflow_process {
+             }
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [ [id: 'test'], [file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz', checkIfExists: true)] ]
+-                input[1] = [ [id: 'checkm2_small_db'], file(params.modules_testdata_base_path + 'delete_me/binette_checkm2/binette_checkm2_small_db.dmnd', checkIfExists: true) ]
++                input[1] = ([ [id: 'checkm2_small_db'], file(params.modules_testdata_base_path + 'delete_me/binette_checkm2/binette_checkm2_small_db.dmnd', checkIfExists: true) ]).with { value -> resource.call(value[1]).with { r -> tuple(value[0], r[0], r[1]) } }
+                 """
+             }
+         }
+@@ -40,8 +47,15 @@ nextflow_process {
+             }
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [ [id: 'test'], [file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz', checkIfExists: true)] ]
+-                input[1] = [ [id: 'checkm2_small_db'], file(params.modules_testdata_base_path + 'delete_me/binette_checkm2/binette_checkm2_small_db.dmnd', checkIfExists: true) ]
++                input[1] = ([ [id: 'checkm2_small_db'], file(params.modules_testdata_base_path + 'delete_me/binette_checkm2/binette_checkm2_small_db.dmnd', checkIfExists: true) ]).with { value -> resource.call(value[1]).with { r -> tuple(value[0], r[0], r[1]) } }
+                 """
+             }
+         }
+diff --git c/modules/nf-core/dastool/dastool/main.nf w/modules/nf-core/dastool/dastool/main.nf
+index b28fa16..7bf8358 100644
+--- c/modules/nf-core/dastool/dastool/main.nf
++++ w/modules/nf-core/dastool/dastool/main.nf
+@@ -1,4 +1,5 @@
+ process DASTOOL_DASTOOL {
++    cache 'deep'
+     tag "${meta.id}"
+     label 'process_medium'
+ 
+@@ -9,7 +10,7 @@ process DASTOOL_DASTOOL {
+ 
+     input:
+     tuple val(meta), path(contigs), path(bins, arity: '1..*'), path(proteins)
+-    path db_directory, stageAs: 'dastool_db'
++    tuple path(db_directory, stageAs: 'dastool_db'), val(db_identity)
+ 
+     output:
+     tuple val(meta), path("*.log")                                      , emit: log
+diff --git c/modules/nf-core/dastool/dastool/meta.yml w/modules/nf-core/dastool/dastool/meta.yml
+index 39d183d..bcd4500 100644
+--- c/modules/nf-core/dastool/dastool/meta.yml
++++ w/modules/nf-core/dastool/dastool/meta.yml
+@@ -44,10 +44,13 @@ input:
+         description: Predicted proteins in prodigal fasta format (>scaffoldID_geneNo)
+         pattern: "*.{fa.gz,fas.gz,fasta.gz}"
+         ontologies: []
+-  - db_directory:
+-      type: file
+-      description: (optional) Directory of single copy gene database.
+-      ontologies: []
++  - - db_directory:
++        type: file
++        description: (optional) Directory of single copy gene database.
++        ontologies: []
++    - db_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+ output:
+   log:
+     - - meta:
+diff --git c/modules/nf-core/dastool/dastool/tests/main.nf.test w/modules/nf-core/dastool/dastool/tests/main.nf.test
+index 8d7e464..fe16ab2 100644
+--- c/modules/nf-core/dastool/dastool/tests/main.nf.test
++++ w/modules/nf-core/dastool/dastool/tests/main.nf.test
+@@ -70,12 +70,19 @@ nextflow_process {
+             }
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = Channel.of([
+                     [ id:'test', single_end:false ],
+                     file(params.modules_testdata_base_path + "genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz", checkIfExists: true)
+                 ]).join(DASTOOL_FASTATOCONTIG2BIN.out.fastatocontig2bin)
+                 .map { meta, contigs, c2b -> [ meta, contigs, c2b, [] ]}
+-                input[1] = []
++                input[1] = resource.call([])
+                 """
+             }
+         }
+@@ -113,13 +120,20 @@ nextflow_process {
+             }
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = Channel.of([
+                     [ id:'test', single_end:false ],
+                     file(params.modules_testdata_base_path + "genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz", checkIfExists: true)
+                 ])
+                 .join(DASTOOL_FASTATOCONTIG2BIN.out.fastatocontig2bin)
+                 .join(PRODIGAL.out.amino_acid_fasta)
+-                input[1] = []
++                input[1] = resource.call([])
+                 """
+             }
+         }
+@@ -154,13 +168,20 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = Channel.of([
+                     [ id:'test', single_end:false ],
+                     file(params.modules_testdata_base_path + "genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz", checkIfExists: true)
+                 ])
+                 .join(DASTOOL_FASTATOCONTIG2BIN.out.fastatocontig2bin)
+                 .join(PRODIGAL.out.amino_acid_fasta)
+-                input[1] = []
++                input[1] = resource.call([])
+                 """
+             }
+         }
+diff --git c/modules/nf-core/eggnogmapper/main.nf w/modules/nf-core/eggnogmapper/main.nf
+index 408a2b5..3f34ed8 100644
+--- c/modules/nf-core/eggnogmapper/main.nf
++++ w/modules/nf-core/eggnogmapper/main.nf
+@@ -1,4 +1,5 @@
+ process EGGNOGMAPPER {
++    cache 'deep'
+     tag "$meta.id"
+     label 'process_high'
+ 
+@@ -9,8 +10,8 @@ process EGGNOGMAPPER {
+ 
+     input:
+     tuple val(meta), path(fasta)
+-    tuple val(search_mode), path(db)
+-    path(eggnog_data_dir)
++    tuple val(search_mode), path(db), val(db_identity)
++    tuple path(eggnog_data_dir), val(eggnog_data_identity)
+ 
+     output:
+     tuple val(meta), path("*.emapper.annotations")   , emit: annotations
+diff --git c/modules/nf-core/eggnogmapper/meta.yml w/modules/nf-core/eggnogmapper/meta.yml
+index 557f9e7..bb7b431 100644
+--- c/modules/nf-core/eggnogmapper/meta.yml
++++ w/modules/nf-core/eggnogmapper/meta.yml
+@@ -61,13 +61,19 @@ input:
+         ontologies:
+           - edam: http://edamontology.org/format_1370 # HMMER format
+           - edam: http://edamontology.org/format_3475 # TSV
+-  - eggnog_data_dir:
+-      type: directory
+-      description: |
+-        Directory containing eggnog-mapper database files
+-        (e.g. can be downloaded via download_eggnog_data.py,
+-        found in the eggnog-mapper repository)
+-      pattern: "*"
++    - db_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
++  - - eggnog_data_dir:
++        type: directory
++        description: |
++          Directory containing eggnog-mapper database files
++          (e.g. can be downloaded via download_eggnog_data.py,
++          found in the eggnog-mapper repository)
++        pattern: "*"
++    - eggnog_data_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+ output:
+   annotations:
+     - - meta:
+diff --git c/modules/nf-core/eggnogmapper/tests/main.nf.test w/modules/nf-core/eggnogmapper/tests/main.nf.test
+index 5bc3e16..faa1eb0 100644
+--- c/modules/nf-core/eggnogmapper/tests/main.nf.test
++++ w/modules/nf-core/eggnogmapper/tests/main.nf.test
+@@ -30,11 +30,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
+-                input[1] = DIAMOND_MAKEDB.out.db.map { _meta, db -> [ 'diamond', db ] }
++                input[1] = DIAMOND_MAKEDB.out.db.map { _meta, db -> [ 'diamond', db ] }.map { mode, db -> resource.call(db).with { value -> tuple(mode, value[0], value[1]) } }
+                 eggnog_db = file(params.modules_testdata_base_path + '/delete_me/eggnogmapper/eggnog.db', checkIfExists: true)
+                 eggnog_db.copyTo("${workDir}/tmp/eggnog.db")
+-                input[2] = "${workDir}/tmp/"
++                input[2] = resource.call("${workDir}/tmp/")
+                 """
+             }
+         }
+@@ -68,11 +75,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
+-                input[1] = MMSEQS_CREATEDB.out.db.map { _meta, db -> [ 'mmseqs', db ] }
++                input[1] = MMSEQS_CREATEDB.out.db.map { _meta, db -> [ 'mmseqs', db ] }.map { mode, db -> resource.call(db).with { value -> tuple(mode, value[0], value[1]) } }
+                 eggnog_db = file(params.modules_testdata_base_path + '/delete_me/eggnogmapper/eggnog.db', checkIfExists: true)
+                 eggnog_db.copyTo("${workDir}/tmp/eggnog.db")
+-                input[2] = "${workDir}/tmp/"
++                input[2] = resource.call("${workDir}/tmp/")
+                 """
+             }
+         }
+@@ -121,11 +135,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
+-                input[1] = EGGNOGMAPPER_SETUP.out.orthologs.map { _meta, orthologs -> [ 'no_search', orthologs ] }
++                input[1] = EGGNOGMAPPER_SETUP.out.orthologs.map { _meta, orthologs -> [ 'no_search', orthologs ] }.map { mode, db -> resource.call(db).with { value -> tuple(mode, value[0], value[1]) } }
+                 eggnog_db = file(params.modules_testdata_base_path + '/delete_me/eggnogmapper/eggnog.db', checkIfExists: true)
+                 eggnog_db.copyTo("${workDir}/tmp/eggnog.db")
+-                input[2] = "${workDir}/tmp/"
++                input[2] = resource.call("${workDir}/tmp/")
+                 """
+             }
+         }
+@@ -161,11 +182,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [ [id:'test'], file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/proteome.fasta', checkIfExists: true) ]
+-                input[1] = DIAMOND_MAKEDB.out.db.map { _meta, db -> [ 'diamond', db ] }
++                input[1] = DIAMOND_MAKEDB.out.db.map { _meta, db -> [ 'diamond', db ] }.map { mode, db -> resource.call(db).with { value -> tuple(mode, value[0], value[1]) } }
+                 eggnog_db = file(params.modules_testdata_base_path + '/delete_me/eggnogmapper/eggnog.db', checkIfExists: true)
+                 eggnog_db.copyTo("${workDir}/tmp/eggnog.db")
+-                input[2] = "${workDir}/tmp/"
++                input[2] = resource.call("${workDir}/tmp/")
+                 """
+             }
+         }
+diff --git c/modules/nf-core/genomad/endtoend/main.nf w/modules/nf-core/genomad/endtoend/main.nf
+index e1608bc..0517fa6 100644
+--- c/modules/nf-core/genomad/endtoend/main.nf
++++ w/modules/nf-core/genomad/endtoend/main.nf
+@@ -1,4 +1,5 @@
+ process GENOMAD_ENDTOEND {
++    cache 'deep'
+     tag "${meta.id}"
+     label 'process_high'
+ 
+@@ -9,7 +10,8 @@ process GENOMAD_ENDTOEND {
+ 
+     input:
+     tuple val(meta), path(fasta)
+-    tuple val(meta2), path(genomad_db)
++    // This value covers recursive relative paths and contents before cache lookup.
++    tuple val(meta2), path(genomad_db), val(genomad_db_identity)
+ 
+     output:
+     tuple val(meta), path("${prefix}/")                                                              , emit: genomad_results
+diff --git c/modules/nf-core/genomad/endtoend/meta.yml w/modules/nf-core/genomad/endtoend/meta.yml
+index 154cf44..89aef15 100644
+--- c/modules/nf-core/genomad/endtoend/meta.yml
++++ w/modules/nf-core/genomad/endtoend/meta.yml
+@@ -37,6 +37,9 @@ input:
+     - genomad_db:
+         type: directory
+         description: Directory pointing to geNomad database
++    - genomad_db_identity:
++        type: map
++        description: Content fingerprint computed before cache lookup from recursive relative paths, file sizes and SHA256, including hidden files
+ output:
+   genomad_results:
+     - - meta:
+diff --git c/modules/nf-core/genomad/endtoend/tests/main.nf.test w/modules/nf-core/genomad/endtoend/tests/main.nf.test
+index 677aa18..1314401 100644
+--- c/modules/nf-core/genomad/endtoend/tests/main.nf.test
++++ w/modules/nf-core/genomad/endtoend/tests/main.nf.test
+@@ -16,6 +16,7 @@ nextflow_process {
+             script "tests/nf-test/prerequisites/nf-core/untar/main.nf"
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                 input[0] = [
+                     [id: "genomad_db"],
+                     file("https://raw.githubusercontent.com/nf-core/test-datasets/refs/heads/mag/databases/genomad/genomad_db_subset_v1.9.tar.gz", checkIfExists: true)
+@@ -29,11 +30,12 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                 input[0] = [
+                     [ id:'test' ], // meta map
+                     file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
+                     ]
+-                input[1] = UNTAR.out.untar
++                input[1] = UNTAR.out.untar.map { meta, database -> tuple(meta, database, ResourceIdentity.capture(database)) }
+                 """
+             }
+         }
+@@ -59,11 +61,12 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                 input[0] = [
+                     [ id:'test' ], // meta map
+                     file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
+                 ]
+-                input[1] = UNTAR.out.untar
++                input[1] = UNTAR.out.untar.map { meta, database -> tuple(meta, database, ResourceIdentity.capture(database)) }
+                 """
+             }
+         }
+diff --git c/modules/nf-core/gtdbtk/classifywf/main.nf w/modules/nf-core/gtdbtk/classifywf/main.nf
+index 99c32a1..314bc0e 100644
+--- c/modules/nf-core/gtdbtk/classifywf/main.nf
++++ w/modules/nf-core/gtdbtk/classifywf/main.nf
+@@ -10,7 +10,7 @@ process GTDBTK_CLASSIFYWF {
+ 
+     input:
+     tuple val(meta)   , path("bins/*")
+-    tuple val(db_name), path(db)
++    tuple val(db_name), path(db), val(db_identity)
+     val use_pplacer_scratch_dir
+     // Explicit regular files: helper changes participate in deep caching.
+     path(autoplasm_helper_0, stageAs: 'normalize_gtdb_bins.py')
+diff --git c/modules/nf-core/gtdbtk/classifywf/meta.yml w/modules/nf-core/gtdbtk/classifywf/meta.yml
+index cd548f9..7da63ce 100644
+--- c/modules/nf-core/gtdbtk/classifywf/meta.yml
++++ w/modules/nf-core/gtdbtk/classifywf/meta.yml
+@@ -42,6 +42,9 @@ input:
+           Must contain the 'metadata' subdirectory
+         pattern: "release[0-9]+/"
+         ontologies: []
++    - db_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+   - use_pplacer_scratch_dir:
+       type: boolean
+       description: Set to true to reduce pplacer memory usage by writing to disk (slower)
+diff --git c/modules/nf-core/gtdbtk/classifywf/tests/main.nf.test w/modules/nf-core/gtdbtk/classifywf/tests/main.nf.test
+index f8c8fe2..51e36aa 100644
+--- c/modules/nf-core/gtdbtk/classifywf/tests/main.nf.test
++++ w/modules/nf-core/gtdbtk/classifywf/tests/main.nf.test
+@@ -38,12 +38,19 @@ nextflow_process {
+ 
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[3] = file("${new File('bin/normalize_gtdb_bins.py').absolutePath}", checkIfExists: true)
+                 input[0] = [
+                     [ id:'test', single_end:false, assembler:'SPADES' ],
+                     [file(params.modules_testdata_base_path + 'genomics/prokaryotes/escherichia_coli/genome/genome.fa', checkIfExists: true)]
+                 ]
+-                input[1] = UNTAR.out.untar
++                input[1] = UNTAR.out.untar.map { meta, db -> resource.call(db).with { value -> tuple(meta, value[0], value[1]) } }
+                 input[2] = false
+                 """
+             }
+@@ -71,12 +78,19 @@ nextflow_process {
+ 
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[3] = file("${new File('bin/normalize_gtdb_bins.py').absolutePath}", checkIfExists: true)
+                 input[0] = [
+                     [ id:'test', single_end:false, assembler:'SPADES' ],
+                     [file(params.modules_testdata_base_path + 'genomics/prokaryotes/escherichia_coli/genome/genome.fa', checkIfExists: true)]
+                 ]
+-                input[1] = UNTAR.out.untar
++                input[1] = UNTAR.out.untar.map { meta, db -> resource.call(db).with { value -> tuple(meta, value[0], value[1]) } }
+                 input[2] = false
+                 """
+             }
+diff --git c/modules/nf-core/kraken2/kraken2/main.nf w/modules/nf-core/kraken2/kraken2/main.nf
+index bc48a46..b815944 100644
+--- c/modules/nf-core/kraken2/kraken2/main.nf
++++ w/modules/nf-core/kraken2/kraken2/main.nf
+@@ -1,4 +1,5 @@
+ process KRAKEN2_KRAKEN2 {
++    cache 'deep'
+     tag "$meta.id"
+     label 'process_high'
+ 
+@@ -9,7 +10,7 @@ process KRAKEN2_KRAKEN2 {
+ 
+     input:
+     tuple val(meta), path(reads)
+-    path  db
++    tuple path(db), val(db_identity)
+     val save_output_fastqs
+     val save_reads_assignment
+ 
+diff --git c/modules/nf-core/kraken2/kraken2/meta.yml w/modules/nf-core/kraken2/kraken2/meta.yml
+index 2f3da71..08c6e7b 100644
+--- c/modules/nf-core/kraken2/kraken2/meta.yml
++++ w/modules/nf-core/kraken2/kraken2/meta.yml
+@@ -31,9 +31,12 @@ input:
+           List of input FastQ files of size 1 and 2 for single-end and paired-end data,
+           respectively.
+         ontologies: []
+-  - db:
+-      type: directory
+-      description: Kraken2 database
++  - - db:
++        type: directory
++        description: Kraken2 database
++    - db_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+   - save_output_fastqs:
+       type: string
+       description: |
+diff --git c/modules/nf-core/kraken2/kraken2/tests/main.nf.test w/modules/nf-core/kraken2/kraken2/tests/main.nf.test
+index 280ec56..2d69bb2 100644
+--- c/modules/nf-core/kraken2/kraken2/tests/main.nf.test
++++ w/modules/nf-core/kraken2/kraken2/tests/main.nf.test
+@@ -29,6 +29,13 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [
+                     [ id:'test', single_end:true ], // meta map
+                     [ file(
+@@ -36,7 +43,7 @@ nextflow_process {
+                         checkIfExists: true
+                     )]
+                 ]
+-                input[1] = UNTAR.out.untar.map{ it[1] }
++                input[1] = UNTAR.out.untar.map{ it[1] }.map { resource.call(it) }
+                 input[2] = true
+                 input[3] = false
+                 """
+@@ -65,6 +72,13 @@ nextflow_process {
+ 
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [
+                     [ id:'test', single_end:false ], // meta map
+                     [
+@@ -79,7 +93,7 @@ nextflow_process {
+ 
+                         ]
+                     ]
+-                input[1] = UNTAR.out.untar.map{ it[1] }
++                input[1] = UNTAR.out.untar.map{ it[1] }.map { resource.call(it) }
+                 input[2] = true
+                 input[3] = false
+                 """
+@@ -114,6 +128,13 @@ nextflow_process {
+ 
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [
+                     [ id:'test', single_end:true ], // meta map
+                     [ file(
+@@ -121,7 +142,7 @@ nextflow_process {
+                         checkIfExists: true
+                     )]
+                 ]
+-                input[1] = UNTAR.out.untar.map{ it[1] }
++                input[1] = UNTAR.out.untar.map{ it[1] }.map { resource.call(it) }
+                 input[2] = false
+                 input[3] = true
+                 """
+@@ -148,11 +169,21 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
++                java.nio.file.Files.createDirectories(java.nio.file.Paths.get("dummy2"))
++                new File("dummy2/STUB_ONLY").text = "Explicit stub database; no classifier inference"
++
+                 input[0] = [
+                     [ id:'test', single_end:true ], // meta map
+                     [ file("dummy1", checkIfExists: false)]
+                 ]
+-                input[1] = file("dummy2", checkIfExists: false)
++                input[1] = resource.call(file("dummy2", checkIfExists: false))
+                 input[2] = true
+                 input[3] = false
+                 """
+@@ -180,11 +211,21 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
++                java.nio.file.Files.createDirectories(java.nio.file.Paths.get("dummy2"))
++                new File("dummy2/STUB_ONLY").text = "Explicit stub database; no classifier inference"
++
+                 input[0] = [
+                     [ id:'test', single_end:false ], // meta map
+                     [ file("dummy1", checkIfExists: false)]
+                 ]
+-                input[1] = file("dummy2", checkIfExists: false)
++                input[1] = resource.call(file("dummy2", checkIfExists: false))
+                 input[2] = true
+                 input[3] = false
+                 """
+diff --git c/modules/nf-core/macsyfinder/search/main.nf w/modules/nf-core/macsyfinder/search/main.nf
+index 5d55b89..0fd89ae 100644
+--- c/modules/nf-core/macsyfinder/search/main.nf
++++ w/modules/nf-core/macsyfinder/search/main.nf
+@@ -1,4 +1,5 @@
+ process MACSYFINDER_SEARCH {
++    cache 'deep'
+     tag "$meta.id"
+     label 'process_medium'
+ 
+@@ -9,7 +10,7 @@ process MACSYFINDER_SEARCH {
+ 
+     input:
+     tuple val(meta), path(proteins), path(topology)
+-    path models
++    tuple path(models), val(models_identity)
+     val model_names
+ 
+     output:
+diff --git c/modules/nf-core/macsyfinder/search/meta.yml w/modules/nf-core/macsyfinder/search/meta.yml
+index f874076..2080fd3 100644
+--- c/modules/nf-core/macsyfinder/search/meta.yml
++++ w/modules/nf-core/macsyfinder/search/meta.yml
+@@ -43,10 +43,13 @@ input:
+           Staged in the same sample tuple as the protein sequences.
+         pattern: "*.txt"
+         ontologies: []
+-  - models:
+-      type: directory
+-      description: Directory containing MacSyFinder model(s)
+-      pattern: "*"
++  - - models:
++        type: directory
++        description: Directory containing MacSyFinder model(s)
++        pattern: "*"
++    - models_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+   - model_names:
+       type: string
+       description: Space-separated list of model names to search for. If not provided,
+diff --git c/modules/nf-core/macsyfinder/search/tests/main.nf.test w/modules/nf-core/macsyfinder/search/tests/main.nf.test
+index 1b73540..5f73651 100644
+--- c/modules/nf-core/macsyfinder/search/tests/main.nf.test
++++ w/modules/nf-core/macsyfinder/search/tests/main.nf.test
+@@ -28,11 +28,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [
+                     [ id:'test' ],
+                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/candidatus_portiera_aleyrodidarum/genome/proteome.fasta', checkIfExists: true), []
+                 ]
+-                input[1] = MACSYFINDER_DOWNLOAD.out.models
++                input[1] = MACSYFINDER_DOWNLOAD.out.models.map { resource.call(it) }
+                 input[2] = 'TXSScan'
+                 """
+             }
+@@ -71,8 +78,15 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = PIGZ_COMPRESS.out.archive.map { meta, proteins -> tuple(meta, proteins, []) }
+-                input[1] = MACSYFINDER_DOWNLOAD.out.models
++                input[1] = MACSYFINDER_DOWNLOAD.out.models.map { resource.call(it) }
+                 input[2] = 'TXSScan'
+                 """
+             }
+@@ -99,11 +113,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [
+                     [ id:'test' ],
+                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/candidatus_portiera_aleyrodidarum/genome/proteome.fasta', checkIfExists: true), []
+                 ]
+-                input[1] = MACSYFINDER_DOWNLOAD.out.models
++                input[1] = MACSYFINDER_DOWNLOAD.out.models.map { resource.call(it) }
+                 input[2] = 'TXSScan'
+                 """
+             }
+diff --git c/modules/nf-core/metaphlan/metaphlan/main.nf w/modules/nf-core/metaphlan/metaphlan/main.nf
+index a5ce6c5..54c8e1e 100644
+--- c/modules/nf-core/metaphlan/metaphlan/main.nf
++++ w/modules/nf-core/metaphlan/metaphlan/main.nf
+@@ -1,4 +1,5 @@
+ process METAPHLAN_METAPHLAN {
++    cache 'deep'
+     tag "${meta.id}"
+     label 'process_medium'
+ 
+@@ -9,7 +10,7 @@ process METAPHLAN_METAPHLAN {
+ 
+     input:
+     tuple val(meta), path(input)
+-    path db_metaphlan_latest
++    tuple path(db_metaphlan_latest), val(db_identity)
+     val save_samfile
+ 
+     output:
+diff --git c/modules/nf-core/metaphlan/metaphlan/meta.yml w/modules/nf-core/metaphlan/metaphlan/meta.yml
+index 647f138..b713e75 100644
+--- c/modules/nf-core/metaphlan/metaphlan/meta.yml
++++ w/modules/nf-core/metaphlan/metaphlan/meta.yml
+@@ -31,13 +31,16 @@ input:
+           marker database) and intermediate bowtie2 alignment files (bowtie2out)
+         pattern: "*.{fastq.gz, fasta, fasta.gz, sam, bowtie2out.txt}"
+         ontologies: []
+-  - db_metaphlan_latest:
+-      type: file
+-      description: |
+-        Directory containing pre-downloaded and uncompressed MetaPhlAn database downloaded from: http://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases/.
+-        Note that you will also need to specify `--index` and the database version name (e.g. 'mpa_vJan21_TOY_CHOCOPhlAnSGB_202103') in your module.conf ext.args for METAPHLAN_METAPHLAN!
+-      pattern: "*/"
+-      ontologies: []
++  - - db_metaphlan_latest:
++        type: file
++        description: |
++          Directory containing pre-downloaded and uncompressed MetaPhlAn database downloaded from: http://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases/.
++          Note that you will also need to specify `--index` and the database version name (e.g. 'mpa_vJan21_TOY_CHOCOPhlAnSGB_202103') in your module.conf ext.args for METAPHLAN_METAPHLAN!
++        pattern: "*/"
++        ontologies: []
++    - db_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+   - save_samfile:
+       type: boolean
+       description: |
+diff --git c/modules/nf-core/metaphlan/metaphlan/tests/main.nf.test w/modules/nf-core/metaphlan/metaphlan/tests/main.nf.test
+index f242123..e657a31 100644
+--- c/modules/nf-core/metaphlan/metaphlan/tests/main.nf.test
++++ w/modules/nf-core/metaphlan/metaphlan/tests/main.nf.test
+@@ -30,11 +30,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = Channel.of([
+                     [ id:'test', single_end:true ], // meta map
+                     file( params.modules_testdata_base_path + 'genomics/sarscov2/illumina/fastq/test_1.fastq.gz',checkIfExists: true )
+                 ])
+-                input[1] = UNTAR.out.untar.map{ it[1] }
++                input[1] = UNTAR.out.untar.map{ it[1] }.map { resource.call(it) }
+                 input[2] = false
+                 """
+             }
+@@ -59,12 +66,19 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = Channel.of([
+                     [ id:'test', single_end:false ], // meta map
+                     [ file( params.modules_testdata_base_path + 'genomics/sarscov2/illumina/fastq/test_1.fastq.gz',checkIfExists: true ),
+                     file( params.modules_testdata_base_path + 'genomics/sarscov2/illumina/fastq/test_2.fastq.gz',checkIfExists: true ) ]
+                 ])
+-                input[1] = UNTAR.out.untar.map{ it[1] }
++                input[1] = UNTAR.out.untar.map{ it[1] }.map { resource.call(it) }
+                 input[2] = false
+                 """
+             }
+@@ -89,11 +103,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = Channel.of([
+                     [ id:'test', single_end:true ], // meta map
+                     file( params.modules_testdata_base_path + 'genomics/sarscov2/illumina/fasta/contigs.fasta',checkIfExists: true )
+                 ])
+-                input[1] = UNTAR.out.untar.map{ it[1] }
++                input[1] = UNTAR.out.untar.map{ it[1] }.map { resource.call(it) }
+                 input[2] = false
+                 """
+             }
+@@ -117,12 +138,19 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = Channel.of([
+                     [ id:'test', single_end:false ], // meta map
+                     [ file( params.modules_testdata_base_path + 'genomics/sarscov2/illumina/fastq/test_1.fastq.gz',checkIfExists: true ),
+                     file( params.modules_testdata_base_path + 'genomics/sarscov2/illumina/fastq/test_2.fastq.gz',checkIfExists: true )]
+                 ])
+-                input[1] = UNTAR.out.untar.map{ it[1] }
++                input[1] = UNTAR.out.untar.map{ it[1] }.map { resource.call(it) }
+                 input[2] = true
+                 """
+             }
+@@ -150,12 +178,19 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = Channel.of([
+                     [ id:'test', single_end:false ], // meta map
+                     [ file( params.modules_testdata_base_path + 'genomics/sarscov2/illumina/fastq/test_1.fastq.gz',checkIfExists: true ),
+                     file( params.modules_testdata_base_path + 'genomics/sarscov2/illumina/fastq/test_2.fastq.gz',checkIfExists: true )]
+                 ])
+-                input[1] = UNTAR.out.untar.map{ it[1] }
++                input[1] = UNTAR.out.untar.map{ it[1] }.map { resource.call(it) }
+                 input[2] = false
+                 """
+             }
+diff --git c/modules/nf-core/mobsuite/typer/main.nf w/modules/nf-core/mobsuite/typer/main.nf
+index 1c5e85c..2430f59 100644
+--- c/modules/nf-core/mobsuite/typer/main.nf
++++ w/modules/nf-core/mobsuite/typer/main.nf
+@@ -1,4 +1,5 @@
+ process MOBSUITE_TYPER {
++    cache 'deep'
+     tag "${meta.id}"
+     label 'process_low'
+ 
+@@ -9,7 +10,7 @@ process MOBSUITE_TYPER {
+ 
+     input:
+     tuple val(meta), path(fasta)
+-    path db
++    tuple path(db), val(db_identity)
+     path plasmid_mash_db
+     path plasmid_meta_txt
+     path plasmid_replicons_fas
+diff --git c/modules/nf-core/mobsuite/typer/meta.yml w/modules/nf-core/mobsuite/typer/meta.yml
+index 8ea9745..4ebcd3d 100644
+--- c/modules/nf-core/mobsuite/typer/meta.yml
++++ w/modules/nf-core/mobsuite/typer/meta.yml
+@@ -28,10 +28,13 @@ input:
+         pattern: "*.{fasta,fa,fna}"
+         ontologies:
+           - edam: "http://edamontology.org/format_1929" # FASTA
+-  - db:
+-      type: directory
+-      description: Optional local copy of MOB-suite database directory
+-      pattern: "databases/"
++  - - db:
++        type: directory
++        description: Optional local copy of MOB-suite database directory
++        pattern: "databases/"
++    - db_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+   - plasmid_mash_db:
+       type: file
+       description: |
+diff --git c/modules/nf-core/mobsuite/typer/tests/main.nf.test w/modules/nf-core/mobsuite/typer/tests/main.nf.test
+index 8d80ff7..799dc8e 100644
+--- c/modules/nf-core/mobsuite/typer/tests/main.nf.test
++++ w/modules/nf-core/mobsuite/typer/tests/main.nf.test
+@@ -14,11 +14,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [
+                     [ id:'test' ],
+                     file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true),
+                 ]
+-                input[1] = []
++                input[1] = resource.call([])
+                 input[2] = []
+                 input[3] = []
+                 input[4] = []
+@@ -51,11 +58,18 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[0] = [
+                     [ id:'test' ],
+                     file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true),
+                 ]
+-                input[1] = []
++                input[1] = resource.call([])
+                 input[2] = []
+                 input[3] = []
+                 input[4] = []
+diff --git c/modules/nf-core/rgi/main/main.nf w/modules/nf-core/rgi/main/main.nf
+index c359db4..c333580 100644
+--- c/modules/nf-core/rgi/main/main.nf
++++ w/modules/nf-core/rgi/main/main.nf
+@@ -10,8 +10,8 @@ process RGI_MAIN {
+ 
+     input:
+     tuple val(meta), path(fasta)
+-    path card
+-    path wildcard
++    tuple path(card), val(card_identity)
++    tuple path(wildcard), val(wildcard_identity)
+     // Explicit regular files: helper changes participate in deep caching.
+     path(autoplasm_helper_0, stageAs: 'validate_rgi_card.py')
+ 
+diff --git c/modules/nf-core/rgi/main/meta.yml w/modules/nf-core/rgi/main/meta.yml
+index 5422b67..92cdda8 100644
+--- c/modules/nf-core/rgi/main/meta.yml
++++ w/modules/nf-core/rgi/main/meta.yml
+@@ -25,14 +25,20 @@ input:
+         description: Nucleotide or protein sequences in FASTA format
+         pattern: "*.{fasta,fasta.gz,fa,fa.gz,fna,fna.gz,faa,faa.gz}"
+         ontologies: []
+-  - card:
+-      type: directory
+-      description: Directory containing the CARD database. This is expected to be the unarchived but otherwise unaltered download folder (see RGI documentation for download instructions).
+-      pattern: "*/"
+-  - wildcard:
+-      type: directory
+-      description: Directory containing the WildCARD database (optional). This is expected to be the unarchived but otherwise unaltered download folder (see RGI documentation for download instructions).
+-      pattern: "*/"
++  - - card:
++        type: directory
++        description: Directory containing the CARD database. This is expected to be the unarchived but otherwise unaltered download folder (see RGI documentation for download instructions).
++        pattern: "*/"
++    - card_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
++  - - wildcard:
++        type: directory
++        description: Directory containing the WildCARD database (optional). This is expected to be the unarchived but otherwise unaltered download folder (see RGI documentation for download instructions).
++        pattern: "*/"
++    - wildcard_identity:
++        type: map
++        description: Pre-cache SHA-256 content/layout identity from resourceInput; explicit absent state for an empty optional resource.
+   - autoplasm_helper_0:
+       type: file
+       description: Local checked adapter bin/validate_rgi_card.py; staged as validate_rgi_card.py. Explicit file content participates in deep task caching.
+diff --git c/modules/nf-core/rgi/main/tests/main.nf.test w/modules/nf-core/rgi/main/tests/main.nf.test
+index 47848f4..dddfb73 100644
+--- c/modules/nf-core/rgi/main/tests/main.nf.test
++++ w/modules/nf-core/rgi/main/tests/main.nf.test
+@@ -42,13 +42,20 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[3] = file("${new File('bin/validate_rgi_card.py').absolutePath}", checkIfExists: true)
+                 input[0] = [
+                     [ id:'test', single_end:false ],
+                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/haemophilus_influenzae/genome/genome.fna.gz', checkIfExists: true)
+                 ]
+-                input[1] = RGI_CARDANNOTATION.out.db
+-                input[2] = []
++                input[1] = RGI_CARDANNOTATION.out.db.map { resource.call(it) }
++                input[2] = resource.call([])
+                 """
+             }
+         }
+@@ -68,13 +75,20 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
++                def resource = { value ->
++                    if (!value) return tuple([], [schema_version: 2, resource_state: 'absent'])
++                    def root = file(value, checkIfExists: true)
++                    tuple(root, ResourceIdentity.capture(root))
++                }
++
+                 input[3] = file("${new File('bin/validate_rgi_card.py').absolutePath}", checkIfExists: true)
+                 input[0] = [
+                     [ id:'test', single_end:false ],
+                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/haemophilus_influenzae/genome/genome.fna.gz', checkIfExists: true)
+                 ]
+-                input[1] = RGI_CARDANNOTATION.out.db
+-                input[2] = []
++                input[1] = RGI_CARDANNOTATION.out.db.map { resource.call(it) }
++                input[2] = resource.call([])
+                 """
+             }
+         }
+diff --git c/modules/typing/copla.nf w/modules/typing/copla.nf
+index 5d83a29..dc70fe0 100644
+--- c/modules/typing/copla.nf
++++ w/modules/typing/copla.nf
+@@ -14,8 +14,8 @@ process COPLA {
+     tuple val(meta), path(plasmid_contigs)
+     path(copla_refgraph, stageAs: 'copla_reference.pickle')
+     path(copla_reflist, stageAs: 'copla_references.fofn')
+-    path(copla_install, stageAs: 'copla_install')
+-    path(copla_macsyfinder, stageAs: 'copla_macsyfinder')
++    tuple path(copla_install, stageAs: 'copla_install'), val(copla_install_identity)
++    tuple path(copla_macsyfinder, stageAs: 'copla_macsyfinder'), val(copla_macsyfinder_identity)
+     // Explicit regular files: helper changes participate in deep caching.
+     path(autoplasm_helper_0, stageAs: 'run_copla_candidates.py')
+ 
+diff --git c/subworkflows/comparative.nf w/subworkflows/comparative.nf
+index 8b54ac6..8abf29d 100644
+--- c/subworkflows/comparative.nf
++++ w/subworkflows/comparative.nf
+@@ -1,3 +1,4 @@
++include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
+ include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+@@ -42,7 +43,7 @@ workflow COMPARATIVE {
+     if (selectedTools(params.comparative_optional_tools).contains('blast')) {
+         BLASTN(
+             ch_plasmids,
+-            Channel.value(tuple([id: 'blast_db'], file(params.blast_db, checkIfExists: true))),
++            Channel.value(taggedResourceInput([id: 'blast_db'], params.blast_db)),
+             [],     // taxidlist
+             [],     // taxids
+             false   // negative_tax
+diff --git c/subworkflows/gplas_binning.nf w/subworkflows/gplas_binning.nf
+index 0131b1b..040e96f 100644
+--- c/subworkflows/gplas_binning.nf
++++ w/subworkflows/gplas_binning.nf
+@@ -10,6 +10,11 @@ workflow GPLAS_BINNING {
+     ch_graph    // same-task SPAdes GFA segments, including KC counts
+ 
+     main:
++    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../lib/ResourceIdentity.groovy"))
++    def resource = { location ->
++        def directory = file(location, checkIfExists: true)
++        tuple(directory, ResourceIdentity.capture(directory))
++    }
+     ch_events = Channel.empty()
+     ch_bins = Channel.empty()
+     ch_states = Channel.empty()
+@@ -44,8 +49,7 @@ workflow GPLAS_BINNING {
+             .join(GPLAS_NODE_DETECTION.out.consensus, failOnDuplicate: true, failOnMismatch: true)
+             .join(ch_assessment, failOnDuplicate: true, failOnMismatch: true), Channel.value(file("${moduleDir}/../bin/gplas_inputs.py", checkIfExists: true)))
+         GPLAS2(GPLAS2_PREDICTIONS.out.ready,
+-            Channel.value(tuple(file(params.gplas_source, checkIfExists: true),
+-                files("${params.gplas_source}/**", type: 'file', hidden: true))), Channel.value(file("${moduleDir}/../bin/gplas_checked.py", checkIfExists: true)))
++            Channel.value(resource.call(params.gplas_source)), Channel.value(file("${moduleDir}/../bin/gplas_checked.py", checkIfExists: true)))
+         ch_bins = GPLAS2.out.bins.map { meta, bins -> tuple(meta.gplas_original_meta, bins) }
+         ch_states = GPLAS2_NODES.out.state.mix(GPLAS2_PREDICTIONS.out.state)
+             .map { meta, state -> tuple(meta.gplas_original_meta, state) }
+diff --git c/subworkflows/host_linking.nf w/subworkflows/host_linking.nf
+index 49d7214..62be5d3 100644
+--- c/subworkflows/host_linking.nf
++++ w/subworkflows/host_linking.nf
+@@ -1,3 +1,4 @@
++include { resourceInput } from '../lib/resource_inputs'
+ include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+@@ -70,9 +71,8 @@ workflow HOST_LINKING {
+                 Channel.value(['preprocessing.py', 'hotspot.py', 'model.py'].collect { name ->
+                     file("${params.hotspot_home}/${name}", checkIfExists: true)
+                 }),
+-                Channel.value(files("${params.hotspot_db}/*", type: 'file', hidden: true, checkIfExists: true)),
+-                Channel.value(tuple(file(params.hotspot_models, checkIfExists: true),
+-                    files("${params.hotspot_models}/**", type: 'file', hidden: true, checkIfExists: true))), Channel.value(tuple(file("${moduleDir}/../bin/convert_hotspot_lineage.py", checkIfExists: true), file("${moduleDir}/../bin/hotspot_runtime.py", checkIfExists: true))))
++                Channel.value(resourceInput(params.hotspot_db)),
++                Channel.value(resourceInput(params.hotspot_models)), Channel.value(tuple(file("${moduleDir}/../bin/convert_hotspot_lineage.py", checkIfExists: true), file("${moduleDir}/../bin/hotspot_runtime.py", checkIfExists: true))))
+             ch_report_events = ch_report_events.mix(reportEvidence([channels: LINK_HOTSPOT.out], '07_host_prediction', 'LINK_HOTSPOT'))
+             ch_links = ch_links.mix(LINK_HOTSPOT.out.links.map { meta, f -> f })
+         }
+diff --git c/subworkflows/host_prediction.nf w/subworkflows/host_prediction.nf
+index 3ce34ed..e0aa954 100644
+--- c/subworkflows/host_prediction.nf
++++ w/subworkflows/host_prediction.nf
+@@ -1,3 +1,4 @@
++include { resourceInput } from '../lib/resource_inputs'
+ include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+@@ -46,7 +47,7 @@ workflow HOST_PREDICTION {
+         HOST_PROFILE_READS(ch_short_reads, ch_long_reads)
+         METAPHLAN(
+             HOST_PROFILE_READS.out.reads,
+-            Channel.value(file(params.metaphlan_db, checkIfExists: true)),
++            Channel.value(resourceInput(params.metaphlan_db)),
+             false   // save_samfile
+         )
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: METAPHLAN.out], '07_host_prediction', 'METAPHLAN'))
+@@ -55,14 +56,14 @@ workflow HOST_PREDICTION {
+     if (selectedTools(params.host_prediction_tools).contains('kraken2') && is_illumina) {
+         KRAKEN2(
+             ch_short_reads.map { meta, r1, r2 -> tuple(meta + [single_end: false], [r1, r2]) },
+-            Channel.value(file(params.kraken2_db, checkIfExists: true)),
++            Channel.value(resourceInput(params.kraken2_db)),
+             false,  // save_output_fastqs
+             false   // save_reads_assignment
+         )
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: KRAKEN2.out], '07_host_prediction', 'KRAKEN2'))
+     }
+     if (selectedTools(params.host_prediction_tools).contains('plasmidhostfinder') && is_assembly) {
+-        PLASMIDHOSTFINDER(ch_plasmids, Channel.value(file(params.plasmidhostfinder_db, checkIfExists: true)))
++        PLASMIDHOSTFINDER(ch_plasmids, Channel.value(resourceInput(params.plasmidhostfinder_db)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMIDHOSTFINDER.out], '07_host_prediction', 'PLASMIDHOSTFINDER'))
+     }
+ 
+diff --git c/subworkflows/mag_host.nf w/subworkflows/mag_host.nf
+index 70bd00e..e2343e9 100644
+--- c/subworkflows/mag_host.nf
++++ w/subworkflows/mag_host.nf
+@@ -1,3 +1,4 @@
++include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
+ include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ include { magSelectionError } from '../lib/mag_selection'
+@@ -106,7 +107,7 @@ workflow MAG_HOST {
+                 tsvs != null
+             }
+             .map { meta, assembly, tsvs -> tuple(meta, assembly, tsvs, []) }
+-        DAS_TOOL(ch_das_in, [])
++        DAS_TOOL(ch_das_in, Channel.value(resourceInput(null)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: DAS_TOOL.out], '07_host_prediction', 'DAS_TOOL'))
+         ch_final_bins = DAS_TOOL.out.bins
+     }
+@@ -114,7 +115,7 @@ workflow MAG_HOST {
+     if (selectedTools(params.mag_tools).contains('checkm2')) {
+         CHECKM2(
+             ch_final_bins,
+-            Channel.value([[id: 'checkm2_db'], file(params.checkm2_db, checkIfExists: true)])
++            Channel.value(taggedResourceInput([id: 'checkm2_db'], params.checkm2_db))
+         )
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: CHECKM2.out], '07_host_prediction', 'CHECKM2'))
+     }
+@@ -123,7 +124,7 @@ workflow MAG_HOST {
+     if (selectedTools(params.mag_tools).contains('gtdbtk')) {
+         GTDBTK(
+             ch_final_bins,
+-            Channel.value([[id: 'gtdbtk_db'], file(params.gtdbtk_db, checkIfExists: true)]),
++            Channel.value(taggedResourceInput([id: 'gtdbtk_db'], params.gtdbtk_db)),
+             false
+         , Channel.value(file("${moduleDir}/../bin/normalize_gtdb_bins.py", checkIfExists: true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: GTDBTK.out], '07_host_prediction', 'GTDBTK'))
+diff --git c/subworkflows/plasmaag_binning.nf w/subworkflows/plasmaag_binning.nf
+index 225abe8..be78f6a 100644
+--- c/subworkflows/plasmaag_binning.nf
++++ w/subworkflows/plasmaag_binning.nf
+@@ -9,6 +9,11 @@ workflow PLASMAAG_BINNING {
+     ch_spades_bundle
+ 
+     main:
++    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../lib/ResourceIdentity.groovy"))
++    def resource = { location ->
++        def directory = file(location, checkIfExists: true)
++        tuple(directory, ResourceIdentity.capture(directory))
++    }
+     ch_bins = Channel.empty()
+     ch_events = Channel.empty()
+     if (selectedTools(params.plasmid_binning_tools).contains('plasmaag')) {
+@@ -41,8 +46,8 @@ workflow PLASMAAG_BINNING {
+             tuple([id: "plasmaag_cohort_${digest}"], rows.collect { it.meta }, rows.collectMany { it.reads }, rows.collect { it.assembly })
+         }
+         PLASMAAG(ch_cohort,
+-            Channel.value(tuple(file(params.plasmaag_source, checkIfExists: true), files("${params.plasmaag_source}/**", type: 'file', hidden: true))),
+-            Channel.value(tuple(file(params.genomad_db, checkIfExists: true), files("${params.genomad_db}/**", type: 'file', hidden: true))),
++            Channel.value(resource.call(params.plasmaag_source)),
++            Channel.value(resource.call(params.genomad_db)),
+             params.short_read_assembler,
+             [genomad_splits: params.plasmaag_genomad_splits ?: 0, vamb_arguments: params.plasmaag_vamb_arguments ?: '', conda_prefix: params.plasmaag_conda_prefix ?: ''],
+             Channel.value(tuple(file("${moduleDir}/../bin/plasmaag_inputs.py", checkIfExists: true), file("${moduleDir}/../bin/plasmaag_checked.py", checkIfExists: true))))
+diff --git c/subworkflows/plasmid_detection.nf w/subworkflows/plasmid_detection.nf
+index f7c0203..d24ad79 100644
+--- c/subworkflows/plasmid_detection.nf
++++ w/subworkflows/plasmid_detection.nf
+@@ -20,27 +20,30 @@ workflow PLASMID_DETECTION {
+ 
+     main:
+     ch_report_events = Channel.empty()
++    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../lib/ResourceIdentity.groovy"))
++    def resource = { location ->
++        def directory = file(location, checkIfExists: true)
++        tuple(directory, ResourceIdentity.capture(directory))
++    }
+     // nf-core module expects the database as tuple val(meta2), path(db); the
+     // db carries no sample metadata, so meta2 is an empty map.
+-    GENOMAD(ch_assembly, Channel.value([[:], file(params.genomad_db, checkIfExists: true)]))
++    GENOMAD(ch_assembly, Channel.value(resource.call(params.genomad_db)).map { directory, identity -> tuple([:], directory, identity) })
+     ch_report_events = ch_report_events.mix(reportEvidence([channels: GENOMAD.out], '04_plasmid_detection', 'GENOMAD'))
+ 
+     ch_plasme = Channel.empty()
+     if (selectedTools(params.plasmid_detection_tools).contains('plasme')) {
+-        PLASME(ch_assembly, Channel.value(file(params.plasme_db, checkIfExists: true)),
+-               Channel.value(file(params.plasme_dir, checkIfExists: true)), Channel.value(tuple(file("${moduleDir}/../bin/normalize_plasme_outputs.py", checkIfExists: true), file("${moduleDir}/../bin/plasme_runtime.py", checkIfExists: true))))
++        PLASME(ch_assembly, Channel.value(resource.call(params.plasme_db)),
++               Channel.value(resource.call(params.plasme_dir)), Channel.value(tuple(file("${moduleDir}/../bin/normalize_plasme_outputs.py", checkIfExists: true), file("${moduleDir}/../bin/plasme_runtime.py", checkIfExists: true))))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASME.out], '04_plasmid_detection', 'PLASME'))
+         ch_plasme = PLASME.out.predictions
+     }
+     ch_plasx = Channel.empty()
+     if (selectedTools(params.plasmid_detection_tools).contains('plasx')) {
+-        // Numbered dependency staging avoids basename collisions in full source
+-        // trees. Recursive regular files make reference/source bytes cache inputs.
+-        def resource = { location -> Channel.value(tuple(file(location, checkIfExists: true),
+-            files("${location}/**", type: 'file', hidden: true))) }
+-        PLASX_ANNOTATE(ch_assembly, resource.call(params.plasx_anvio_source),
+-                      resource.call(params.plasx_cog_db), resource.call(params.plasx_pfam_db), Channel.value(tuple(file("${moduleDir}/../bin/plasx_inputs.py", checkIfExists: true), file("${moduleDir}/../bin/anvio_checked.py", checkIfExists: true))))
+-        PLASX(PLASX_ANNOTATE.out.annotations, resource.call(params.plasx_source), resource.call(params.plasx_profiles),
++        // Compact content/layout identity avoids per-member staging and glob omissions.
++        def plasxResource = { location -> Channel.value(resource.call(location)) }
++        PLASX_ANNOTATE(ch_assembly, plasxResource.call(params.plasx_anvio_source),
++                      plasxResource.call(params.plasx_cog_db), plasxResource.call(params.plasx_pfam_db), Channel.value(tuple(file("${moduleDir}/../bin/plasx_inputs.py", checkIfExists: true), file("${moduleDir}/../bin/anvio_checked.py", checkIfExists: true))))
++        PLASX(PLASX_ANNOTATE.out.annotations, plasxResource.call(params.plasx_source), plasxResource.call(params.plasx_profiles),
+               Channel.value(file(params.plasx_model, checkIfExists: true)), Channel.value(tuple(file("${moduleDir}/../bin/plasx_inputs.py", checkIfExists: true), file("${moduleDir}/../bin/plasx_checked.py", checkIfExists: true))))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASX_ANNOTATE.out], '04_plasmid_detection', 'PLASX_ANNOTATE'))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASX.out], '04_plasmid_detection', 'PLASX'))
+@@ -48,8 +51,7 @@ workflow PLASMID_DETECTION {
+     }
+     ch_platon = Channel.empty()
+     if (selectedTools(params.plasmid_detection_tools).contains('platon')) {
+-        PLATON(ch_assembly, Channel.value(tuple(file(params.platon_db, checkIfExists: true),
+-            files("${params.platon_db}/**", type: 'file', hidden: true))), Channel.value(file("${moduleDir}/../bin/platon_checked.py", checkIfExists: true)))
++        PLATON(ch_assembly, Channel.value(resource.call(params.platon_db)), Channel.value(file("${moduleDir}/../bin/platon_checked.py", checkIfExists: true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLATON.out], '04_plasmid_detection', 'PLATON'))
+         ch_platon = PLATON.out.predictions
+     }
+diff --git c/subworkflows/plasmid_downstream.nf w/subworkflows/plasmid_downstream.nf
+index b404596..c85be86 100644
+--- c/subworkflows/plasmid_downstream.nf
++++ w/subworkflows/plasmid_downstream.nf
+@@ -1,3 +1,4 @@
++include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
+ include { reportEvidence; reportSamples } from '../lib/report_events'
+ include { selectedTools } from '../lib/tool_selection'
+ 
+@@ -74,17 +75,22 @@ workflow PLASMID_DOWNSTREAM {
+     if (selectedTools(params.typing_tools).contains('mob_typer')) {
+         // optional per-file db inputs (mash/meta/replicons/mask/mob/mpf/orit) left empty
+         MOB_TYPER(ch_plasmids,
+-                  Channel.value(file(params.mob_suite_db, checkIfExists: true)),
++                  Channel.value(resourceInput(params.mob_suite_db)),
+                   [], [], [], [], [], [], [],
+                   false, false)
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_TYPER.out], '06_plasmid_typing', 'MOB_TYPER'))
+     }
+     if (selectedTools(params.typing_optional_tools).contains('copla')) {
++        def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../lib/ResourceIdentity.groovy"))
++        def resource = { location ->
++            def directory = file(location, checkIfExists: true)
++            tuple(directory, ResourceIdentity.capture(directory))
++        }
+         COPLA(ch_plasmids,
+               Channel.value(file(params.copla_refgraph, checkIfExists: true)),
+               Channel.value(file(params.copla_reflist, checkIfExists: true)),
+-              Channel.value(file(params.copla_dir, checkIfExists: true)),
+-              Channel.value(file(params.copla_macsyfinder_dir, checkIfExists: true)), Channel.value(file("${moduleDir}/../bin/run_copla_candidates.py", checkIfExists: true)))
++              Channel.value(resource.call(params.copla_dir)),
++              Channel.value(resource.call(params.copla_macsyfinder_dir)), Channel.value(file("${moduleDir}/../bin/run_copla_candidates.py", checkIfExists: true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: COPLA.out], '06_plasmid_typing', 'COPLA'))
+     }
+     if (run_conjscan || run_macsyfinder) {
+@@ -94,11 +100,11 @@ workflow PLASMID_DOWNSTREAM {
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER_DOWNLOAD.out], '06_plasmid_typing', 'MACSYFINDER_DOWNLOAD'))
+     }
+     if (run_conjscan) {
+-        CONJSCAN(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJScan/Plasmids all')
++        CONJSCAN(ch_proteins, MACSYFINDER_DOWNLOAD.out.models.map { resourceInput(it) }, 'CONJScan/Plasmids all')
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: CONJSCAN.out], '06_plasmid_typing', 'CONJSCAN'))
+     }
+     if (run_macsyfinder) {
+-        MACSYFINDER(ch_proteins, MACSYFINDER_DOWNLOAD.out.models, 'CONJScan/Plasmids all')
++        MACSYFINDER(ch_proteins, MACSYFINDER_DOWNLOAD.out.models.map { resourceInput(it) }, 'CONJScan/Plasmids all')
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MACSYFINDER.out], '06_plasmid_typing', 'MACSYFINDER'))
+     }
+ 
+@@ -107,14 +113,14 @@ workflow PLASMID_DOWNSTREAM {
+     if (selectedTools(params.annotation_tools).contains('bakta')) {
+         // optional proteins/prodigal-tf/regions/hmms inputs left empty
+         BAKTA(ch_plasmids,
+-              Channel.value(file(params.bakta_db, checkIfExists: true)),
++              Channel.value(resourceInput(params.bakta_db)),
+               [], [], [], [])
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: BAKTA.out], '08_annotation', 'BAKTA'))
+         // clinker consumes the directory holding the *.gbff files (the task dir itself)
+         ch_bakta_dir = BAKTA.out.gbff.map { meta, gbff -> tuple(meta, gbff.parent) }
+     }
+     if (selectedTools(params.annotation_tools).contains('amrfinderplus')) {
+-        AMRFINDERPLUS(ch_plasmids, Channel.value(file(params.amrfinderplus_db, checkIfExists: true)))
++        AMRFINDERPLUS(ch_plasmids, Channel.value(resourceInput(params.amrfinderplus_db)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: AMRFINDERPLUS.out], '08_annotation', 'AMRFINDERPLUS'))
+     }
+     if (selectedTools(params.annotation_tools).contains('abricate') || selectedTools(params.annotation_optional_tools).contains('abricate')) {
+@@ -138,15 +144,15 @@ workflow PLASMID_DOWNSTREAM {
+     if (selectedTools(params.annotation_optional_tools).contains('rgi')) {
+         // card = directory with card.json + card_database_v*.fasta; wildcard optional
+         RGI(ch_plasmids,
+-            Channel.value(file(params.card_db, checkIfExists: true)),
+-            [], Channel.value(file("${moduleDir}/../bin/validate_rgi_card.py", checkIfExists: true)))
++            Channel.value(resourceInput(params.card_db)),
++            Channel.value(resourceInput(null)), Channel.value(file("${moduleDir}/../bin/validate_rgi_card.py", checkIfExists: true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: RGI.out], '08_annotation', 'RGI'))
+     }
+     if (run_eggnog) {
+         // search_mode=diamond with no explicit dmnd db (falls back to --data_dir)
+         EGGNOG_MAPPER(ch_proteins.map { meta, proteins, topology -> tuple(meta, proteins) },
+-                      Channel.value(['diamond', []]),
+-                      Channel.value(file(params.eggnog_db, checkIfExists: true)))
++                      Channel.value(taggedResourceInput('diamond', null)),
++                      Channel.value(resourceInput(params.eggnog_db)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: EGGNOG_MAPPER.out], '08_annotation', 'EGGNOG_MAPPER'))
+     }
+ 
+diff --git c/tests/module_harness.py w/tests/module_harness.py
+index 9eb18ab..756ad58 100644
+--- c/tests/module_harness.py
++++ w/tests/module_harness.py
+@@ -1,10 +1,20 @@
+ """Materialize a direct-module harness without changing a historical module ABI."""
+ from pathlib import Path
+ import re
++import uuid
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ 
+ 
++def run_session_uuid(run_name, directory=ROOT):
++    """Bind a recovery check to the one actual session created by its cold run."""
++    matches = [fields[5] for line in (Path(directory) / '.nextflow/history').read_text().splitlines()
++               if len(fields := line.split('\t')) >= 6 and fields[2] == run_name]
++    if len(matches) != 1:
++        raise ValueError('Expected one exact Nextflow session for ' + run_name + ': ' + repr(matches))
++    return str(uuid.UUID(matches[0]))
++
++
+ def render_module_harness(harness, include_path, module_source, helper):
+     module_source = Path(module_source)
+     module_file = module_source if module_source.suffix == '.nf' else module_source.with_suffix('.nf')
+@@ -12,7 +22,16 @@ def render_module_harness(harness, include_path, module_source, helper):
+     quoted_include = repr(include_path)
+     assert text.count(quoted_include) == 1, include_path
+     text = text.replace(quoted_include, repr(str(module_file.with_suffix(''))))
+-    if 'autoplasm_helper_0' not in module_file.read_text():
++    source = module_file.read_text()
++    if '_identity)' not in source:
++        # Historical modules retain their original resource ABI, even when the
++        # current harness carries explicit content identities.
++        text = text.replace('Channel.value(resourceInput(params.card))',
++                            'Channel.value(file(params.card, checkIfExists: true))')
++        text = text.replace('Channel.value(resourceInput(null))', '[]')
++        text = text.replace("Channel.value(taggedResourceInput([id:'EXPLICIT_INTERFACE_FIXTURE'], params.gtdbtk_db))",
++                            "Channel.value([[id:'EXPLICIT_INTERFACE_FIXTURE'],file(params.gtdbtk_db,checkIfExists:true)])")
++    if 'autoplasm_helper_0' not in source:
+         # Frozen original modules have their original number of inputs. Removing
+         # only this helper argument keeps the original failing tool path intact.
+         pattern = (r', Channel\.value\(file\("\$\{moduleDir\}/[^"\n]*/bin/'
+@@ -21,4 +40,5 @@ def render_module_harness(harness, include_path, module_source, helper):
+         assert count == 1, (helper, count)
+     # The generated workflow lives in its evidence directory, so moduleDir is
+     # different from the checked-in harness directory.
+-    return text.replace('${moduleDir}/../../bin/', str(ROOT / 'bin') + '/')
++    return text.replace('${moduleDir}/../../bin/', str(ROOT / 'bin') + '/').replace(
++        "'../../lib/resource_inputs'", repr(str(ROOT / 'lib/resource_inputs')))
+diff --git c/tests/nextflow/copla_native.nf w/tests/nextflow/copla_native.nf
+index 36a46d3..3dff797 100644
+--- c/tests/nextflow/copla_native.nf
++++ w/tests/nextflow/copla_native.nf
+@@ -2,9 +2,14 @@ nextflow.enable.dsl=2
+ include { COPLA } from '../../modules/typing/copla'
+ 
+ workflow {
++    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../../lib/ResourceIdentity.groovy"))
++    def resource = { location ->
++        def directory = file(location, checkIfExists:true)
++        tuple(directory, ResourceIdentity.capture(directory))
++    }
+     COPLA(Channel.of(tuple([id:params.sample_id], file(params.assembly,checkIfExists:true))),
+           Channel.value(file(params.refgraph,checkIfExists:true)),
+           Channel.value(file(params.reflist,checkIfExists:true)),
+-          Channel.value(file(params.installation,checkIfExists:true)),
+-          Channel.value(file(params.macsyfinder,checkIfExists:true)), Channel.value(file("${moduleDir}/../../bin/run_copla_candidates.py", checkIfExists: true)))
++          Channel.value(resource.call(params.installation)),
++          Channel.value(resource.call(params.macsyfinder)), Channel.value(file("${moduleDir}/../../bin/run_copla_candidates.py", checkIfExists: true)))
+ }
+diff --git c/tests/nextflow/dastool_custom_db.nf w/tests/nextflow/dastool_custom_db.nf
+index 1ef4068..cdca0a1 100644
+--- c/tests/nextflow/dastool_custom_db.nf
++++ w/tests/nextflow/dastool_custom_db.nf
+@@ -1,4 +1,5 @@
+ nextflow.enable.dsl=2
++include { resourceInput } from '../../lib/resource_inputs'
+ 
+ include { DASTOOL_DASTOOL as DAS_TOOL } from '../../modules/nf-core/dastool/dastool/main'
+ 
+@@ -7,6 +8,6 @@ workflow {
+         file(params.assembly, checkIfExists: true),
+         params.predictions.collect { file(it, checkIfExists: true) },
+         params.proteins ? file(params.proteins, checkIfExists: true) : []))
+-    DAS_TOOL(inputs, params.db_dir ? file(params.db_dir, checkIfExists: true) : [])
++    DAS_TOOL(inputs, Channel.value(resourceInput(params.db_dir ?: null)))
+     DAS_TOOL.out.bins.view { meta, bins -> "EXPORTED_BINS=${meta.id}:${bins}" }
+ }
+diff --git c/tests/nextflow/dastool_export.nf w/tests/nextflow/dastool_export.nf
+index 3af628f..a752e14 100644
+--- c/tests/nextflow/dastool_export.nf
++++ w/tests/nextflow/dastool_export.nf
+@@ -1,4 +1,5 @@
+ nextflow.enable.dsl=2
++include { resourceInput } from '../../lib/resource_inputs'
+ 
+ include { DASTOOL_DASTOOL as DAS_TOOL } from '../../modules/nf-core/dastool/dastool/main'
+ 
+@@ -6,6 +7,6 @@ workflow {
+     inputs = Channel.of(tuple([id: 'DASToolRun1'],
+         file(params.assembly, checkIfExists: true),
+         params.predictions.collect { file(it, checkIfExists: true) }, []))
+-    DAS_TOOL(inputs, [])
++    DAS_TOOL(inputs, Channel.value(resourceInput(null)))
+     DAS_TOOL.out.bins.view { meta, bins -> "EXPORTED_BINS=${meta.id}:${bins}" }
+ }
+diff --git c/tests/nextflow/gplas_native.nf w/tests/nextflow/gplas_native.nf
+index 7cc5a3f..28168f1 100644
+--- c/tests/nextflow/gplas_native.nf
++++ w/tests/nextflow/gplas_native.nf
+@@ -1,12 +1,16 @@
+ nextflow.enable.dsl=2
+ include { GPLAS2 } from '../../modules/binning/gplas2'
+ workflow {
++    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../../lib/ResourceIdentity.groovy"))
++    def resource = { location ->
++        def directory = file(location, checkIfExists: true)
++        tuple(directory, ResourceIdentity.capture(directory))
++    }
+     records = Channel.fromList(params.records).map { row ->
+         tuple([id: "native_graph_${row.id}", gplas_original_meta: [id: row.id, group: 'preserved']],
+             file(row.graph, checkIfExists: true), file(row.predictions, checkIfExists: true),
+             file(params.ready_marker, checkIfExists: true))
+     }
+-    GPLAS2(records, Channel.value(tuple(file(params.gplas_source, checkIfExists: true),
+-        files("${params.gplas_source}/**", type: 'file', hidden: true))), Channel.value(file("${moduleDir}/../../bin/gplas_checked.py", checkIfExists: true)))
++    GPLAS2(records, Channel.value(resource.call(params.gplas_source)), Channel.value(file("${moduleDir}/../../bin/gplas_checked.py", checkIfExists: true)))
+     GPLAS2.out.bins.view { meta, result -> "GPLAS_PRODUCT=${meta.gplas_original_meta.id}:${result}" }
+ }
+diff --git c/tests/nextflow/gtdb_inputs.nf w/tests/nextflow/gtdb_inputs.nf
+index 046c3bf..837af76 100644
+--- c/tests/nextflow/gtdb_inputs.nf
++++ w/tests/nextflow/gtdb_inputs.nf
+@@ -1,4 +1,5 @@
+ nextflow.enable.dsl=2
++include { resourceInput; taggedResourceInput } from '../../lib/resource_inputs'
+ 
+ include { GTDBTK_CLASSIFYWF as GTDBTK } from '../../modules/nf-core/gtdbtk/classifywf/main'
+ 
+@@ -6,5 +7,5 @@ workflow {
+     inputs = Channel.fromList(params.records).map { row ->
+         tuple([id: row.id],row.bins.collect { file(it,checkIfExists:true) })
+     }
+-    GTDBTK(inputs,Channel.value([[id:'EXPLICIT_INTERFACE_FIXTURE'],file(params.gtdbtk_db,checkIfExists:true)]),false, Channel.value(file("${moduleDir}/../../bin/normalize_gtdb_bins.py", checkIfExists: true)))
++    GTDBTK(inputs,Channel.value(taggedResourceInput([id:'EXPLICIT_INTERFACE_FIXTURE'], params.gtdbtk_db)),false, Channel.value(file("${moduleDir}/../../bin/normalize_gtdb_bins.py", checkIfExists: true)))
+ }
+diff --git c/tests/nextflow/macsy_inputs.nf w/tests/nextflow/macsy_inputs.nf
+index 6aa6c01..71011fa 100644
+--- c/tests/nextflow/macsy_inputs.nf
++++ w/tests/nextflow/macsy_inputs.nf
+@@ -1,8 +1,9 @@
+ nextflow.enable.dsl=2
++include { resourceInput } from '../../lib/resource_inputs'
+ 
+ include { MACSYFINDER_SEARCH as CONJSCAN } from '../../modules/nf-core/macsyfinder/search/main'
+ 
+ workflow {
+     proteins=Channel.value(tuple([id:'boundary'],file(params.proteins,checkIfExists:true),file(params.topology,checkIfExists:true)))
+-    CONJSCAN(proteins,Channel.value(file(params.models,checkIfExists:true)),'CONJScan/Plasmids all')
++    CONJSCAN(proteins,Channel.value(resourceInput(params.models)),'CONJScan/Plasmids all')
+ }
+diff --git c/tests/nextflow/plasme_native.nf w/tests/nextflow/plasme_native.nf
+index df135fd..b7442d3 100644
+--- c/tests/nextflow/plasme_native.nf
++++ w/tests/nextflow/plasme_native.nf
+@@ -2,7 +2,12 @@ nextflow.enable.dsl=2
+ include { PLASME } from '../../modules/detection/plasme'
+ 
+ workflow {
++    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../../lib/ResourceIdentity.groovy"))
++    def resource = { location ->
++        def directory = file(location, checkIfExists:true)
++        tuple(directory, ResourceIdentity.capture(directory))
++    }
+     PLASME(Channel.of(tuple([id:params.sample_id],file(params.assembly,checkIfExists:true))),
+-           Channel.value(file(params.database,checkIfExists:true)),
+-           Channel.value(file(params.source_dir,checkIfExists:true)), Channel.value(tuple(file("${moduleDir}/../../bin/normalize_plasme_outputs.py", checkIfExists: true), file("${moduleDir}/../../bin/plasme_runtime.py", checkIfExists: true))))
++           Channel.value(resource.call(params.database)),
++           Channel.value(resource.call(params.source_dir)), Channel.value(tuple(file("${moduleDir}/../../bin/normalize_plasme_outputs.py", checkIfExists: true), file("${moduleDir}/../../bin/plasme_runtime.py", checkIfExists: true))))
+ }
+diff --git c/tests/nextflow/plasx_native.nf w/tests/nextflow/plasx_native.nf
+index 0d1a95c..0d5e1e2 100644
+--- c/tests/nextflow/plasx_native.nf
++++ w/tests/nextflow/plasx_native.nf
+@@ -2,15 +2,21 @@ nextflow.enable.dsl=2
+ include { PLASX_ANNOTATE; PLASX } from '../../modules/detection/plasx'
+ 
+ workflow ANNOTATE_ONLY {
+-    def resource = { location -> Channel.value(tuple(file(location, checkIfExists: true),
+-        files("${location}/**", type: 'file', hidden: true))) }
++    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../../lib/ResourceIdentity.groovy"))
++    def resource = { location ->
++        def directory = file(location, checkIfExists: true)
++        Channel.value(tuple(directory, ResourceIdentity.capture(directory)))
++    }
+     ch_assembly = Channel.of(tuple([id: params.sample_id], file(params.assembly, checkIfExists: true)))
+     PLASX_ANNOTATE(ch_assembly, resource.call(params.plasx_anvio_source), resource.call(params.plasx_cog_db), resource.call(params.plasx_pfam_db), Channel.value(tuple(file("${moduleDir}/../../bin/plasx_inputs.py", checkIfExists: true), file("${moduleDir}/../../bin/anvio_checked.py", checkIfExists: true))))
+ }
+ 
+ workflow {
+-    def resource = { location -> Channel.value(tuple(file(location, checkIfExists: true),
+-        files("${location}/**", type: 'file', hidden: true))) }
++    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../../lib/ResourceIdentity.groovy"))
++    def resource = { location ->
++        def directory = file(location, checkIfExists: true)
++        Channel.value(tuple(directory, ResourceIdentity.capture(directory)))
++    }
+     if (params.annotation_only) {
+         ANNOTATE_ONLY()
+     } else {
+diff --git c/tests/nextflow/platon_native.nf w/tests/nextflow/platon_native.nf
+index b23587b..47ed5e3 100644
+--- c/tests/nextflow/platon_native.nf
++++ w/tests/nextflow/platon_native.nf
+@@ -1,8 +1,12 @@
+ nextflow.enable.dsl=2
+ include { PLATON } from '../../modules/detection/platon'
+ workflow {
++    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../../lib/ResourceIdentity.groovy"))
++    def resource = { location ->
++        def directory = file(location, checkIfExists: true)
++        tuple(directory, ResourceIdentity.capture(directory))
++    }
+     candidates=Channel.fromList(params.records).map { row -> tuple([id:row.id,group:'preserved'],file(row.fasta,checkIfExists:true)) }
+-    PLATON(candidates,Channel.value(tuple(file(params.database,checkIfExists:true),
+-        files("${params.database}/**",type:'file',hidden:true))), Channel.value(file("${moduleDir}/../../bin/platon_checked.py", checkIfExists: true)))
++    PLATON(candidates,Channel.value(resource.call(params.database)), Channel.value(file("${moduleDir}/../../bin/platon_checked.py", checkIfExists: true)))
+     PLATON.out.predictions.view { meta, value -> 'PLATON_PRODUCT='+meta.id+':'+value }
+ }
+diff --git c/tests/nextflow/rgi_database_scope.nf w/tests/nextflow/rgi_database_scope.nf
+index 5fda2ac..1d95917 100644
+--- c/tests/nextflow/rgi_database_scope.nf
++++ w/tests/nextflow/rgi_database_scope.nf
+@@ -1,9 +1,10 @@
+ nextflow.enable.dsl=2
++include { resourceInput } from '../../lib/resource_inputs'
+ 
+ include { RGI_MAIN as RGI } from '../../modules/nf-core/rgi/main/main'
+ 
+ workflow {
+     reads = Channel.fromList(params.records).map { row -> tuple([id: row.id], file(row.fasta, checkIfExists: true)) }
+-    RGI(reads, Channel.value(file(params.card, checkIfExists: true)), [], Channel.value(file("${moduleDir}/../../bin/validate_rgi_card.py", checkIfExists: true)))
++    RGI(reads, Channel.value(resourceInput(params.card)), Channel.value(resourceInput(null)), Channel.value(file("${moduleDir}/../../bin/validate_rgi_card.py", checkIfExists: true)))
+     RGI.out.db_version.view { "DB_VERSION_CAPTURE=${it}" }
+ }
+diff --git c/tests/nf-test/README.md w/tests/nf-test/README.md
+index 3a9daaf..e2305a4 100644
+--- c/tests/nf-test/README.md
++++ w/tests/nf-test/README.md
+@@ -524,7 +524,7 @@ DESeq2 部署版本补验使用 `tests/run_deseq2_model.py --deseq-prefix <locke
+ 
+ ### PlasX完整自动注释验证（2026-10-24）
+ 
+-`nodes-detection-plasx.nf.test`实际运行生产两阶段：逐样本anvi’o7.1 COG2014/Pfam32及完整十组de novo家族，再用原模型评分。设置`AUTOPLASM_PLASX_ROOT`指向完整资源目录，包含primary/、anvio-primary-complete/、COG_2014/、Pfam_v32/、profiles/及原始系数文件；原始数据和模型锁在`tests/plasx-native.lock.json`，两阶段分别使用351包和63包Linux64显式锁。可用`tests/prepare_plasx_resources.py --outdir <新资源目录> --anvio-prefix <351包环境> --cache <已有下载缓存>`重建全部公共资源；准备会运行原生索引程序，需要足够磁盘及进程通信权限。重建器返回的生产参数使用`sources/anvio`、`sources/plasx`及`model/`；本P3资源根目录采用上述审计布局，重建后需为同一完整资源设置对应目录/文件别名，不能省略资源。
++`nodes-detection-plasx.nf.test`实际运行生产两阶段：逐样本anvi’o7.1 COG2014/Pfam32及完整十组de novo家族，再用原模型评分。设置`AUTOPLASM_PLASX_ROOT`指向完整资源目录，包含primary/、anvio-primary-complete/、COG_2014/、Pfam_v32/、profiles/及原始系数文件；原始数据和模型锁在`tests/plasx-native.lock.json`，两阶段分别使用351包和63包Linux64显式锁。可用`tests/prepare_plasx_resources.py prepare --outdir <新资源目录> --anvio-prefix <351包环境> --cache <已有下载缓存>`重建全部公共资源；准备会运行原生索引程序，需要足够磁盘及进程通信权限。重建器返回的生产参数使用`sources/anvio`、`sources/plasx`及`model/`；本P3资源根目录采用上述审计布局，重建后需为同一完整资源设置对应目录/文件别名，不能省略资源。
+ 
+ 必须使用提供生产配置的原生或Conda overlay，不再使用无依赖的Python容器冒充PlasX。P3断言同时检查两任务、三类注释、原生运行记录、样本状态域及标准库独立计数/logistic算术；不把本次自动输出更新成“独立生物真值”快照。`tests/run_plasx_native.py --workflow <有execution.json的冷运行目录> --source <官方源码> --model <原模型> --output <新核验目录>`可单独核对既有执行，`--prefix <原生环境>`另执行未修改官方predict对照；`--products`只验证产物，不能代替执行证据。整个组装0基因目前原生明确失败，排除支持；无COG/Pfam命中及未评分contig另行核验。
+ 
+@@ -535,3 +535,12 @@ DESeq2 部署版本补验使用 `tests/run_deseq2_model.py --deseq-prefix <locke
+ `prerequisites/`保存8类测试专用helper，按各consumer在`modules.json`中的固定commit获取；24个代码/环境/metadata文件、原MIT许可和完整来源见`source-lock.json`。10个vendored suite的14处setup引用现在指向此目录，生产工具版本和模块登记保持不变。更新consumer后须同步核对这些来源。
+ 
+ `docs/tool-audit/scripts/check_vendored_prerequisites.py`检查literal路径、源文件Git blob和consumer版本。实际nf-test `--dryRun`只执行发现：它打印的PASSED不能算已执行测试。真实归档I/O另由`tests/run_upstream_prerequisites.py`对固定FASTA、匹配版本的工具prefix、meta和CRC错误传播检查；这不认证其他需要模型/数据库的P1用例。原HiFi下载模块使用master数据库，实际运行前需另外固定其数据身份。完整范围见`docs/tool-audit/contracts/vendored-prerequisites.md`。
++
++
++### TA-091 目录资源续接（2026-10-26，候选）
++
++当前目录资源输入使用缓存查找前的紧凑内容/布局身份，不再将目录 glob 列表逐文件 staging。`tests/run_resource_identity.py` 检查实际 Groovy 实现与独立 Python oracle；`tests/run_resource_consumers.py --work-dir <新目录>` 分别修改15个资源输入，在13个实际消费者上核验目标重算、其他任务缓存和还原。后者是明确的 stub/version/PHF CLI observer，不是分类器推理。
++
++固定 anvi’o 主归档含13个 Git 子模块占位，原解包树中有3个断链。完整枚举明确拒绝该树，不跳过断链。资源准备器现按 `tests/anvio-submodules.lock.json` 的原提交、长度和SHA补齐全部13个子模块，并分别验证原1185个源码摘要和各子模块摘要。运行准备器的驱动 Python 需支持 `tarfile` 的 data filter（Python3.12+）；实际anvi’o工具继续使用原3.7环境，方法和数据库不变。已有原解包树可用 `python3 tests/prepare_anvio_submodules.py --source <原解包树> --archives <锁定归档缓存> --output <新的完整源码目录>` 生成完整副本，再设置生产 `--plasx_anvio_source`。PlasX P3可用 `AUTOPLASM_ANVIO_SOURCE` 覆盖其源码目录，其他资源仍由 `AUTOPLASM_PLASX_ROOT` 提供。
++
++恢复控制绑定冷运行的精确 session UUID；并发驱动各用独立工作目录下的 `.nextflow/history`。运行名或未指明会话的 `-resume` 不能代替本轮实际任务状态断言。当前证据及尚未覆盖的隐式环境/模型以 `docs/tool-audit/contracts/resource-directory-cache.md` 和本轮receipt为准；TA-091未正式接受。
+diff --git c/tests/nf-test/nodes-binning-gplas2.nf.test w/tests/nf-test/nodes-binning-gplas2.nf.test
+index 2da0f0b..6a1d9d7 100644
+--- c/tests/nf-test/nodes-binning-gplas2.nf.test
++++ w/tests/nf-test/nodes-binning-gplas2.nf.test
+@@ -12,6 +12,7 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                 input[2] = file("${new File('bin/gplas_checked.py').absolutePath}", checkIfExists: true)
+                 def root = System.getenv('AUTOPLASM_GPLAS_ROOT')
+                 input[0] = [
+@@ -20,7 +21,7 @@ nextflow_process {
+                     file(root + '/gplas/independent_prediction/test_ecoli_plasmid_prediction.tab', checkIfExists: true),
+                     file(root + '/resource_provenance.json', checkIfExists: true)
+                 ]
+-                input[1] = [file(root, checkIfExists: true), files(root + '/**', type: 'file', hidden: true)]
++                input[1] = [file(root, checkIfExists: true), ResourceIdentity.capture(file(root, checkIfExists: true))]
+                 """
+             }
+         }
+diff --git c/tests/nf-test/nodes-detection-plasme.nf.test w/tests/nf-test/nodes-detection-plasme.nf.test
+index 1bef821..b66acca 100644
+--- c/tests/nf-test/nodes-detection-plasme.nf.test
++++ w/tests/nf-test/nodes-detection-plasme.nf.test
+@@ -13,10 +13,11 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                 input[3] = [file("${new File('bin/normalize_plasme_outputs.py').absolutePath}", checkIfExists: true), file("${new File('bin/plasme_runtime.py').absolutePath}", checkIfExists: true)]
+                 input[0] = [[id: 'pUTI89'], file("${System.getenv('AUTOPLASM_PLASME_INPUTS')}/pUTI89.fna", checkIfExists: true)]
+-                input[1] = file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true)
+-                input[2] = file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true)
++                input[1] = [file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true))]
++                input[2] = [file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true))]
+                 """
+             }
+         }
+@@ -51,10 +52,11 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                 input[3] = [file("${new File('bin/normalize_plasme_outputs.py').absolutePath}", checkIfExists: true), file("${new File('bin/plasme_runtime.py').absolutePath}", checkIfExists: true)]
+                 input[0] = [[id: 'pUTI89'], file("${System.getenv('AUTOPLASM_PLASME_INPUTS')}/pUTI89.fna.gz", checkIfExists: true)]
+-                input[1] = file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true)
+-                input[2] = file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true)
++                input[1] = [file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_PLASME_DB')}", checkIfExists: true))]
++                input[2] = [file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_PLASME_SOURCE')}", checkIfExists: true))]
+                 """
+             }
+         }
+diff --git c/tests/nf-test/nodes-detection-plasx.nf.test w/tests/nf-test/nodes-detection-plasx.nf.test
+index 4c5ff95..15ab0cd 100644
+--- c/tests/nf-test/nodes-detection-plasx.nf.test
++++ w/tests/nf-test/nodes-detection-plasx.nf.test
+@@ -13,7 +13,7 @@ nextflow_pipeline {
+             params {
+                 sample_id = 'S.1'
+                 assembly = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/primary/test/test-contigs.fa"
+-                plasx_anvio_source = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/anvio-primary-complete"
++                plasx_anvio_source = System.getenv('AUTOPLASM_ANVIO_SOURCE') ?: "${System.getenv('AUTOPLASM_PLASX_ROOT')}/anvio-primary-complete"
+                 plasx_source = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/primary"
+                 plasx_cog_db = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/COG_2014"
+                 plasx_pfam_db = "${System.getenv('AUTOPLASM_PLASX_ROOT')}/Pfam_v32"
+diff --git c/tests/nf-test/nodes-detection-platon.nf.test w/tests/nf-test/nodes-detection-platon.nf.test
+index 37ecba2..0c24075 100644
+--- c/tests/nf-test/nodes-detection-platon.nf.test
++++ w/tests/nf-test/nodes-detection-platon.nf.test
+@@ -16,13 +16,14 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                 input[2] = file("${new File('bin/platon_checked.py').absolutePath}", checkIfExists: true)
+                 input[0] = [
+                     [id: 'pUTI89'],
+                     file("${System.getenv('AUTOPLASM_TEST_DATA')}/pUTI89.fasta", checkIfExists: true)
+                 ]
+                 input[1] = [file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true),
+-                            files("${System.getenv('AUTOPLASM_DB')}/platon/db/**", type: 'file', hidden: true)]
++                            ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true))]
+                 """
+             }
+         }
+@@ -53,13 +54,14 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                 input[2] = file("${new File('bin/platon_checked.py').absolutePath}", checkIfExists: true)
+                 input[0] = [
+                     [id: 'pUTI89_gzip'],
+                     file("${System.getenv('AUTOPLASM_TEST_DATA')}/data/genomics/prokaryotes/plasmids/pUTI89/pUTI89.fna.gz", checkIfExists: true)
+                 ]
+                 input[1] = [file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true),
+-                            files("${System.getenv('AUTOPLASM_DB')}/platon/db/**", type: 'file', hidden: true)]
++                            ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_DB')}/platon/db", checkIfExists: true))]
+                 """
+             }
+         }
+diff --git c/tests/nf-test/nodes-typing-copla.nf.test w/tests/nf-test/nodes-typing-copla.nf.test
+index 7a4ef6d..c12cc9f 100644
+--- c/tests/nf-test/nodes-typing-copla.nf.test
++++ w/tests/nf-test/nodes-typing-copla.nf.test
+@@ -12,12 +12,13 @@ nextflow_process {
+         when {
+             process {
+                 """
++                def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${new File('lib/ResourceIdentity.groovy').absolutePath}"))
+                 input[5] = file("${new File('bin/run_copla_candidates.py').absolutePath}", checkIfExists: true)
+                 input[0] = [[id:'Lab26'], file("${System.getenv('AUTOPLASM_COPLA_DATA')}/Lab26.fna.gz",checkIfExists:true)]
+                 input[1] = file("${System.getenv('AUTOPLASM_COPLA_GRAPH')}",checkIfExists:true)
+                 input[2] = file("${System.getenv('AUTOPLASM_COPLA_REFLIST')}",checkIfExists:true)
+-                input[3] = file("${System.getenv('AUTOPLASM_COPLA_INSTALLATION')}",checkIfExists:true)
+-                input[4] = file("${System.getenv('AUTOPLASM_COPLA_MACSYFINDER')}",checkIfExists:true)
++                input[3] = [file("${System.getenv('AUTOPLASM_COPLA_INSTALLATION')}",checkIfExists:true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_COPLA_INSTALLATION')}",checkIfExists:true))]
++                input[4] = [file("${System.getenv('AUTOPLASM_COPLA_MACSYFINDER')}",checkIfExists:true), ResourceIdentity.capture(file("${System.getenv('AUTOPLASM_COPLA_MACSYFINDER')}",checkIfExists:true))]
+                 """
+             }
+         }
+diff --git c/tests/nf-test/workflows/blastn_real.nf w/tests/nf-test/workflows/blastn_real.nf
+index 4d272b9..4743bd8 100644
+--- c/tests/nf-test/workflows/blastn_real.nf
++++ w/tests/nf-test/workflows/blastn_real.nf
+@@ -4,6 +4,7 @@
+ // blast/makeblastdb setup module; this chain covers the same node for real.
+ // Backend: podman (wave blast image, pulled on demand).
+ nextflow.enable.dsl = 2
++include { resourceInput; taggedResourceInput } from '../../../lib/resource_inputs'
+ 
+ include { BLAST_BLASTN } from '../../../modules/nf-core/blast/blastn/main'
+ 
+@@ -26,5 +27,6 @@ process MAKEBLASTDB_SCAFFOLD {
+ workflow {
+     def asm = file("${params.test_data}/pUTI89.fasta", checkIfExists: true)
+     MAKEBLASTDB_SCAFFOLD(Channel.of(tuple([id: 'mini_blast_db'], asm)))
+-    BLAST_BLASTN(Channel.of(tuple([id: 'pUTI89'], asm)), MAKEBLASTDB_SCAFFOLD.out, [], [], false)
++    BLAST_BLASTN(Channel.of(tuple([id: 'pUTI89'], asm)),
++        MAKEBLASTDB_SCAFFOLD.out.map { meta, db -> taggedResourceInput(meta, db) }, [], [], false)
+ }
+diff --git c/tests/prepare_plasx_resources.py w/tests/prepare_plasx_resources.py
+index ae5da09..c57a838 100644
+--- c/tests/prepare_plasx_resources.py
++++ w/tests/prepare_plasx_resources.py
+@@ -129,6 +129,20 @@ def format_databases(directory, threads):
+     pfam.hmmpress_files()
+ 
+ 
++def prepare_anvio_dependencies(source, downloads, cache=None):
++    # The primary archive records gitlinks but does not include their contents.
++    # Download only exact, independently locked submodule archives before the
++    # source guard or recursive resource fingerprint can accept this tree.
++    from prepare_anvio_submodules import hydrate
++    lock = json.loads((ROOT / 'tests/anvio-submodules.lock.json').read_text())
++    archives = downloads / 'anvio-gitlinks'
++    for row in lock['submodules']:
++        name = '-'.join(row['url'].split('/')[3:5]) + '-' + row['commit'] + '.tar.gz'
++        fetch({'url': row['url'], 'bytes': row['bytes'], 'sha256': row['archive_sha256']},
++              archives / name, cache)
++    return hydrate(source, archives)
++
++
+ def prepare(args):
+     directory = args.outdir.resolve()
+     directory.mkdir(parents=True, exist_ok=False)
+@@ -138,7 +152,7 @@ def prepare(args):
+         path = downloads / item['archive']
+         fetch(item, path, args.cache)
+         extract(path, directory / 'sources' / ('anvio' if item['repository'] == 'merenlab/anvio' else 'plasx'), strip_root=True)
+-    load_helper('anvio_checked').verify_source(directory / 'sources/anvio')
++    prepare_anvio_dependencies(directory / 'sources/anvio', downloads, args.cache)
+     load_helper('plasx_checked').verify_source(directory / 'sources/plasx/plasx')
+     for name, item in lock['downloads'].items():
+         fetch(item, downloads / name, args.cache)
+@@ -172,7 +186,9 @@ def prepare(args):
+         for path in sorted((directory / folder).rglob('*')):
+             if path.is_file():
+                 files.append({'path': str(path.relative_to(directory)), 'bytes': path.stat().st_size, 'sha256': sha256(path)})
+-    receipt = {'lock_sha256': sha256(args.lock), 'source_lock_status': lock['status'], 'format_exit_code': process.returncode,
++    receipt = {'lock_sha256': sha256(args.lock),
++               'anvio_submodule_lock_sha256': sha256(ROOT / 'tests/anvio-submodules.lock.json'),
++               'source_lock_status': lock['status'], 'format_exit_code': process.returncode,
+                'scope': 'complete fixed source/COG2014/Pfam32/de-novo/model preparation; no classifier or biological validation claim',
+                'files': files, 'parameters': {'plasx_anvio_source': str(directory / 'sources/anvio'),
+                'plasx_source': str(directory / 'sources/plasx'), 'plasx_cog_db': str(directory / 'COG_2014'),
+diff --git c/tests/run_dastool_custom_db.py w/tests/run_dastool_custom_db.py
+index c0425bf..0c243d5 100644
+--- c/tests/run_dastool_custom_db.py
++++ w/tests/run_dastool_custom_db.py
+@@ -68,7 +68,9 @@ def run(base, fixture, prefix, proteins, old_module, cases):
+     workflow = ROOT / 'tests/nextflow/dastool_custom_db.nf'
+     if old_module:
+         before = base / 'before-probe.nf'
+-        before.write_text(workflow.read_text().replace("'../../modules/nf-core/dastool/dastool/main'", repr(str(old_module.with_suffix('')))))
++        before.write_text(workflow.read_text().replace("'../../modules/nf-core/dastool/dastool/main'", repr(str(old_module.with_suffix(''))))
++            .replace("'../../lib/resource_inputs'",repr(str(ROOT/'lib/resource_inputs')))
++            .replace('Channel.value(resourceInput(params.db_dir ?: null))','params.db_dir ? file(params.db_dir,checkIfExists:true) : []'))
+     definitions = [('custom-space', space, None, None), ('custom-named-db', named_db, proteins, None), ('default-db', None, None, None),
+                    ('missing-file', missing, proteins, 'DAS Tool custom database is missing or empty: arc.scg.lookup'),
+                    ('empty-file', empty, proteins, 'DAS Tool custom database is missing or empty: bac.scg.faa'),
+diff --git c/tests/run_gtdb_inputs.py w/tests/run_gtdb_inputs.py
+index e010816..7a834b2 100644
+--- c/tests/run_gtdb_inputs.py
++++ w/tests/run_gtdb_inputs.py
+@@ -5,7 +5,7 @@ Requires an installed GTDB2.7.2 prefix and two real, already verified genome
+ FASTA inputs. Source bytes/DNA are the independent preservation oracle. A tiny
+ reference-name fixture and synthetic summary markers are explicitly observers.
+ """
+-from module_harness import render_module_harness
++from module_harness import render_module_harness, run_session_uuid
+ import argparse
+ import csv
+ import gzip
+@@ -67,10 +67,12 @@ def run(base,prefix,genomes,before):
+             if not resume:workflow.write_text(render_module_harness(ROOT/'tests/nextflow/gtdb_inputs.nf', '../../modules/nf-core/gtdbtk/classifywf/main', module, 'normalize_gtdb_bins.py'))
+         trace=folder/('trace-resume.tsv' if resume else 'trace.tsv')
+         command=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(workflow),'-params-file',str(folder/'params.json'),'-work-dir',str(folder/'work'),'-with-trace',str(trace),'-ansi-log','false']
+-        if resume:command+=['-resume']
++        run_name='gtdb_inputs_'+hashlib.sha256(str(folder).encode()).hexdigest()[:12]
++        if resume:command+=['-resume',run_session_uuid(run_name, directory=base)]
++        else:command+=['-name',run_name]
+         env={**os.environ,'PATH':str(observers)+':'+str(prefix/'bin')+':'+os.environ['PATH']}
+         if failure=='observer':env['GTDB_INPUT_OBSERVER_FAIL']='1'
+-        result=subprocess.run(command,capture_output=True,text=True,env=env)
++        result=subprocess.run(command,capture_output=True,text=True,env=env,cwd=base)
+         suffix='-resume' if resume else ''
+         (folder/('stdout'+suffix+'.log')).write_text(result.stdout);(folder/('stderr'+suffix+'.log')).write_text(result.stderr)
+         tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else []
+diff --git c/tests/run_hotspot_native.py w/tests/run_hotspot_native.py
+index b7634fc..6d583d0 100644
+--- c/tests/run_hotspot_native.py
++++ w/tests/run_hotspot_native.py
+@@ -12,6 +12,7 @@ import hashlib
+ import json
+ import os
+ from pathlib import Path
++from module_harness import run_session_uuid
+ import pickle
+ import shutil
+ import subprocess
+@@ -61,7 +62,7 @@ def run(base,prefix,program,database,models,before):
+         'raise SystemExit(r.returncode)\n')
+     shim.chmod(0o755)
+     runs=[]
+-    def execute(name,chosen=records,legacy=False,resume=False,disabled=False,failure=False,conda=False):
++    def execute(name,chosen=records,legacy=False,resume=False,disabled=False,failure=False,conda=False,phase=None):
+         folder=base/name;folder.mkdir(exist_ok=resume)
+         workflow=ROOT/'tests/nextflow/hotspot.nf'
+         if legacy:
+@@ -77,12 +78,13 @@ def run(base,prefix,program,database,models,before):
+                     'hotspot_home':str(program),'hotspot_db':str(database),'hotspot_models':str(local_models),'outdir':str(folder/'out')}
+             (folder/'params.json').write_text(json.dumps(params,indent=2))
+         suffix=('-corrupt-resume' if failure else '-resume') if resume else ''
++        if phase:suffix='-'+phase+'-resume'
+         trace=folder/('trace'+suffix+'.tsv');key='hotspot_'+hashlib.sha256(str(folder).encode()).hexdigest()[:12]
+         cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(workflow),'-params-file',str(folder/'params.json'),'-work-dir',str(folder/'work'),'-with-trace',str(trace),'-ansi-log','false']
+-        cmd+=['-resume',key] if resume else ['-name',key]
++        cmd+=['-resume',run_session_uuid(key, directory=base)] if resume else ['-name',key]
+         environment={**os.environ,'PATH':(str(transport)+':' if legacy else '')+str(prefix/'bin')+':'+os.environ['PATH'],
+                      'PYTHONDONTWRITEBYTECODE':'1','MAMBA_ROOT_PREFIX':str(ROOT/'results/tool-audit/runtime/mamba-root')}
+-        result=subprocess.run(cmd,env=environment,capture_output=True,text=True)
++        result=subprocess.run(cmd,env=environment,capture_output=True,text=True,cwd=base)
+         (folder/('stdout'+suffix+'.log')).write_text(result.stdout);(folder/('stderr'+suffix+'.log')).write_text(result.stderr)
+         tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else []
+         record={'scenario':name+suffix,'command':cmd,'exit_code':result.returncode,'trace':tasks,'mutated_model':failure}
+@@ -145,6 +147,7 @@ def run(base,prefix,program,database,models,before):
+         execute('current',resume=True)
+         put(corrupt);execute('current',resume=True,failure=True)
+         put(original)
++        execute('current',resume=True,phase='restored')
+         execute('disabled',disabled=True)
+         execute('no-input',chosen=[])
+         execute('locked-conda',chosen=records[:1],conda=True)
+diff --git c/tests/run_platon_native.py w/tests/run_platon_native.py
+index 61973a1..584afd6 100644
+--- c/tests/run_platon_native.py
++++ w/tests/run_platon_native.py
+@@ -46,17 +46,22 @@ def main():
+     def put(value):target.write_bytes(value);os.utime(target,ns=(stat.st_atime_ns,stat.st_mtime_ns))
+     (base/'mutation.json').write_text(json.dumps({'before_sha256':hashlib.sha256(data).hexdigest(),'corrupt_sha256':hashlib.sha256(corrupt).hexdigest(),'bytes':len(data),'mtime_ns':stat.st_mtime_ns,'scope':'one private copied HMM only; original full DB unchanged'},indent=2)+'\n')
+     sources=['bin/platon_checked.py','modules/detection/platon.nf','envs/platon-linux-64.lock','tests/nextflow/platon_native.nf','tests/run_platon_native.py']
+-    hashes={p:sha(ROOT/p) for p in sources};runs=[]
+-    def execute(name,chosen=records,resume=False,failure=None,conda=False):
++    hashes={p:sha(ROOT/p) for p in sources};runs=[];sessions={}
++    def execute(name,chosen=records,resume=False,failure=None,conda=False,phase=None):
+         folder=base/name;folder.mkdir(exist_ok=resume);config=folder/'config';work=folder/'work';key='platon_'+hashlib.sha256(str(folder).encode()).hexdigest()[:12]
+         if not resume:
+             config.write_text("params.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=2\nprocess.memory='4 GB'\nprocess.maxForks=2\nprocess.errorStrategy='terminate'\ndocker.enabled=false\nsingularity.enabled=false\nconda { enabled="+str(conda).lower()+";useMicromamba="+str(conda).lower()+";cacheDir="+repr(str(base/'conda-cache'))+";createOptions='--offline' }\n")
+             (folder/'params.json').write_text(json.dumps({'records':chosen,'database':str(private),'outdir':str(folder/'out')},indent=2)+'\n')
+         suffix='-bad-resume' if resume and failure else '-resume' if resume else ''
+-        trace=folder/('trace'+suffix+'.tsv');cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(ROOT/'tests/nextflow/platon_native.nf'),'-params-file',str(folder/'params.json'),'-work-dir',str(work),'-with-trace',str(trace),'-ansi-log','false']+(['-resume',key] if resume else ['-name',key])
++        if phase:suffix='-'+phase+'-resume'
++        trace=folder/('trace'+suffix+'.tsv');cmd=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(ROOT/'tests/nextflow/platon_native.nf'),'-params-file',str(folder/'params.json'),'-work-dir',str(work),'-with-trace',str(trace),'-ansi-log','false']+(['-resume',sessions[name]] if resume else ['-name',key])
+         env={**os.environ,'PATH':str(prefix/'bin')+':'+os.environ['PATH'],'PYTHONDONTWRITEBYTECODE':'1','CONDA_PKGS_DIRS':str(ROOT/'results/tool-audit/runtime/mamba-root/pkgs'),'MAMBA_ROOT_PREFIX':str(ROOT/'results/tool-audit/runtime/mamba-root')}
+         p=subprocess.run(cmd,env=env,text=True,capture_output=True);(folder/('stdout'+suffix+'.log')).write_text(p.stdout);(folder/('stderr'+suffix+'.log')).write_text(p.stderr)
+         tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else [];entry={'case':name+suffix,'command':cmd,'exit_code':p.returncode,'tasks':tasks};runs.append(entry)
++        if not resume and p.returncode==0:
++            matches=[line.split('\t')[5] for line in (ROOT/'.nextflow/history').read_text().splitlines() if '\t'+key+'\t' in line]
++            assert len(matches)==1,matches
++            sessions[name]=matches[0];entry['session_uuid']=sessions[name]
+         checks={}
+         if failure:
+             checks['explicit_failure']=p.returncode!=0 and any(t['status']=='FAILED' for t in tasks)
+@@ -86,6 +91,7 @@ def main():
+         execute('baseline',resume=True)
+         put(corrupt);execute('baseline',resume=True,failure='HMM')
+         put(data)
++        execute('baseline',resume=True,phase='restored')
+         execute('length',[{'id':'Short','fasta':str(short)}])
+         execute('corrupt-gzip',[{'id':'Bad','fasta':str(bad)}],failure='gzipped')
+         execute('duplicate-ID',[{'id':'Dup','fasta':str(duplicate)}],failure='Duplicate FASTA ID')
+diff --git c/tests/run_protein_input_controls.py w/tests/run_protein_input_controls.py
+index e9ea00b..ec0506a 100644
+--- c/tests/run_protein_input_controls.py
++++ w/tests/run_protein_input_controls.py
+@@ -22,7 +22,9 @@ def run(base, prefix, models, proteins, genome, before):
+             workflow=folder/'original.nf'
+             workflow.write_text((ROOT/'tests/nextflow/macsy_inputs.nf').read_text()
+                 .replace("'../../modules/nf-core/macsyfinder/search/main'",repr(str(before.with_suffix(''))))
+-                .replace(',file(params.topology,checkIfExists:true)', ''))
++                .replace(',file(params.topology,checkIfExists:true)', '')
++                .replace("'../../lib/resource_inputs'",repr(str(ROOT/'lib/resource_inputs')))
++                .replace('Channel.value(resourceInput(params.models))','Channel.value(file(params.models,checkIfExists:true))'))
+         config=folder/'nextflow.config'
+         args='--db-type gembase --replicon-topology linear'
+         if old:args+=' --topology-file '+str(bad)
+diff --git c/tests/run_protein_inputs.py w/tests/run_protein_inputs.py
+index 5afa822..18172b5 100644
+--- c/tests/run_protein_inputs.py
++++ w/tests/run_protein_inputs.py
+@@ -12,6 +12,7 @@ import hashlib
+ import json
+ import os
+ from pathlib import Path
++from module_harness import run_session_uuid
+ import subprocess
+ import sys
+ 
+@@ -113,10 +114,10 @@ def run(base, macsy, eggnog, models_archive, fixture, plasmid):
+         trace=folder/('trace'+suffix+'.tsv')
+         run_name='protein_'+hashlib.sha256(str(folder).encode()).hexdigest()[:12]
+         command=[str(ROOT/'results/tool-audit/runtime/bin/nextflow'),'-C',str(config),'run',str(ROOT/'tests/nextflow/protein_inputs.nf'),'-params-file',str(folder/'params.json'),'-work-dir',str(folder/'work'),'-with-trace',str(trace),'-ansi-log','false']
+-        if resume:command+=['-resume',run_name]
++        if resume:command+=['-resume',run_session_uuid(run_name, directory=base)]
+         else:command+=['-name',run_name]
+         env={**os.environ,'PATH':str(nativebin)+':'+str(macsy/'bin')+':'+os.environ['PATH']}
+-        result=subprocess.run(command,capture_output=True,text=True,env=env)
++        result=subprocess.run(command,capture_output=True,text=True,env=env,cwd=base)
+         (folder/('stdout'+suffix+'.log')).write_text(result.stdout);(folder/('stderr'+suffix+'.log')).write_text(result.stderr)
+         tasks=list(csv.DictReader(trace.open(),delimiter='\t')) if trace.exists() else []
+         record={'scenario':name+suffix,'command':command,'exit_code':result.returncode,'trace':tasks}
+diff --git c/tests/run_rgi_database_scope.py w/tests/run_rgi_database_scope.py
+index 919e0d1..a627a50 100644
+--- c/tests/run_rgi_database_scope.py
++++ w/tests/run_rgi_database_scope.py
+@@ -67,7 +67,7 @@ def run_checks(base, fixture, prefix, module, cases):
+                    '-with-trace', str(p / 'trace.tsv'), '-ansi-log', 'false']
+         env = os.environ.copy()
+         env['PATH'] = str(prefix / 'bin') + ':' + env['PATH']
+-        result = subprocess.run(command, env=env, capture_output=True, text=True)
++        result = subprocess.run(command, env=env, capture_output=True, text=True, cwd=base)
+         (p / 'stdout.log').write_text(result.stdout)
+         (p / 'stderr.log').write_text(result.stderr)
+         tasks = list(csv.DictReader((p / 'trace.tsv').open(), delimiter='\t')) if (p / 'trace.tsv').exists() else []
+diff --git c/tests/test_platon_input_interface.py w/tests/test_platon_input_interface.py
+index b55b744..def9a3b 100644
+--- c/tests/test_platon_input_interface.py
++++ w/tests/test_platon_input_interface.py
+@@ -33,7 +33,11 @@ class PlatonInputInterfaceTests(unittest.TestCase):
+             path=base/(mode+('.fa' if mode=='plain' else '.fa.GZ' if mode=='uppercase' else '.fa.gz'))
+             path.write_bytes(b'not a gzip file' if corrupt else data if mode=='plain' else gzip.compress(data,mtime=0))
+             tuples.append("tuple([id:'"+mode+"'],file('"+str(path)+"'))")
+-        (base/'probe.nf').write_text("nextflow.enable.dsl=2\ninclude { PLATON } from '"+str(ROOT/'modules/detection/platon')+"'\nworkflow { PLATON(Channel.of("+','.join(tuples)+"),Channel.value(tuple(file('"+str(self.db)+"'),files('"+str(self.db)+"/**',type:'file',hidden:true)))) }\n")
++        (base/'probe.nf').write_text(
++            "nextflow.enable.dsl=2\ninclude { PLATON } from '"+str(ROOT/'modules/detection/platon')+"'\n"
++            "include { resourceInput } from '"+str(ROOT/'lib/resource_inputs')+"'\n"
++            "workflow { PLATON(Channel.of("+','.join(tuples)+"),Channel.value(resourceInput('"+str(self.db)+"')),"
++            "Channel.value(file('"+str(ROOT/'bin/platon_checked.py')+"',checkIfExists:true))) }\n")
+         (base/'config').write_text("params.outdir='"+str(base/'out')+"'\nparams.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=2\nprocess.memory='4 GB'\nprocess.maxForks=2\nconda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n")
+         command=['nextflow','-C',str(base/'config'),'run',str(base/'probe.nf'),'-work-dir',str(base/'work'),'-with-trace',str(base/'trace.tsv'),'-ansi-log','false']
+         env={**os.environ,'PATH':str(self.prefix/'bin')+':'+os.environ['PATH'],'PYTHONDONTWRITEBYTECODE':'1'}
+diff --git a/lib/ResourceIdentity.groovy b/lib/ResourceIdentity.groovy
+new file mode 100644
+--- /dev/null
++++ b/lib/ResourceIdentity.groovy
+@@ -0,0 +1,106 @@
++import java.nio.file.Files
++import java.nio.file.Path
++import java.nio.file.FileVisitOption
++import java.nio.file.FileVisitResult
++import java.nio.file.SimpleFileVisitor
++import java.nio.file.attribute.BasicFileAttributes
++import java.nio.charset.StandardCharsets
++import java.security.MessageDigest
++
++/** Content identity for declared resources, computed before task-cache lookup.
++ * Only a small serializable value is passed into the process. Resource bytes
++ * remain in their original directory input; no per-file staging is required.
++ */
++class ResourceIdentity {
++    /** Enumerate through NIO, never glob/line parsing. Follow linked resources
++     * (including external targets), but fail closed on cycles, dangling links,
++     * unreadable entries and special files. Root aliases have the same identity.
++     * Resources must remain immutable from capture through task completion.
++     */
++    static List<Path> entries(Path root) {
++        def base = root.toAbsolutePath().normalize()
++        List<Path> result = []
++        Files.walkFileTree(base, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE,
++            new SimpleFileVisitor<Path>() {
++                @Override
++                FileVisitResult preVisitDirectory(Path path, BasicFileAttributes attrs) {
++                    result.add(path)
++                    return FileVisitResult.CONTINUE
++                }
++                @Override
++                FileVisitResult visitFile(Path path, BasicFileAttributes attrs) {
++                    if (!attrs.isRegularFile())
++                        throw new IllegalArgumentException('Resource member is not a regular file: ' + path)
++                    result.add(path)
++                    return FileVisitResult.CONTINUE
++                }
++            })
++        return result
++    }
++
++    static List<Path> members(Path root) {
++        return entries(root).findAll { Files.isRegularFile(it) }
++    }
++
++    static Map capture(Path root) {
++        def paths = entries(root)
++        def result = capture(root, paths.findAll { Files.isRegularFile(it) })
++        def base = root.toAbsolutePath().normalize()
++        def layout = MessageDigest.getInstance('SHA-256')
++        for (Path entry : paths.sort { a, b -> base.relativize(a).toString() <=> base.relativize(b).toString() }) {
++            // Ignore the spelling of a root alias; retain member link topology.
++            String link = entry != base && Files.isSymbolicLink(entry) ? Files.readSymbolicLink(entry).toString() : ''
++            String kind = Files.isDirectory(entry) ? 'directory' : 'file'
++            String permissions = Files.getPosixFilePermissions(entry).collect { it.name() }.sort().join(',')
++            for (String field : [base.relativize(entry).toString(), kind, link, permissions]) {
++                layout.update(field.getBytes(StandardCharsets.UTF_8))
++                layout.update((byte) 0)
++            }
++        }
++        layout.update(result.sha256.getBytes(StandardCharsets.UTF_8))
++        result.schema_version = 2
++        result.algorithm = 'sha256-files-v1-layout-posix-v2'
++        result.entry_count = paths.size()
++        result.sha256 = layout.digest().encodeHex().toString()
++        return result
++    }
++
++    static Map capture(Path root, Collection<Path> members) {
++        def base = root.toAbsolutePath().normalize()
++        def paths = members.collect { it.toAbsolutePath().normalize() }
++        if (paths.toSet().size() != paths.size())
++            throw new IllegalArgumentException('Duplicate resource member path')
++        paths = paths.sort { a, b -> base.relativize(a).toString() <=> base.relativize(b).toString() }
++        def tree = MessageDigest.getInstance('SHA-256')
++        byte[] buffer = new byte[1024 * 1024]
++        long total = 0
++        for (Path member : paths) {
++            def relative = base.relativize(member).toString().replace(File.separatorChar, '/' as char)
++            if (relative == '..' || relative.startsWith('../'))
++                throw new IllegalArgumentException('Resource member outside declared root')
++            if (!Files.isRegularFile(member))
++                throw new IllegalArgumentException('Resource member is not a regular file: ' + member)
++            def before = Files.readAttributes(member, BasicFileAttributes)
++            def content = MessageDigest.getInstance('SHA-256')
++            long length = 0
++            Files.newInputStream(member).withCloseable { stream ->
++                int count
++                while ((count = stream.read(buffer)) != -1) {
++                    content.update(buffer, 0, count)
++                    length += count
++                }
++            }
++            def after = Files.readAttributes(member, BasicFileAttributes)
++            if (before.size() != length || before.size() != after.size() ||
++                before.lastModifiedTime() != after.lastModifiedTime() || before.fileKey() != after.fileKey())
++                throw new IllegalStateException('Resource changed while fingerprinting: ' + member)
++            for (String field : [relative, Long.toString(length), content.digest().encodeHex().toString()]) {
++                tree.update(field.getBytes(StandardCharsets.UTF_8))
++                tree.update((byte) 0)
++            }
++            total += length
++        }
++        return [schema_version: 1, algorithm: 'sha256-relative-path-size-file-sha256-v1',
++                file_count: paths.size(), bytes: total, sha256: tree.digest().encodeHex().toString()]
++    }
++}
+diff --git a/lib/resource_inputs.nf b/lib/resource_inputs.nf
+new file mode 100644
+--- /dev/null
++++ b/lib/resource_inputs.nf
+@@ -0,0 +1,15 @@
++/* Capture declared resource bytes before the consumer's task-cache lookup.
++ * Empty optional resources stay explicit; no glob or per-file staging.
++ */
++def resourceInput(location) {
++    if (location == null || (location instanceof Collection && location.isEmpty()))
++        return tuple([], [schema_version: 2, resource_state: 'absent'])
++    def root = file(location, checkIfExists: true)
++    def identity = new GroovyClassLoader().parseClass(new File("${moduleDir}/ResourceIdentity.groovy"))
++    return tuple(root, identity.capture(root))
++}
++
++def taggedResourceInput(label, location) {
++    def resource = resourceInput(location)
++    return tuple(label, resource[0], resource[1])
++}
+diff --git a/tests/anvio-submodules.lock.json b/tests/anvio-submodules.lock.json
+new file mode 100644
+--- /dev/null
++++ b/tests/anvio-submodules.lock.json
+@@ -0,0 +1,122 @@
++{
++  "upstream_commit": "258991a5bc0f483c958040a55d339e1f447429ac",
++  "submodules": [
++    {
++      "path": "anvio/data/interactive/lib/JavaScript-MD5",
++      "commit": "9756d82db70b0f678bc6cd055e7aa08f5c1a0390",
++      "url": "https://codeload.github.com/blueimp/JavaScript-MD5/tar.gz/9756d82db70b0f678bc6cd055e7aa08f5c1a0390",
++      "archive_sha256": "e85d9b983921dcc3b9927aa498a63d7034162d594a58329ebb31d45c2c7e82be",
++      "files": 16,
++      "digest": "ed23a37172d63601928e6ca2a4e38cb79b905b455d40106896cb14298a06e15a",
++      "bytes": 142216
++    },
++    {
++      "path": "anvio/data/interactive/lib/bootstrap",
++      "commit": "16b48259a62f576e52c903c476bd42b90ab22482",
++      "url": "https://codeload.github.com/twbs/bootstrap/tar.gz/16b48259a62f576e52c903c476bd42b90ab22482",
++      "archive_sha256": "b04a955a9321965179206aebd4042d79632221664005d4564faad6f63cce6594",
++      "files": 361,
++      "digest": "5490896d35904851c6e3f5f040ff7ef88e09a664c1e9e6ca1f4704b4830e50c4",
++      "bytes": 3203512
++    },
++    {
++      "path": "anvio/data/interactive/lib/bootstrap-markdown",
++      "commit": "0320bec0bdb3fa49754d8fc26bfe2159c5fbe4d2",
++      "url": "https://codeload.github.com/toopay/bootstrap-markdown/tar.gz/0320bec0bdb3fa49754d8fc26bfe2159c5fbe4d2",
++      "archive_sha256": "15c115dc3910c388a032b835823ae4308c6aebc968de4f5b0a309d9e8721baea",
++      "files": 32,
++      "digest": "14150e5032cc01ae771b1eb8d8c7a146cb4a3677ee21f3f5ef765cc53277231c",
++      "bytes": 23133
++    },
++    {
++      "path": "anvio/data/interactive/lib/bootstrap-sortable",
++      "commit": "159505ae6ad99aefd727e8ffd9dc31cad58905b7",
++      "url": "https://codeload.github.com/drvic10k/bootstrap-sortable/tar.gz/159505ae6ad99aefd727e8ffd9dc31cad58905b7",
++      "archive_sha256": "a85d283d5101129f3985b8f8bbe75d98ba9b50cb76769d02298e692c5b7f225a",
++      "files": 6,
++      "digest": "ce51d07097129b25136d4ca36f9a63577d53bdb7b61f01a44e0121f46eeb6d72",
++      "bytes": 16212
++    },
++    {
++      "path": "anvio/data/interactive/lib/bootstrap-waitingfor",
++      "commit": "6ea63523247fe772bca0e633dc51a62e9dfbc9ce",
++      "url": "https://codeload.github.com/ehpc/bootstrap-waitingfor/tar.gz/6ea63523247fe772bca0e633dc51a62e9dfbc9ce",
++      "archive_sha256": "548899460475e416875eb2e488b9691319e8561455c0eaa4cadd660779bfee32",
++      "files": 14,
++      "digest": "1304a4f3e65c7df9c7e014a46b06ec73b4b864de219309a05145f76496ad0668",
++      "bytes": 8248
++    },
++    {
++      "path": "anvio/data/interactive/lib/d3.js",
++      "commit": "b48420930f3848b1498c034387fac2588903d7cf",
++      "url": "https://codeload.github.com/mbostock/d3/tar.gz/b48420930f3848b1498c034387fac2588903d7cf",
++      "archive_sha256": "e38ff0bc5a756411e725a8641de5c48fbdae85a7f795aaa3a530d228b2d6d525",
++      "files": 546,
++      "digest": "ce0d46a9eb17cb07d48bb6f1d93b23889bccae9f5c51b45b3f8d170fc686b3bb",
++      "bytes": 3025051
++    },
++    {
++      "path": "anvio/data/interactive/lib/jquery",
++      "commit": "1472290917f17af05e98007136096784f9051fab",
++      "url": "https://codeload.github.com/jquery/jquery/tar.gz/1472290917f17af05e98007136096784f9051fab",
++      "archive_sha256": "e5a8afb7663174746784e65091b3642ddc3a8422966fdcc4041b7c0d4a6ddb31",
++      "files": 226,
++      "digest": "fd9c2189760b96519bc6cb53cc53943c49f62f73db214bff889a85cd3f642752",
++      "bytes": 698526
++    },
++    {
++      "path": "anvio/data/interactive/lib/jquery-ui",
++      "commit": "d6713024e16de90ea71dc0544ba34e1df01b4d8a",
++      "url": "https://codeload.github.com/jquery/jquery-ui/tar.gz/d6713024e16de90ea71dc0544ba34e1df01b4d8a",
++      "archive_sha256": "a5070b085c98217bbeda8dc0e5cd9973e836f73f43f7923db3b05d7e86ce990b",
++      "files": 663,
++      "digest": "609f745769431803ee0258063671c536cd203fffd598185ac57d9fdf646978a4",
++      "bytes": 2540421
++    },
++    {
++      "path": "anvio/data/interactive/lib/marked",
++      "commit": "8f9d0b72f5606ed32057049f387161dd41c36ade",
++      "url": "https://codeload.github.com/chjj/marked/tar.gz/8f9d0b72f5606ed32057049f387161dd41c36ade",
++      "archive_sha256": "ddc574e45e9cc58f1d43418280dd0f48db58bd9b562ca286b9e6d6edf9b6362e",
++      "files": 228,
++      "digest": "dec4c0040f626e0e0a18f997b8c17c03e89fdb7123d7582294f71cac03d08aa3",
++      "bytes": 77189
++    },
++    {
++      "path": "anvio/data/interactive/lib/randomColor",
++      "commit": "455f347ecde2f61f9d32d9d1dbe4f6f28e54fc9e",
++      "url": "https://codeload.github.com/davidmerfield/randomColor/tar.gz/455f347ecde2f61f9d32d9d1dbe4f6f28e54fc9e",
++      "archive_sha256": "ad686d40caf7101246221780eb24409ef76e01dc150ab7bd972972d441b0f98e",
++      "files": 11,
++      "digest": "d4b7eb0ed07bf2adbc7f7d7cf20377b81042cbd8e46a8a81ff6e81a86ba1572b",
++      "bytes": 14519
++    },
++    {
++      "path": "anvio/data/interactive/lib/toastr",
++      "commit": "b957ae9f38e6856346a0200e83281b08ca717a7d",
++      "url": "https://codeload.github.com/CodeSeven/toastr/tar.gz/b957ae9f38e6856346a0200e83281b08ca717a7d",
++      "archive_sha256": "b989290941d5907a2f5132e344fc7a7bb9897f4a670057669783a20a64f0eba8",
++      "files": 74,
++      "digest": "dfc5bdda96e1105e55fe8c5a319bb0190a091f59ab7f69275fc69734332dd13c",
++      "bytes": 215106
++    },
++    {
++      "path": "anvio/data/static/content/bootstrap-sortable",
++      "commit": "64e1a43425d3b87605f2bf365d681056a14cd30a",
++      "url": "https://codeload.github.com/drvic10k/bootstrap-sortable/tar.gz/64e1a43425d3b87605f2bf365d681056a14cd30a",
++      "archive_sha256": "b7b359cf9296dbc9c5d4cb8639d44e9b7b8f31fe5ec1da047a557db39bf8a7f5",
++      "files": 6,
++      "digest": "7c652716eec427110c8afdcd3dec66025a34b4c181d5b461d3d30e563aaf5f3f",
++      "bytes": 16220
++    },
++    {
++      "path": "anvio/data/static/content/chartsjs",
++      "commit": "cc57b9e58192e28e061eec93ec5e646ba9cfd99b",
++      "url": "https://codeload.github.com/nnnick/Chart.js/tar.gz/cc57b9e58192e28e061eec93ec5e646ba9cfd99b",
++      "archive_sha256": "bb600d0c5e8d794d766baa8b15b1ef65870e1ea8bbaedd5665df72140e9280f1",
++      "files": 33,
++      "digest": "cb697fcf716471cfb023d1480169090e25fe15a54be92e5f9556a8088d8fae42",
++      "bytes": 80744
++    }
++  ]
++}
+diff --git a/tests/nextflow/resource_consumer_cache.nf b/tests/nextflow/resource_consumer_cache.nf
+new file mode 100644
+--- /dev/null
++++ b/tests/nextflow/resource_consumer_cache.nf
+@@ -0,0 +1,38 @@
++nextflow.enable.dsl=2
++include { resourceInput; taggedResourceInput } from '../../lib/resource_inputs'
++include { MOBSUITE_TYPER as MOB } from '../../modules/nf-core/mobsuite/typer/main'
++include { BAKTA_BAKTA as BAKTA } from '../../modules/nf-core/bakta/bakta/main'
++include { AMRFINDERPLUS_RUN as AMR } from '../../modules/nf-core/amrfinderplus/run/main'
++include { RGI_MAIN as RGI } from '../../modules/nf-core/rgi/main/main'
++include { EGGNOGMAPPER as EGG } from '../../modules/nf-core/eggnogmapper/main'
++include { METAPHLAN_METAPHLAN as META } from '../../modules/nf-core/metaphlan/metaphlan/main'
++include { KRAKEN2_KRAKEN2 as KRAKEN } from '../../modules/nf-core/kraken2/kraken2/main'
++include { GTDBTK_CLASSIFYWF as GTDB } from '../../modules/nf-core/gtdbtk/classifywf/main'
++include { CHECKM2_PREDICT as CHECK } from '../../modules/nf-core/checkm2/predict/main'
++include { BLAST_BLASTN as BLAST } from '../../modules/nf-core/blast/blastn/main'
++include { MACSYFINDER_SEARCH as MACSY } from '../../modules/nf-core/macsyfinder/search/main'
++include { DASTOOL_DASTOOL as DAS } from '../../modules/nf-core/dastool/dastool/main'
++include { PLASMIDHOSTFINDER as PHF } from '../../modules/host/plasmidhostfinder'
++
++workflow {
++    def fasta = file(params.fasta, checkIfExists: true)
++    def sequence = Channel.value(tuple([id: 'CACHE_OBSERVER', single_end: true], fasta))
++    def resource = { name -> Channel.value(resourceInput(params.resources[name])) }
++    def tagged = { label, name -> Channel.value(taggedResourceInput(label, params.resources[name])) }
++    MOB(sequence, resource.call('MOB_db'), [], [], [], [], [], [], [], false, false)
++    BAKTA(sequence, resource.call('BAKTA_db'), [], [], [], [])
++    AMR(sequence, resource.call('AMR_db'))
++    RGI(sequence, resource.call('RGI_card'), resource.call('RGI_wildcard'),
++        Channel.value(file("${moduleDir}/../../bin/validate_rgi_card.py", checkIfExists: true)))
++    EGG(sequence, tagged.call('diamond', 'EGG_db'), resource.call('EGG_data'))
++    META(sequence, resource.call('META_db'), false)
++    KRAKEN(sequence, resource.call('KRAKEN_db'), false, false)
++    GTDB(sequence, tagged.call([id: 'CACHE_OBSERVER_DB'], 'GTDB_db'), false,
++        Channel.value(file("${moduleDir}/../../bin/normalize_gtdb_bins.py", checkIfExists: true)))
++    CHECK(sequence, tagged.call([id: 'CACHE_OBSERVER_DB'], 'CHECK_db'))
++    BLAST(sequence, tagged.call([id: 'CACHE_OBSERVER_DB'], 'BLAST_db'), [], [], false)
++    MACSY(Channel.value(tuple([id: 'CACHE_OBSERVER'], fasta, [])), resource.call('MACSY_models'), 'STUB_ONLY')
++    DAS(Channel.value(tuple([id: 'CACHE_OBSERVER'], fasta,
++        [file(params.bins, checkIfExists: true)], [])), resource.call('DAS_db'))
++    PHF(sequence, resource.call('PHF_db'))
++}
+diff --git a/tests/nextflow/resource_identity.nf b/tests/nextflow/resource_identity.nf
+new file mode 100644
+--- /dev/null
++++ b/tests/nextflow/resource_identity.nf
+@@ -0,0 +1,34 @@
++nextflow.enable.dsl=2
++
++process READ_RESOURCE {
++    cache 'deep'
++    input:
++    tuple path(resource), val(identity)
++    output:
++    tuple val(identity), path('observed.txt')
++    script:
++    """
++    cat '${resource}/signal.txt' > observed.txt
++    """
++}
++
++workflow {
++    def ResourceIdentity = new GroovyClassLoader().parseClass(new File("${moduleDir}/../../lib/ResourceIdentity.groovy"))
++    if (params.mode == 'properties') {
++        Channel.fromList(params.cases).map { row ->
++            try {
++                def root = file(row.root,checkIfExists:true)
++                def members = row.containsKey('members') ? row.members.collect { file(it,checkIfExists:true) } :
++                    ResourceIdentity.members(root)
++                ['case':row.id, identity:row.containsKey('members') ? ResourceIdentity.capture(root,members) : ResourceIdentity.capture(root)]
++            } catch (Exception error) {
++                ['case':row.id, error:error.class.simpleName, message:error.message]
++            }
++        }.view { row -> 'IDENTITY_CONTROL=' + groovy.json.JsonOutput.toJson(row) }
++    } else {
++        def root = file(params.resource,checkIfExists:true)
++        def identity = ResourceIdentity.capture(root)
++        READ_RESOURCE(Channel.value(tuple(root,identity)))
++        READ_RESOURCE.out.view { actual, result -> 'CACHE_CONTROL=' + groovy.json.JsonOutput.toJson([identity:actual,observed:result.text]) }
++    }
++}
+diff --git a/tests/nextflow/resource_input_import.nf b/tests/nextflow/resource_input_import.nf
+new file mode 100644
+--- /dev/null
++++ b/tests/nextflow/resource_input_import.nf
+@@ -0,0 +1,10 @@
++nextflow.enable.dsl=2
++include { resourceInput } from '../../lib/resource_inputs'
++workflow {
++    def resource = resourceInput(params.resource)
++    assert resource[1].schema_version == 2
++    assert resource[1].file_count > 0
++    assert resourceInput(null)[0] == []
++    assert resourceInput([])[1].resource_state == 'absent'
++    println 'RESOURCE_IMPORT=' + groovy.json.JsonOutput.toJson(resource[1])
++}
+diff --git a/tests/prepare_anvio_submodules.py b/tests/prepare_anvio_submodules.py
+new file mode 100644
+--- /dev/null
++++ b/tests/prepare_anvio_submodules.py
+@@ -0,0 +1,65 @@
++#!/usr/bin/env python3
++"""Complete the pinned anvi'o source using verified, locally cached gitlink archives."""
++import argparse
++import hashlib
++import importlib.util
++import json
++from pathlib import Path, PurePosixPath
++import shutil
++import tarfile
++import tempfile
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def hydrate(source, archives_dir):
++    lock_path = ROOT / 'tests/anvio-submodules.lock.json'
++    lock = json.loads(lock_path.read_text())
++    output = Path(source).resolve()
++    archives = {sha(path): path for path in Path(archives_dir).glob('*.tar.gz')}
++    for row in lock['submodules']:
++        relative = PurePosixPath(row['path'])
++        assert not relative.is_absolute() and '..' not in relative.parts
++        archive = archives.get(row['archive_sha256'])
++        if archive is None:
++            raise ValueError('Missing locked archive: ' + row['url'])
++        target = output / relative
++        if not target.is_dir() or list(target.iterdir()):
++            raise ValueError('Expected an empty original gitlink directory: ' + str(target))
++        with tempfile.TemporaryDirectory(prefix='anvio-gitlink-', dir=output.parent) as temporary:
++            with tarfile.open(archive) as stream:
++                stream.extractall(temporary, filter='data')
++            roots = list(Path(temporary).iterdir())
++            assert len(roots) == 1 and roots[0].is_dir()
++            shutil.copytree(roots[0], target, symlinks=True, dirs_exist_ok=True)
++    spec = importlib.util.spec_from_file_location('anvio_checked', ROOT / 'bin/anvio_checked.py')
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    primary_digest = module.verify_source(output)
++    dangling = [str(path.relative_to(output)) for path in output.rglob('*') if path.is_symlink() and not path.exists()]
++    assert not dangling, dangling
++    (output / 'resource_provenance.json').write_text(json.dumps({
++        'upstream_commit': lock['upstream_commit'], 'primary_source_digest': primary_digest,
++        'gitlink_lock_sha256': sha(lock_path), 'submodules': lock['submodules'],
++        'scope': 'Original scientific source plus all exact gitlink archives; no method or source substitutions.'
++    }, indent=2) + '\n')
++    return primary_digest
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    for name in ['source', 'archives', 'output']:
++        parser.add_argument('--' + name, required=True, type=Path)
++    args = parser.parse_args()
++    output = args.output.resolve()
++    shutil.copytree(args.source.resolve(), output, symlinks=True)
++    hydrate(output, args.archives)
++    print('Verified original source and all 13 pinned submodules')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/run_resource_consumers.py b/tests/run_resource_consumers.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_resource_consumers.py
+@@ -0,0 +1,123 @@
++#!/usr/bin/env python3
++"""Actual consumer cache keys, with explicit node stubs/version observers, never inference."""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++
++from module_harness import run_session_uuid
++
++ROOT = Path(__file__).resolve().parents[1]
++RESOURCES = ['MOB_db', 'BAKTA_db', 'AMR_db', 'RGI_card', 'RGI_wildcard', 'EGG_db', 'EGG_data',
++             'META_db', 'KRAKEN_db', 'GTDB_db', 'CHECK_db', 'BLAST_db', 'MACSY_models', 'DAS_db', 'PHF_db']
++PROCESSES = {name.split('_')[0] for name in RESOURCES}
++
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def run(base):
++    base.mkdir(parents=True, exist_ok=False)
++    fixture = base / 'fixture'
++    fixture.mkdir()
++    paths = {}
++    for name in RESOURCES:
++        folder = fixture / name
++        (folder / 'metadata').mkdir(parents=True)
++        (folder / 'metadata/metadata.txt').write_text('VERSION_DATA=EXPLICIT_CACHE_OBSERVER\n')
++        (folder / '.signal\ncache').write_bytes(b'old\n')
++        paths[name] = str(folder)
++    fasta = fixture / 'input.fna'
++    fasta.write_text('>CACHE_OBSERVER\nACGTACGTACGT\n')
++    bins = fixture / 'bins.tsv'
++    bins.write_text('CACHE_OBSERVER\tSTUB_ONLY\n')
++    observer = base / 'observer-bin'
++    observer.mkdir()
++    script = '''#!/bin/sh
++case "$(basename "$0")" in
++  plasmidhostfinder.py) printf 'scope\\tresult\\nEXPLICIT_CACHE_OBSERVER\\tNO_INFERENCE\\n' > observer.tsv ;;
++  amrfinder) printf '2026-01-01.1 EXPLICIT_CACHE_OBSERVER\\n' ;;
++  DAS_Tool) printf 'DAS Tool EXPLICIT_CACHE_OBSERVER\\n' ;;
++  hmmsearch) printf '# EXPLICIT_CACHE_OBSERVER\\n# HMMER EXPLICIT_CACHE_OBSERVER\\n' ;;
++  *) printf 'EXPLICIT_CACHE_OBSERVER\\n' ;;
++esac
++'''
++    for name in ['mob_typer', 'bakta', 'amrfinder', 'rgi', 'kma', 'python', 'metaphlan', 'kraken2',
++                 'pigz', 'gtdbtk', 'checkm2', 'blastn', 'macsyfinder', 'hmmsearch', 'DAS_Tool',
++                 'plasmidhostfinder.py']:
++        path = observer / name
++        path.write_text(script)
++        path.chmod(0o755)
++    config = base / 'config'
++    config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='128 MB'\n"
++                      "process.maxForks=3\nprocess.errorStrategy='terminate'\n"
++                      "conda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\n"
++                      "params.publish_dir_mode='copy'\ntrace.fields='task_id,hash,name,status,exit,workdir'\n")
++    params = base / 'params.json'
++    params.write_text(json.dumps({'fasta': str(fasta), 'bins': str(bins), 'resources': paths,
++                                 'outdir': str(base / 'out')}) + '\n')
++    sources = ['lib/ResourceIdentity.groovy', 'lib/resource_inputs.nf',
++               'tests/nextflow/resource_consumer_cache.nf', 'tests/run_resource_consumers.py']
++    sources += [str(path.relative_to(ROOT)) for path in ROOT.glob('modules/nf-core/**/main.nf')
++                if 'val(db_identity)' in path.read_text() or 'val(card_identity)' in path.read_text()
++                or 'val(models_identity)' in path.read_text() or 'val(eggnog_data_identity)' in path.read_text()]
++    sources += ['modules/host/plasmidhostfinder.nf']
++    hashes = {name: sha(ROOT / name) for name in sources}
++    env = dict(os.environ, PATH=str(observer) + ':' + os.environ['PATH'])
++    records = []
++    session = None
++    cold_hashes = {}
++    for case in ['cold', 'unchanged'] + [phase + ':' + resource for resource in RESOURCES for phase in ['mutated', 'restored']]:
++        folder = base / case.replace(':', '-')
++        folder.mkdir()
++        if ':' in case:
++            phase, resource = case.split(':')
++            target = Path(paths[resource]) / '.signal\ncache'
++            before = target.stat()
++            parent = target.parent.stat()
++            target.write_bytes(b'new\n' if phase == 'mutated' else b'old\n')
++            os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
++            os.utime(target.parent, ns=(parent.st_atime_ns, parent.st_mtime_ns))
++        trace = folder / 'trace.tsv'
++        command = [str(ROOT / 'results/tool-audit/runtime/bin/nextflow'), '-C', str(config), 'run',
++                   str(ROOT / 'tests/nextflow/resource_consumer_cache.nf'), '-params-file', str(params),
++                   '-work-dir', str(base / 'work'), '-with-trace', str(trace), '-ansi-log', 'false', '-stub-run']
++        command += ['-resume', session] if session else ['-name', 'resource_consumers_cold']
++        result = subprocess.run(command, env=env, cwd=base, capture_output=True, text=True, timeout=180)
++        (folder / 'stdout').write_text(result.stdout)
++        (folder / 'stderr').write_text(result.stderr)
++        tasks = list(csv.DictReader(trace.open(), delimiter='\t')) if trace.exists() else []
++        entry = {'case': case, 'command': command, 'exit_code': result.returncode, 'tasks': tasks}
++        records.append(entry)
++        (base / 'progress.json').write_text(json.dumps(records, indent=2) + '\n')
++        assert result.returncode == 0, result.stdout + result.stderr
++        assert len(tasks) == len(PROCESSES) == 13, tasks
++        observed = {task['name'].split(' (')[0]: task for task in tasks}
++        assert set(observed) == PROCESSES, observed
++        affected = case.split(':')[1].split('_')[0] if case.startswith('mutated:') else None
++        for name, task in observed.items():
++            expected = 'COMPLETED' if case == 'cold' or name == affected else 'CACHED'
++            assert task['status'] == expected, (case, name, task)
++            if case == 'cold':
++                cold_hashes[name] = task['hash']
++            else:
++                assert (task['hash'] != cold_hashes[name]) == (name == affected), (case, task)
++        if session is None:
++            session = run_session_uuid('resource_consumers_cold', base)
++        print(case, 'passed', flush=True)
++    assert hashes == {name: sha(ROOT / name) for name in sources}
++    (base / 'run.json').write_text(json.dumps({
++        'pass': True, 'runs': records, 'source_sha256': hashes, 'session_uuid': session,
++        'scope': '15 distinct resource inputs in 13 actual consumers; synthetic LF/hidden byte changes, '
++                 'per-node stub/version observers and one PHF CLI observer. No biological classifier/model inference.'
++    }, indent=2) + '\n')
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work-dir', type=Path, required=True)
++    run(parser.parse_args().work_dir.resolve())
+diff --git a/tests/run_resource_identity.py b/tests/run_resource_identity.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_resource_identity.py
+@@ -0,0 +1,159 @@
++#!/usr/bin/env python3
++"""Independent Python oracle and actual Nextflow content-cache controls.
++
++Synthetic resource bytes plus a native cat reader; no classifier/biology claim.
++"""
++import argparse
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import stat
++import subprocess
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def sha(path):
++    digest=hashlib.sha256()
++    with Path(path).open('rb') as stream:
++        for block in iter(lambda:stream.read(1024*1024),b''):digest.update(block)
++    return digest.hexdigest()
++
++
++def oracle(root):
++    if root.is_file():paths=[root]
++    else:paths=[Path(parent)/name for parent,dirs,names in os.walk(root,followlinks=True) for name in names]
++    # Java String.compareTo sorts UTF-16 code units, independent of locale.
++    paths.sort(key=lambda p:str(p.relative_to(root)).encode('utf-16-be'))
++    digest=hashlib.sha256();total=0
++    for path in paths:
++        relative='' if path==root else str(path.relative_to(root))
++        size=path.stat().st_size;total+=size
++        for value in [relative,str(size),sha(path)]:digest.update(value.encode());digest.update(b'\0')
++    file_digest=digest.hexdigest()
++    entries=[root] if root.is_file() else [root]+[Path(parent)/name for parent,dirs,names in os.walk(root,followlinks=True) for name in dirs+names]
++    entries.sort(key=lambda p:('' if p==root else str(p.relative_to(root))).encode('utf-16-be'))
++    layout=hashlib.sha256()
++    bits={'OWNER_READ':stat.S_IRUSR,'OWNER_WRITE':stat.S_IWUSR,'OWNER_EXECUTE':stat.S_IXUSR,
++          'GROUP_READ':stat.S_IRGRP,'GROUP_WRITE':stat.S_IWGRP,'GROUP_EXECUTE':stat.S_IXGRP,
++          'OTHERS_READ':stat.S_IROTH,'OTHERS_WRITE':stat.S_IWOTH,'OTHERS_EXECUTE':stat.S_IXOTH}
++    for path in entries:
++        mode=path.stat().st_mode
++        fields=['' if path==root else str(path.relative_to(root)), 'directory' if path.is_dir() else 'file',
++                os.readlink(path) if path!=root and path.is_symlink() else '',
++                ','.join(sorted(name for name,bit in bits.items() if mode&bit))]
++        for value in fields:layout.update(value.encode());layout.update(b'\0')
++    layout.update(file_digest.encode())
++    return {'schema_version':2,'algorithm':'sha256-files-v1-layout-posix-v2',
++            'file_count':len(paths),'entry_count':len(entries),'bytes':total,'sha256':layout.hexdigest()}
++
++
++def run(base,nextflow):
++    source={p:sha(ROOT/p) for p in ['lib/ResourceIdentity.groovy','tests/nextflow/resource_identity.nf','tests/run_resource_identity.py']}
++    fixture=base/"fixtures with space's";fixture.mkdir()
++    tree=fixture/'base';tree.mkdir();(tree/'nested').mkdir()
++    (tree/'signal.txt').write_bytes(b'old\n');(tree/'.hidden').write_bytes(b'hidden\n')
++    (tree/'nested/signal.txt').write_bytes(b'different basename peer\n')
++    (tree/'large.bin').write_bytes(bytes(range(256))*(8192)+b'ending')
++    for name in ['α.model','😀.model','\ue000.model','line\nbreak.model','tab\treturn\r.model','literal[glob]*?.model']:(tree/name).write_text(name+'\n')
++    cases=[{'id':'base','root':str(tree)}]
++    for name in ['identical','changed_same_stats','mtime_only','tail_changed','renamed','hidden_added','deleted','empty_dir_added','executable_changed']:
++        path=fixture/name;shutil.copytree(tree,path)
++        if name=='changed_same_stats':
++            target=path/'signal.txt';stamp=target.stat();target.write_bytes(b'new\n');os.utime(target,ns=(stamp.st_atime_ns,stamp.st_mtime_ns))
++        elif name=='mtime_only':os.utime(path/'signal.txt',ns=(1_000_000_000,1_000_000_000))
++        elif name=='tail_changed':
++            with (path/'large.bin').open('r+b') as stream:stream.seek(-1,2);stream.write(b'X')
++        elif name=='renamed':(path/'nested/signal.txt').rename(path/'nested/renamed.txt')
++        elif name=='hidden_added':(path/'.new-hidden').write_text('new hidden model\n')
++        elif name=='empty_dir_added':(path/'empty-dir').mkdir()
++        elif name=='executable_changed':(path/'signal.txt').chmod(0o755)
++        elif name=='deleted':(path/'nested/signal.txt').unlink()
++        cases.append({'id':name,'root':str(path)})
++    alias=fixture/'root_alias';alias.symlink_to(tree,target_is_directory=True);cases.append({'id':'root_alias','root':str(alias)})
++    empty=fixture/'empty';empty.mkdir();cases.append({'id':'empty_directory','root':str(empty)})
++    single=fixture/'single';single.write_bytes(b'');cases.append({'id':'empty_file','root':str(single)})
++    link_tree=fixture/'links';link_tree.mkdir();(link_tree/'file_link').symlink_to(tree/'signal.txt');(link_tree/'dir_link').symlink_to(tree/'nested',target_is_directory=True)
++    cases.append({'id':'symlink_members','root':str(link_tree)})
++    for name in ['symlink_retarget_a','symlink_retarget_b']:
++        path=fixture/name;path.mkdir()
++        target=fixture/(name+'.target');target.write_bytes(b'identical target content\n')
++        (path/'linked').symlink_to(target)
++        cases.append({'id':name,'root':str(path)})
++    for name in ['broken_link','link_cycle','fifo']:
++        path=fixture/name;path.mkdir()
++        if name=='broken_link':(path/'bad').symlink_to(path/'missing')
++        elif name=='link_cycle':(path/'cycle').symlink_to(path,target_is_directory=True)
++        else:os.mkfifo(path/'fifo')
++        cases.append({'id':name,'root':str(path),'expected_error':True})
++    cases.extend([
++        {'id':'outside_member','root':str(tree),'members':[str(single)]},
++        {'id':'duplicate_member','root':str(tree),'members':[str(tree/'signal.txt')]*2},
++        {'id':'directory_member','root':str(tree),'members':[str(tree/'nested')]},
++    ])
++    props=base/'properties';props.mkdir();(props/'params.json').write_text(json.dumps({'mode':'properties','cases':cases})+'\n')
++    config=base/'native.config';config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='256 MB'\ntrace.fields='task_id,hash,name,status,exit,workdir'\n")
++    def execute(folder,params,resume=None):
++        (folder/'params.json').write_text(json.dumps(params)+'\n')
++        command=[nextflow,'-C',str(config),'run',str(ROOT/'tests/nextflow/resource_identity.nf'),'-params-file',str(folder/'params.json'),
++                 '-work-dir',str(base/'work'),'-with-trace',str(folder/'trace.tsv'),'-ansi-log','false','-name','resource_identity_'+folder.name]
++        if resume:command+=['-resume',resume]
++        result=subprocess.run(command,cwd=base,capture_output=True,text=True,timeout=180)
++        (folder/'stdout').write_text(result.stdout);(folder/'stderr').write_text(result.stderr)
++        assert result.returncode==0,result.stdout+result.stderr
++        return command,result.stdout
++    command,text=execute(props,{'mode':'properties','cases':cases})
++    observed={row['case']:row for row in [json.loads(line.split('=',1)[1]) for line in text.splitlines() if line.startswith('IDENTITY_CONTROL=')]}
++    assert len(observed)==len(cases)==22
++    for row in cases:
++        if row.get('expected_error'):assert 'error' in observed[row['id']],row['id']
++        elif 'members' in row:assert observed[row['id']]['error']=='IllegalArgumentException'
++        else:assert observed[row['id']]['identity']==oracle(Path(row['root'])),row['id']
++    assert observed['base']['identity']==observed['identical']['identity']==observed['mtime_only']['identity']==observed['root_alias']['identity']
++    for name in ['changed_same_stats','tail_changed','renamed','hidden_added','deleted','empty_dir_added','executable_changed']:assert observed[name]['identity']!=observed['base']['identity']
++    assert observed['symlink_retarget_a']['identity']!=observed['symlink_retarget_b']['identity']
++    resource=base/'resource';resource.mkdir();signal=resource/'signal.txt';signal.write_bytes(b'old\n');stamp=signal.stat();rootstamp=resource.stat()
++    records=[];uuid=None;scripts=set()
++    for case in ['cold','unchanged','changed','restored','hidden_added','hidden_removed','newline_added','newline_changed','newline_removed','empty_dir_added','empty_dir_removed','mode_changed','mode_restored','link_added','link_target_changed','link_removed']:
++        folder=base/case;folder.mkdir()
++        if case in ['changed','restored']:
++            signal.write_bytes(b'new\n' if case=='changed' else b'old\n');os.utime(signal,ns=(stamp.st_atime_ns,stamp.st_mtime_ns))
++        if case=='hidden_added':(resource/'.hidden').write_bytes(b'not consumed by cat but part of declared resource\n')
++        if case=='hidden_removed':(resource/'.hidden').unlink()
++        if case=='newline_added':(resource/'line\nbreak').write_bytes(b'old\n')
++        if case=='newline_changed':
++            member=resource/'line\nbreak';before=member.stat();member.write_bytes(b'new\n');os.utime(member,ns=(before.st_atime_ns,before.st_mtime_ns))
++        if case=='newline_removed':(resource/'line\nbreak').unlink()
++        if case=='empty_dir_added':(resource/'empty').mkdir()
++        if case=='empty_dir_removed':(resource/'empty').rmdir()
++        if case in ['mode_changed','mode_restored']:signal.chmod(0o755 if case=='mode_changed' else 0o644)
++        if case=='link_added':
++            (base/'external-target').write_bytes(b'old\n');(resource/'linked').symlink_to(base/'external-target')
++        if case=='link_target_changed':
++            member=base/'external-target';before=member.stat();member.write_bytes(b'new\n');os.utime(member,ns=(before.st_atime_ns,before.st_mtime_ns))
++        if case=='link_removed':(resource/'linked').unlink()
++        os.utime(resource,ns=(rootstamp.st_atime_ns,rootstamp.st_mtime_ns))
++        command,text=execute(folder,{'mode':'cache','resource':str(resource)},uuid)
++        tasks=list(csv.DictReader((folder/'trace.tsv').open(),delimiter='\t'));assert len(tasks)==1
++        expected='COMPLETED' if case in ['cold','changed','hidden_added','newline_added','newline_changed','empty_dir_added','mode_changed','link_added','link_target_changed'] else 'CACHED'
++        assert tasks[0]['status']==expected,tasks
++        row,=[json.loads(line.split('=',1)[1]) for line in text.splitlines() if line.startswith('CACHE_CONTROL=')]
++        assert row['identity']==oracle(resource) and row['observed']==('new\n' if case=='changed' else 'old\n')
++        scripts.add(sha(Path(tasks[0]['workdir'])/'.command.sh'))
++        if uuid is None:uuid=next(line.split('\t')[5] for line in reversed((base/'.nextflow/history').read_text().splitlines()) if '\tresource_identity_cold\t' in line)
++        records.append({'case':case,'command':command,'tasks':tasks,'observed':row})
++        print(case,expected,flush=True)
++    assert len(scripts)==1,'The reader script must stay identical; cache invalidation comes from the identity input.'
++    assert all(sha(ROOT/p)==h for p,h in source.items())
++    (base/'run.json').write_text(json.dumps({'pass':True,'source_sha256':source,'source_unchanged':True,
++        'property_cases':len(cases),'property_results':observed,'runs':records,'reader_script_sha256':next(iter(scripts)),
++        'scope':'Actual Groovy fingerprint implementation vs independent Python oracle; synthetic byte fixtures and native cat cache observer only, not biological tools/model accuracy/OCI/cloud.'},indent=2,ensure_ascii=False)+'\n')
++
++
++if __name__=='__main__':
++    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--work-dir',required=True)
++    parser.add_argument('--nextflow',default=str(ROOT/'results/tool-audit/runtime/bin/nextflow'))
++    args=parser.parse_args();base=Path(args.work_dir).resolve();base.mkdir(parents=True,exist_ok=False);run(base,args.nextflow)
+diff --git a/tests/test_anvio_submodules.py b/tests/test_anvio_submodules.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_anvio_submodules.py
+@@ -0,0 +1,49 @@
++"""Verify the pinned full source and reject private gitlink content corruption."""
++import importlib.util
++import json
++import os
++from pathlib import Path
++import shutil
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++spec = importlib.util.spec_from_file_location('anvio_checked', ROOT / 'bin/anvio_checked.py')
++module = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(module)
++
++
++class AnvioSubmoduleTests(unittest.TestCase):
++    def test_archive_lock_and_runtime_source_lock_agree(self):
++        lock = json.loads((ROOT / 'tests/anvio-submodules.lock.json').read_text())
++        expected = {row['path']: {key: row[key] for key in ['commit', 'files', 'digest']}
++                    for row in lock['submodules']}
++        self.assertEqual(len(expected), 13)
++        self.assertEqual(expected, module.SOURCE_SUBMODULES)
++
++    def test_complete_real_source_and_private_same_stat_corruption(self):
++        source = os.environ.get('AUTOPLASM_ANVIO_COMPLETE_SOURCE')
++        if not source:
++            self.skipTest('Pinned complete source must be supplied explicitly')
++        source = Path(source).resolve()
++        self.assertEqual(module.verify_source(source), module.SOURCE_DIGEST)
++        with tempfile.TemporaryDirectory(prefix='anvio-source-control-') as temporary:
++            private = Path(temporary) / 'source'
++            shutil.copytree(source, private, symlinks=True)
++            target = private / 'anvio/data/interactive/lib/bootstrap/dist/js/bootstrap.min.js'
++            original = target.read_bytes()
++            before = target.stat()
++            target.write_bytes(bytes([original[0] ^ 1]) + original[1:])
++            os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
++            with self.assertRaisesRegex(ValueError, 'Missing or changed pinned.*submodule'):
++                module.verify_source(private)
++            target.write_bytes(original)
++            os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
++            self.assertEqual(module.verify_source(private), module.SOURCE_DIGEST)
++            target.unlink()
++            with self.assertRaisesRegex(ValueError, 'Missing or changed pinned.*submodule'):
++                module.verify_source(private)
++
++
++if __name__ == '__main__':
++    unittest.main()

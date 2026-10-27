@@ -1,0 +1,22 @@
+order	layer	subject	patch_or_paths	acceptance
+1	resource-core	fix(resources): add content identity for explicit resource consumers	docs/tool-audit/patches/TA-091-resource-consumers.diff	unaccepted_candidate
+2	report-provenance	feat(provenance): preserve pending report runtime candidate	docs/tool-audit/patches/TA-016-preserved-report-candidate.diff	unaccepted_candidate
+3	resource-core	fix(resources): track resource roots links and permissions	docs/tool-audit/patches/TA-091-resource-root.diff	unaccepted_candidate
+4	runtime-resource-adapters	feat(resources): probe implicit runtime resource paths	docs/tool-audit/patches/TA-091-runtime-resource-pilot.diff	unaccepted_candidate
+5	runtime-resource-adapters	fix(semibin): bind native runtime model resources	docs/tool-audit/patches/TA-091-semibin-runtime.diff	unaccepted_candidate
+6	runtime-resource-adapters	fix(isescan): probe prepared native resources	docs/tool-audit/patches/TA-091-isescan-runtime.diff	unaccepted_candidate
+7	runtime-resource-adapters	fix(semibin): track FGS runtime and native helpers	docs/tool-audit/patches/TA-091-semibin-fgs-runtime.diff	unaccepted_candidate
+8	runtime-resource-adapters	fix(abricate): bind runtime database and tool identity	docs/tool-audit/patches/TA-091-abricate-runtime.diff	unaccepted_candidate
+9	native-error-propagation	fix(abricate): propagate native BLAST failures	docs/tool-audit/patches/TA-092-abricate-errors.diff	unaccepted_candidate
+10	framework-tests	test(abricate): restore native framework resource coverage	docs/tool-audit/patches/TA-091-abricate-framework.diff	unaccepted_candidate
+11	approved-method-and-resources	fix(integronfinder)!: preserve unknown-linear topology and resource identity	docs/tool-audit/patches/TA-091-TA-093-integronfinder.diff	unaccepted_candidate
+12	environment-compatibility	fix(plasmidfinder): pin Python compatibility and remove unsupported legacy flag	docs/tool-audit/patches/TA-094-TA-095-plasmidfinder-startup.diff	unaccepted_candidate
+13	runtime-resource-adapters	fix(plasmidfinder): bind prepared databases and retire viral test input	docs/tool-audit/patches/TA-091-plasmidfinder-resources.diff	unaccepted_candidate
+14	native-readset-tests	test(mobsuite): map native resource selection readsets	docs/tool-audit/patches/TA-091-mobsuite-readset.diff	unaccepted_candidate
+15	runtime-resource-adapters	feat(mobsuite): refuse unprepared native resources	docs/tool-audit/patches/TA-091-mobsuite-preflight.diff	unaccepted_candidate
+16	environment-compatibility	fix(mobsuite): install pinned wheel without implicit database initialization	docs/tool-audit/patches/TA-091-mobsuite-no-init.diff	unaccepted_candidate
+17	native-execution-guard	fix(mobsuite): guard native execution against implicit initialization	docs/tool-audit/patches/TA-091-mobsuite-execution-guard.diff	unaccepted_candidate
+18	native-readset-tests	test(medaka): lock native model selection readsets	docs/tool-audit/patches/TA-091-medaka-readset.diff	unaccepted_candidate
+19	model-selection-candidate	feat(medaka): observe model byte identity without downloads	docs/tool-audit/patches/TA-091-medaka-selection.diff	unaccepted_candidate
+20	unexecuted-ONT-drivers	test(medaka): checkpoint pending full ONT and neural-coverage drivers	tests/check_medaka_probability_coverage.py,tests/run_medaka_framework.py,tests/run_medaka_real_ont.py	unexecuted_work_in_progress
+21	audit-cleanup-and-plan	docs(audit): checkpoint candidate evidence cleanup and execution plan	docs/tool-audit/*	audit_only_not_acceptance

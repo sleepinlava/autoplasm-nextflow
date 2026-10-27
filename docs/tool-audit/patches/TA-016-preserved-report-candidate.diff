@@ -1,0 +1,387 @@
+diff --git c/bin/generate_report.R w/bin/generate_report.R
+index c4ca045..a8f75cc 100755
+--- c/bin/generate_report.R
++++ w/bin/generate_report.R
+@@ -151,6 +151,7 @@ section_names <- c("00_basecalling", "01_qc", "02_assembly", "03_assembly_qc", "
+ records <- manifest$records
+ required_kinds <- c("plasmid_fasta", "consensus", "structure")
+ inputs <- list()
++runtime_commands <- list()
+ for (record in records) {
+   if (!is.character(record$kind) || length(record$kind) != 1L ||
+       !is.character(record$producer) || length(record$producer) != 1L ||
+@@ -165,6 +166,30 @@ for (record in records) {
+     key <- paste(record$sample_id, record$kind, sep = "/")
+     if (!is.null(inputs[[key]])) die(paste0("Duplicate report input: ", key))
+     inputs[[key]] <- files
++  } else if (identical(record$kind, "runtime_command")) {
++    scalar_text <- function(value) is.character(value) && length(value) == 1L && !is.na(value) && nzchar(value)
++    if (!scalar_text(record$sample_id) || !record$sample_id %in% expected ||
++        !scalar_text(record$analysis_sample_id) || !scalar_text(record$task_process) ||
++        !scalar_text(record$script_sha256) || !grepl("^[0-9a-f]{64}$", record$script_sha256) ||
++        !is.list(record$runtime_probe) || !scalar_text(record$runtime_probe$command) ||
++        !scalar_text(record$runtime_probe$stdout)) die("Invalid runtime command identity/probe")
++    files <- unlist(record$files, use.names = FALSE)
++    if (length(files) != 1L || !file.exists(files) || dir.exists(files))
++      die("Missing declared task command file")
++    if (!requireNamespace("digest", quietly = TRUE)) die("Runtime command records require the digest package")
++    size <- file.info(files)$size
++    if (!is.finite(size) || size < 1) die("Empty declared task command file")
++    command <- readChar(files, nchars = size, useBytes = TRUE)
++    command_sha256 <- digest::digest(file = files, algo = "sha256", serialize = FALSE)
++    if (!identical(command_sha256, record$script_sha256)) die("Originating task command checksum mismatch")
++    key <- paste(record$task_process, record$sample_id, record$analysis_sample_id, sep = "/")
++    if (!is.null(runtime_commands[[key]])) die("Duplicate runtime command identity")
++    runtime_commands[[key]] <- list(
++      producer = record$producer, task_process = record$task_process,
++      sample_id = record$sample_id, analysis_sample_id = record$analysis_sample_id,
++      script_sha256 = command_sha256,
++      script = command, runtime_probe = record$runtime_probe,
++      origin = "Declared originating task artifact; resume may reuse that task's outputs")
+   } else if (!record$kind %in% c("evidence", "provided_input")) {
+     die("Unknown report event kind")
+   }
+@@ -254,6 +279,12 @@ methods <- paste0("# Methods\n\n",
+   if (length(versions)) paste(unique(vapply(versions, function(record) {
+     paste0("- ", record$producer, "/", record$output, ": ", jsonlite::toJSON(record$evidence, auto_unbox = TRUE))
+   }, character(1))), collapse = "\n") else "- No version evidence recorded.",
++  "\n\nRecorded originating task commands and runtime probes (full scripts in report_data.json):\n\n",
++  if (length(runtime_commands)) paste(vapply(runtime_commands, function(record) {
++    paste0("- ", record$task_process, " / ", record$sample_id, " (analysis ID ", record$analysis_sample_id,
++           "): SHA256 ", record$script_sha256, "; ", record$runtime_probe$command, " => ", record$runtime_probe$stdout)
++  }, character(1)), collapse = "\n") else "- No explicit task command records received.",
++  "\nThese records describe their originating tasks; resume can reuse those outputs.\n",
+   "\n\nRequested settings (configuration, not evidence that a tool ran):\n\n```json\n",
+   jsonlite::toJSON(settings, auto_unbox = TRUE, pretty = TRUE), "\n```\n\n",
+   "Complete runtime CLI arguments and database/model identities are not recorded for every producer. ",
+@@ -288,6 +319,7 @@ report_data <- list(
+                         stringsAsFactors = FALSE),
+   input_manifest_md5 = unname(tools::md5sum(opts$manifest)),
+   samplesheet_md5 = unname(tools::md5sum(opts$samplesheet)),
++  runtime_commands = unname(runtime_commands),
+   methods = sub("^# Methods\n\n", "", methods)
+ )
+ # Absolute path: rmarkdown knits the template in its own directory context.
+@@ -325,7 +357,7 @@ if (!rendered) {
+     "<!DOCTYPE html><html><head><meta charset='utf-8'>",
+     sprintf("<title>AutoPlasm report — %s</title>", html_escape(project_name)),
+     "<style>body{font-family:sans-serif;max-width:60em;margin:2em auto}</style>",
+-    sprintf("</head><body><pre>%s</pre></body></html>\n", html_escape(md)))
++    sprintf("</head><body><pre>%s</pre></body></html>\n", html_escape(paste(md, methods, sep = "\n\n"))))
+   write_char(html, file.path(opts[["out-prefix"]], "report.html"))
+ }
+ 
+diff --git c/envs/r_analysis.yml w/envs/r_analysis.yml
+index 83c7c07..908f681 100644
+--- c/envs/r_analysis.yml
++++ w/envs/r_analysis.yml
+@@ -7,6 +7,7 @@ dependencies:
+   - r-data.table
+   - r-vegan
+   - r-jsonlite
++  - r-digest
+   - r-rmarkdown
+   - pandoc
+   - bioconductor-biostrings
+diff --git c/lib/report_events.nf w/lib/report_events.nf
+index 027b88c..dbede3e 100644
+--- c/lib/report_events.nf
++++ w/lib/report_events.nf
+@@ -12,6 +12,16 @@ def reportValue(value) {
+ def reportEvidence(recordedOutputs, section, producer) {
+     def outputs = recordedOutputs.channels
+     def streams = outputs.getNames().collect { outputName ->
++        if (outputName == 'task_provenance') {
++            return outputs.getProperty(outputName).map { process, meta, command, probe, stdout, checksum ->
++                def original = meta.gplas_original_meta ?: meta
++                tuple([section: section, producer: producer, kind: 'runtime_command',
++                       task_process: process.toString(), sample_id: original.id.toString(),
++                       analysis_sample_id: meta.id.toString(),
++                       script_sha256: checksum.toString().tokenize()[0],
++                       runtime_probe: [command: probe.toString(), stdout: stdout.toString()]], [command])
++            }
++        }
+         outputs.getProperty(outputName).map { value ->
+             tuple([section: section, producer: producer, kind: 'evidence', output: outputName,
+                    evidence: reportValue(value)], [])
+diff --git c/modules/cross_sample/report.nf w/modules/cross_sample/report.nf
+index 53ee85b..f30f226 100644
+--- c/modules/cross_sample/report.nf
++++ w/modules/cross_sample/report.nf
+@@ -1,5 +1,6 @@
+ /* Current-run files are path inputs. publishDir is only an output sink. */
+ process REPORT {
++    cache 'deep'
+     tag 'report'
+     label 'process_single'
+     conda "${moduleDir}/../../envs/r_analysis.yml"
+diff --git c/modules/detection/consensus.nf w/modules/detection/consensus.nf
+index e355903..4222e1a 100644
+--- c/modules/detection/consensus.nf
++++ w/modules/detection/consensus.nf
+@@ -20,11 +20,15 @@ process PLASMID_CONSENSUS {
+     tuple val(meta), path("${meta.id}.plasmid_contigs.fasta"), emit: contigs
+     tuple val(meta), path("${meta.id}.plasmid_predictions.tsv"), emit: predictions
+     tuple val(meta), path("${meta.id}.plasmid_consensus.tsv"), emit: consensus
++    tuple val("${task.process}"), val(meta), path("${meta.id}.PLASMID_CONSENSUS.task_command.sh"),
++          val('Rscript --version'), eval('Rscript --version'),
++          eval("sha256sum '${meta.id}.PLASMID_CONSENSUS.task_command.sh'"), emit: task_provenance
+ 
+     script:
+     def extras_args = extras ? (extras in List ? extras.collect { it.toString() } : [extras.toString()]).collect { "--extra ${it}" }.join(' ') : ''
+     def domain_args = meta.analysis_entity == 'gplas_graph_node' ? '--include-all-contigs true' : ''
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLASMID_CONSENSUS.task_command.sh'
+     plasmid_consensus.R \\
+         --assembly ${assembly} \\
+         --genomad-summary ${genomad_summary} \\
+diff --git c/modules/detection/structure.nf w/modules/detection/structure.nf
+index a29fadf..b0c024c 100644
+--- c/modules/detection/structure.nf
++++ w/modules/detection/structure.nf
+@@ -18,9 +18,13 @@ process PLASMID_STRUCTURE {
+ 
+     output:
+     tuple val(meta), path("${meta.id}.plasmid_structure.tsv"), emit: structure
++    tuple val("${task.process}"), val(meta), path("${meta.id}.PLASMID_STRUCTURE.task_command.sh"),
++          val('Rscript --version'), eval('Rscript --version'),
++          eval("sha256sum '${meta.id}.PLASMID_STRUCTURE.task_command.sh'"), emit: task_provenance
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLASMID_STRUCTURE.task_command.sh'
+     plasmid_structure.R \\
+         --contigs ${plasmid_contigs} \\
+         --sample-id ${meta.id} \\
+diff --git c/tests/test_generate_report.py w/tests/test_generate_report.py
+index f5b079c..d7a676c 100644
+--- c/tests/test_generate_report.py
++++ w/tests/test_generate_report.py
+@@ -1,4 +1,5 @@
+ import json
++import hashlib
+ import subprocess
+ import tempfile
+ import unittest
+@@ -173,6 +174,48 @@ class GenerateReportTests(unittest.TestCase):
+             self.sample(sid, 1, 0, 'genomad')
+         self.assertEqual([r['sample_id'] for r in self.run_report()['samples']], ['001', '1', 'NA'])
+ 
++    def command_record(self):
++        self.sample('001', 0, 0, 'genomad')
++        command = self.root / 'command.sh'
++        command.write_text('#!/bin/bash -ue\nprintf "controlled input\\n"\n')
++        record = {'section': '04_plasmid_detection', 'producer': 'CONTROL', 'kind': 'runtime_command',
++                  'sample_id': '001', 'analysis_sample_id': 'graph_node_001',
++                  'task_process': 'GRAPH:CONTROL', 'files': [str(command)],
++                  'script_sha256': hashlib.sha256(command.read_bytes()).hexdigest(),
++                  'runtime_probe': {'command': 'controlled version probe', 'stdout': 'explicit test value'}}
++        self.records.append(record)
++        return command, record
++
++    def test_runtime_script_bytes_and_original_sample_identity_are_preserved(self):
++        command, record = self.command_record()
++        data = self.run_report()
++        result, = data['runtime_commands']
++        self.assertEqual(result['script'], command.read_text())
++        self.assertEqual(result['script_sha256'], hashlib.sha256(command.read_bytes()).hexdigest())
++        self.assertEqual((result['sample_id'], result['analysis_sample_id']), ('001', 'graph_node_001'))
++        self.assertEqual(result['runtime_probe'], record['runtime_probe'])
++        self.assertIn('resume', result['origin'])
++        self.assertIn('not recorded for every producer', data['methods'])
++        self.assertIn(result['script_sha256'], (self.output/'report.html').read_text())
++        self.assertIn(record['runtime_probe']['stdout'], (self.output/'report.html').read_text())
++
++    def test_changed_command_bytes_are_not_attributed_to_the_originating_task(self):
++        command, record = self.command_record()
++        command.write_text(command.read_text().replace('controlled', 'unverified'))
++        self.assert_rejected('Originating task command checksum mismatch')
++
++    def test_missing_command_and_incomplete_probe_are_not_silently_omitted(self):
++        command, record = self.command_record()
++        command.unlink()
++        self.assert_rejected('Missing declared task command file')
++        record['runtime_probe']['stdout'] = ''
++        self.assert_rejected('Invalid runtime command identity/probe')
++
++    def test_duplicate_runtime_command_identity_is_rejected(self):
++        self.command_record()
++        self.records.append(self.records[-1].copy())
++        self.assert_rejected('Duplicate runtime command identity')
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/nextflow/report_runtime.nf b/tests/nextflow/report_runtime.nf
+new file mode 100644
+--- /dev/null
++++ b/tests/nextflow/report_runtime.nf
+@@ -0,0 +1,28 @@
++nextflow.enable.dsl=2
++include { PLASMID_CONSENSUS } from '../../modules/detection/consensus'
++include { PLASMID_CONSENSUS as GRAPH_CONSENSUS } from '../../modules/detection/consensus'
++include { PLASMID_STRUCTURE } from '../../modules/detection/structure'
++include { REPORTING } from '../../modules/cross_sample/report'
++include { reportEvidence; reportSamples } from '../../lib/report_events'
++
++workflow {
++    // Explicit controlled predictions; real R algorithms/report, no classifier inference.
++    inputs = Channel.fromList(['S.1','001']).map { sid ->
++        tuple([id:sid], file("${params.fixture_dir}/${sid}.fasta", checkIfExists:true),
++              file("${params.fixture_dir}/${sid}.summary.tsv", checkIfExists:true), [])
++    }
++    PLASMID_CONSENSUS(inputs)
++    PLASMID_STRUCTURE(PLASMID_CONSENSUS.out.contigs)
++    GRAPH_CONSENSUS(Channel.value(tuple(
++        [id:'gplas_nodes_control_001',analysis_entity:'gplas_graph_node',gplas_original_meta:[id:'001']],
++        file("${params.fixture_dir}/001.fasta", checkIfExists:true),
++        file("${params.fixture_dir}/001.summary.tsv", checkIfExists:true), [])))
++    events = reportEvidence([channels:PLASMID_CONSENSUS.out], '04_plasmid_detection', 'PLASMID_CONSENSUS')
++        .mix(reportEvidence([channels:PLASMID_STRUCTURE.out], '04_plasmid_detection', 'PLASMID_STRUCTURE'),
++             reportEvidence([channels:GRAPH_CONSENSUS.out], '04_plasmid_detection', 'GRAPH_CONSENSUS'),
++             reportSamples(PLASMID_CONSENSUS.out.contigs, 'plasmid_fasta', 'PLASMID_CONSENSUS'),
++             reportSamples(PLASMID_CONSENSUS.out.consensus, 'consensus', 'PLASMID_CONSENSUS'),
++             reportSamples(PLASMID_STRUCTURE.out.structure, 'structure', 'PLASMID_STRUCTURE'))
++    REPORTING(events, file("${params.fixture_dir}/samples.tsv",checkIfExists:true),
++              [platform:'assembly',project_name:'Native R provenance controls'])
++}
+diff --git a/tests/run_report_runtime.py b/tests/run_report_runtime.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_report_runtime.py
+@@ -0,0 +1,135 @@
++#!/usr/bin/env python3
++"""Native consensus/structure/report provenance and exact-UUID cache controls.
++
++Predictions and DNA are explicit software fixtures, not biological truth or a
++classifier benchmark. Only private task-command artifacts are mutated.
++"""
++import argparse
++from collections import Counter
++import csv
++import hashlib
++import json
++import os
++from pathlib import Path
++import random
++import shutil
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def sha(path):
++    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++
++
++def check_report(base, tasks, dna, version):
++    report = next(t for t in tasks if t['name'].endswith('REPORT (report)'))
++    data_path = Path(report['workdir']) / 'report_data.json'
++    data = json.loads(data_path.read_text())
++    assert {r['sample_id']: (r['consensus_plasmids'],r['circular']) for r in data['samples']} == {'S.1':(1,0),'001':(0,0)}
++    records = data['runtime_commands']
++    assert len(records) == 5
++    for task in [t for t in tasks if not t['name'].endswith('REPORT (report)')]:
++        folder = Path(task['workdir'])
++        copied, = folder.glob('*.task_command.sh')
++        original = (folder / '.command.sh').read_bytes()
++        assert copied.read_bytes() == original
++        record, = [r for r in records if r['task_process'] == task['name'].split(' (')[0] and
++                   r['analysis_sample_id'] == task['name'].split(' (')[1][:-1]]
++        assert record['script'].encode() == original and record['script_sha256'] == sha(copied)
++        assert record['runtime_probe'] == {'command':'Rscript --version','stdout':version}
++        assert '--sample-id ' + record['analysis_sample_id'] in record['script']
++        assert record['script_sha256'] in data['methods']
++        assert record['script_sha256'] in (Path(report['workdir'])/'methods.md').read_text()
++        assert record['script_sha256'] in (Path(report['workdir'])/'report.html').read_text()
++        if task['name'].startswith('GRAPH_CONSENSUS '):
++            assert record['sample_id']=='001' and record['analysis_sample_id']=='gplas_nodes_control_001'
++        if task['name']=='PLASMID_CONSENSUS (S.1)':
++            fasta=(folder/'S.1.plasmid_contigs.fasta').read_text().splitlines()
++            assert fasta[0]=='>p1' and not any(line.startswith('>') for line in fasta[1:])
++            assert ''.join(fasta[1:])==dna
++        if task['name']=='PLASMID_CONSENSUS (001)':
++            assert (folder/'001.plasmid_contigs.fasta').read_bytes()==b''
++    assert 'not recorded for every producer' in data['methods']
++    assert 'render failed' not in (Path(report['workdir'])/'.command.err').read_text()
++    return {'report_data_sha256':sha(data_path),'runtime_commands':5,'source_DNA_and_sample_counts':True,
++            'original_script_bytes_sha256_and_direct_R_version':True,'HTML_and_methods_hashes':True,
++            'graph_analysis_ID_and_original_sample_ID':True}
++
++
++def run(base, nextflow):
++    fixture=base/'fixtures';fixture.mkdir()
++    rng=random.Random(29);dna=''.join(rng.choice('ACGT') for _ in range(1200))
++    assert not any(dna[:n]==dna[-n:] for n in range(20,len(dna)))
++    (fixture/'samples.tsv').write_text('sample_id\nS.1\n001\n')
++    for sid in ['S.1','001']:
++        (fixture/(sid+'.fasta')).write_text('>p1\n'+dna+'\n')
++        (fixture/(sid+'.summary.tsv')).write_text('seq_name\tplasmid_score\n'+('p1\t0.99\n' if sid=='S.1' else ''))
++    config=base/'native.config'
++    config.write_text("process.executor='local'\nprocess.cpus=1\nprocess.memory='1 GB'\nprocess.maxForks=1\nprocess.errorStrategy='terminate'\n"
++                      "process { withName: GRAPH_CONSENSUS { scratch=true } }\n"
++                      "conda.enabled=false\ndocker.enabled=false\nsingularity.enabled=false\nparams.publish_dir_mode='copy'\n"
++                      "params.consensus_method='weighted_vote'\nparams.consensus_weights='genomad:1'\n"
++                      "trace.fields='task_id,hash,name,status,exit,workdir'\n")
++    names=['bin/generate_report.R','bin/plasmid_consensus.R','bin/plasmid_structure.R','modules/detection/consensus.nf',
++           'modules/detection/structure.nf','modules/cross_sample/report.nf','lib/report_events.nf','assets/plasmid_report.Rmd',
++           'tests/nextflow/report_runtime.nf','tests/run_report_runtime.py','envs/r_analysis.yml']
++    before={p:sha(ROOT/p) for p in names}
++    version=subprocess.run(['Rscript','--version'],capture_output=True,text=True,check=True).stdout.strip()
++    env={**os.environ,'PATH':str(ROOT/'bin')+':'+os.environ['PATH']}
++    runs=[];uuid=None;target=None;original_bytes=None;original_stat=None;scientific_before=None
++    try:
++        for case in ['cold','resume','command_corruption','restored']:
++            folder=base/case;folder.mkdir()
++            if case=='command_corruption':
++                modified=original_bytes.replace(b'--sample-id S.1',b'--sample-id X.1')
++                assert modified!=original_bytes and len(modified)==len(original_bytes)
++                target.write_bytes(modified);os.utime(target,ns=(original_stat.st_atime_ns,original_stat.st_mtime_ns))
++                (folder/'tampered-task-command.sh').write_bytes(modified)
++            if case=='restored':
++                target.write_bytes(original_bytes);os.utime(target,ns=(original_stat.st_atime_ns,original_stat.st_mtime_ns))
++            (folder/'params.json').write_text(json.dumps({'fixture_dir':str(fixture),'outdir':str(folder/'out')})+'\n')
++            command=[nextflow,'-C',str(config),'run',str(ROOT/'tests/nextflow/report_runtime.nf'),'-params-file',str(folder/'params.json'),
++                     '-work-dir',str(base/'work'),'-with-trace',str(folder/'trace.tsv'),'-ansi-log','false','-name','report_runtime_'+case]
++            if uuid:command+=['-resume',uuid]
++            result=subprocess.run(command,cwd=base,env=env,capture_output=True,text=True,timeout=180)
++            (folder/'stdout').write_text(result.stdout);(folder/'stderr').write_text(result.stderr)
++            tasks=list(csv.DictReader((folder/'trace.tsv').open(),delimiter='\t')) if (folder/'trace.tsv').exists() else []
++            entry={'case':case,'command':command,'exit_code':result.returncode,'tasks':tasks};runs.append(entry)
++            (base/'progress.json').write_text(json.dumps({'source_sha256':before,'runs':runs},indent=2)+'\n')
++            if case=='command_corruption':
++                assert result.returncode!=0 and 'Originating task command checksum mismatch' in result.stdout+result.stderr
++                assert Counter(t['status'] for t in tasks)=={'CACHED':5,'FAILED':1}
++                assert next(t for t in tasks if t['status']=='FAILED')['name'].endswith('REPORT (report)')
++                assert not (folder/'out/report/report_data.json').exists()
++                entry['checks']={'same_size_mtime_corruption_rejected_before_report_publication':True}
++            else:
++                assert result.returncode==0,result.stdout+result.stderr
++                assert len(tasks)==6 and all(t['status']==('COMPLETED' if case=='cold' else 'CACHED') for t in tasks)
++                entry['checks']=check_report(folder,tasks,dna,version)
++                if case=='cold':
++                    row=next(l.split('\t') for l in reversed((base/'.nextflow/history').read_text().splitlines()) if '\treport_runtime_cold\t' in l)
++                    uuid=row[5]
++                    task=next(t for t in tasks if t['name']=='PLASMID_CONSENSUS (S.1)')
++                    target=Path(task['workdir'])/'S.1.PLASMID_CONSENSUS.task_command.sh'
++                    original_bytes=target.read_bytes();original_stat=target.stat()
++                    scientific_before={str(p):sha(p) for p in (base/'work').rglob('*') if p.is_file() and not p.is_symlink() and p.suffix in ['.fasta','.tsv']}
++                if case=='restored':assert entry['checks']['report_data_sha256']==runs[0]['checks']['report_data_sha256']
++            assert before=={p:sha(ROOT/p) for p in names}
++            if scientific_before:assert all(sha(p)==h for p,h in scientific_before.items())
++            print(case,Counter(t['status'] for t in tasks),flush=True)
++    finally:
++        if target is not None and original_bytes is not None:
++            target.write_bytes(original_bytes);os.utime(target,ns=(original_stat.st_atime_ns,original_stat.st_mtime_ns))
++    receipt={'pass':True,'runs':runs,'cold_uuid':uuid,'source_sha256':before,'source_unchanged':True,
++             'scientific_products_unchanged':True,'native_Rscript_version':version,
++             'scope':'Five actual consensus/structure R tasks (one scratch graph-entity control) and native R Markdown report; exact command bytes/digests/probe stdout/sample identity, cache and corruption rejection.',
++             'limitations':['Explicit controlled DNA/predictions, no native classifier inference or biological benchmark.','Production capture currently covers consensus/structure only; all other producers and database/model identities remain TA-016 incomplete.','Native local26.10 only; no Conda/image/remote/AWS or full-platform certification.']}
++    (base/'run.json').write_text(json.dumps(receipt,indent=2)+'\n')
++
++
++if __name__=='__main__':
++    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--work-dir',required=True)
++    parser.add_argument('--nextflow',default=shutil.which('nextflow') or str(ROOT/'results/tool-audit/runtime/bin/nextflow'))
++    args=parser.parse_args();base=Path(args.work_dir).resolve();base.mkdir(parents=True)
++    run(base,args.nextflow)

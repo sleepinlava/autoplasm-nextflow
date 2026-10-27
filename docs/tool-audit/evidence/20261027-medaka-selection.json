@@ -1,0 +1,66 @@
+{
+  "run_id": "20261027-medaka-selection-candidate",
+  "result": "standalone_native_selection_identity_and_download_refusal_pending_production_science_cache",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "native_cli_cases": 9,
+  "native_cli_exit_counts": {
+    "0": 6,
+    "2": 3
+  },
+  "late_resolution_injected_observers": 1,
+  "model_stores_unchanged": true,
+  "same_size_mtime_model_mutation_and_restoration": true,
+  "framework_discovered_only": 2,
+  "framework_testcases_executed": 0,
+  "full_polishing_runs": 0,
+  "production_MEDAKA_changes": 0,
+  "candidate_input_eligible_as_matched_real_ONT_positive": false,
+  "candidate_input_full_read_name_counts": {
+    "NC-000913.3": 494,
+    "NC-006347.1": 506
+  },
+  "cleanup_logical_bytes": 15573586,
+  "cleanup_observed_available_delta_bytes": 0,
+  "cleanup_fixed_artifacts_verified": 74,
+  "cleanup_recursive_json_indexes_reviewed": 2585,
+  "resource_pairs": {
+    "total": 42,
+    "candidate": 38,
+    "pending": 4
+  },
+  "remaining": [
+    "Medaka reviewed complete matched real bacterial ONT reads/draft/baseline with justified basecaller/model compatibility; downloaded mixed accession/no-metadata candidate rejected, not substituted",
+    "Full model format/compatibility/execution read-write set, production/cache:false per-sample gate, pre-cache context, native polishing positive/negative/error and cache corruption/mutation/restoration, actual nf-test",
+    "MOB Recon/Typer default reference/content/native science/filter/cache gates and Dorado pending implicit resource",
+    "TA016/TA031 GTDB r232/TT003 genuine shotgun P4/default-real/M0-M4/OCI/providers/platform/AWS original goal under no-virus constraint"
+  ],
+  "scope": "Standalone fixed-source Medaka2.2.2 original CLI/Bash-prefix model selection observer, not production/cache/scientific-readiness certification.9actual CLI outcomes(6exit0+3expectedexit2),plus1explicit injected parent-store late-resolution observer;N-only metadata controls, no alignment/inference/stitch. Actual model SHA/path/mode/inputs/context and original final flag state, hidden download-failure fallback refused; legitimate no-metadata fallback/explicit/bacteria semantics retained. Full original private bundled model same-size/same-mtime mutation detected,expect refuses,byte restore matches; native model stores unchanged. Viral vendored fixture removed,complete reviewed bacterial prepared cases required,full reference oracle introduced;2nf-test dry-run discoveries are0executed cases/tasks,old snapshot historical. Downloaded immutable full10.3MB named bacterial-folder file reviewed all1000reads:two bacterial accession groups,no comments,not matched retained strain or proven real ONT;no scientific positive/coverage claim,never polished. Candidate FASTQ and duplicate plain reference removed after2585index review/74fixed artifact checks;logical15,573,586bytes,observedavailabilitydelta0;metadata/source/locks/originalgzip retained,rawcandidate body no longer local. Initial cleanup old-source check rejected intentional test edit before deletion,then verified exact19-patch current hashes with only that known difference.19ordered unaccepted patches197candidate paths795current snapshot;prior18patches/formal718/99accepted+2retired/8unresolved unchanged,42pairs38candidate+4pending. No viral sample/model used,commit/push/upload/AWS/charge.",
+  "receipt": "results/tool-audit/20261027-medaka-selection/receipt.json",
+  "receipt_sha256": "651abd8be15bdf246fa6ea6cfe8347bd69a587babdfb4dd0ccd85c151d794973",
+  "patches": {
+    "docs/tool-audit/patches/TA-091-resource-consumers.diff": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+    "docs/tool-audit/patches/TA-016-preserved-report-candidate.diff": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+    "docs/tool-audit/patches/TA-091-resource-root.diff": "b50cb5c15450d7a4b856acd880a86e590e6692520896a3dc7b59c9785f0e9b4e",
+    "docs/tool-audit/patches/TA-091-runtime-resource-pilot.diff": "74f4e758ce846f2050ef609f738b37b8c381f0181d5c9b815e413fbeaab82857",
+    "docs/tool-audit/patches/TA-091-semibin-runtime.diff": "ef097d7faa8f086fc83834fb15383aa4c922da0068781828a0b493651838130e",
+    "docs/tool-audit/patches/TA-091-isescan-runtime.diff": "865acb900581a8f7706b5e7c0a9d2d6ee1a09a6cf59c910eb0d6b18dc281e5da",
+    "docs/tool-audit/patches/TA-091-semibin-fgs-runtime.diff": "b6e568cb76d0653e709813fa61a32b1b1739f6ca638ba72026d4fd65bffb9bb6",
+    "docs/tool-audit/patches/TA-091-abricate-runtime.diff": "5c42d56e0be3a9843cf33c9d526f053c6dd3d477a363b605eb053a1c00c96496",
+    "docs/tool-audit/patches/TA-092-abricate-errors.diff": "40c178138031291e1dbee786a2d8a0a289b9f1a9ea67af88d5befd94d68b6151",
+    "docs/tool-audit/patches/TA-091-abricate-framework.diff": "78bd86b53f39c776be6c2945d5e4d44185d8544f95f1549346a299f2a5f6d19d",
+    "docs/tool-audit/patches/TA-091-TA-093-integronfinder.diff": "363e01d653df36b0c6432b6aa75a26d9307201835d173bb8c5947f78bd08ef67",
+    "docs/tool-audit/patches/TA-094-TA-095-plasmidfinder-startup.diff": "b906316185b3302e6df7bd52a19af97fe79a7c376bf54a42cc23679ef5a3ccae",
+    "docs/tool-audit/patches/TA-091-plasmidfinder-resources.diff": "eefd28fc8b6ade7c48579d79219b697d16e93fc0fe075e9d02bb48aeb9ca8087",
+    "docs/tool-audit/patches/TA-091-mobsuite-readset.diff": "f6da6b382d58ef864b03ce2b058dd9fd9649658ac0f04ef02d406f7d23efbfa1",
+    "docs/tool-audit/patches/TA-091-mobsuite-preflight.diff": "d702bcc68c33c58658cae8898153c5a08ce22cc8836afd9fcd86d6664eaaeae2",
+    "docs/tool-audit/patches/TA-091-mobsuite-no-init.diff": "3cc65c93cf8796f50495e9afff4da4c0a75d2e07b9ef4e651ed6826566a2123c",
+    "docs/tool-audit/patches/TA-091-mobsuite-execution-guard.diff": "368742542ea7c27dcb54280e6c4c772ec9937fa0ab62b1527c33f1b9c5506865",
+    "docs/tool-audit/patches/TA-091-medaka-readset.diff": "ae94078e3b6e6886ceae87b7253cdb1099aa193d8023e999b60b03ec24cb8e5a",
+    "docs/tool-audit/patches/TA-091-medaka-selection.diff": "7dbeb88cdfd492250ca3d96567d88bd640c12c9189bf49808a21b3ae22413614"
+  },
+  "current_source_paths": 795,
+  "candidate_source_paths": 197,
+  "formal_source_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d"
+}

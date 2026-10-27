@@ -1,0 +1,50 @@
+{
+  "run_id": "20261026-resource-root-candidate",
+  "result": "bounded_pass_TA091_open",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "regression_cases": 7,
+  "consumer_cached_tasks": 13,
+  "source_unchanged": true,
+  "patches": {
+    "docs/tool-audit/patches/TA-091-resource-consumers.diff": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+    "docs/tool-audit/patches/TA-016-preserved-report-candidate.diff": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+    "docs/tool-audit/patches/TA-091-resource-root.diff": "b50cb5c15450d7a4b856acd880a86e590e6692520896a3dc7b59c9785f0e9b4e"
+  },
+  "forward_matches_current_worktree": true,
+  "reverse_matches_exact_HEAD_bytes": true,
+  "candidate_paths": 103,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "temporary_roundtrip_directory": "/tmp/autoplasm-root-roundtrip-w3hqh2lr",
+  "artifacts": [
+    {
+      "path": "results/tool-audit/20261026-resource-root/regression-v2/run.json",
+      "sha256": "7dc21fe348e63096415453cbbcd2fe3fb489ae941cf319d56a5f34537fe61498"
+    },
+    {
+      "path": "results/tool-audit/20261026-resource-root/consumer-resume/run.json",
+      "sha256": "9f02d81bfe7547516daf9233d5ef8e1ab3658e7d2e8d0a57d65726a7455be818"
+    },
+    {
+      "path": "results/tool-audit/20261026-resource-root/locator-controls/run.json",
+      "sha256": "4a57516dae2417a2cf2d87135e86f43a81fffff826bfb58d97ca1636010b2d2c"
+    }
+  ],
+  "prior_receipt": {
+    "path": "results/tool-audit/20261026-resource-consumers/receipt.json",
+    "sha256": "cbe8e7f61f539fa7e05f8ec93d6512558dd70b014aab8381dd725bc7985509a8",
+    "source_changes_since_capture": {
+      "lib/resource_inputs.nf": {
+        "previous": "4d3292d3c7177e3056b4aa379decaf2945bb7ab0811a3409b8043788aca49d66",
+        "current": "95d0735471a581eb3ff2174d18eb3108bab2386445b29b72feef4aa3e1f6a923"
+      }
+    }
+  },
+  "counterexample": {
+    "path": "results/tool-audit/20261026-resource-consumers/root-locator-probe/run.json",
+    "scope": "Real existing root names [],*,? rejected by old default glob locator; preserved before fix"
+  },
+  "scope": "Only shared literal-root locator changed: glob:false. Same resource layout/content yields same identity and exact previous13 observer task hashes; no native algorithm/parameter change, inference, whole-TA091 or formal718-source acceptance.",
+  "full_receipt": "results/tool-audit/20261026-resource-root/receipt.json",
+  "full_receipt_sha256": "e1d15a5b5d64472ddd33b25c0ba763ca1427a8474b106189b35efdc35708812f"
+}

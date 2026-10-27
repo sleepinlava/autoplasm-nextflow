@@ -1,0 +1,49 @@
+{
+  "run_id": "20261026-mobsuite-source-readset-candidate",
+  "result": "source_bound_checks_complete_native_pending",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "source_direct_matches": 2,
+  "prior453_fixed_artifact_hashes_reverified": true,
+  "source_commit": "eb86064884338c9ec19c19b4043aaa7ea1c9361b",
+  "source_path_cases": 19,
+  "source_unknown_option_refused": true,
+  "native_mob_scientific_tasks": 0,
+  "native_mob_environment_installed": false,
+  "database_sequence_model_downloaded": false,
+  "resource_pairs": {
+    "candidate": 38,
+    "pending": 3,
+    "total": 41
+  },
+  "cleanup_receipt": "results/tool-audit/20261026-cleanup-5/cleanup.json",
+  "remaining": [
+    "MOB3.1.9 native package+archive/source verification and constraint-compatible prepared databases before auto-init/scientific execution",
+    "Full real resource readset including actual BLAST alias volumes/mash/filter writes/taxonomy updates, production probe+two aliases/context/cache mutation/restore/corruption",
+    "Replace original viral MOB test inputs with full bacterial fixtures before any test execution; do not run old viral tests",
+    "Dorado/Medaka and full environment/provider/platform/optional/native/P4/S2/GTDB/M0-M4/AWS tasks subject to no-virus constraint"
+  ],
+  "scope": "Only six software source/config files+tag metadata downloaded, tag bytes verified against immutable eb860648 commit. Original AST parser/path-selection slices execute, verify_init explicit observer and never called for real.19path cases plus unknown option negative are not19native tasks or biological samples. Production comment correction only, no runtime guard claimed. Fourteenth unaccepted patch,173candidate paths/779current sources; formal718/99accepted+2retired/8unresolved unchanged. Six obsolete failed PlasMAAG BAM/BAI removed with metadata/SHA/index evidence; all original inputs, successful v2 outputs and logs/traces retained. No viral sequence/model/DB download or native run, commit/push/upload/AWS/charge.",
+  "receipt": "results/tool-audit/20261026-mobsuite-readset/receipt.json",
+  "receipt_sha256": "533f16425027fed4eedd69140e314b798c18016c4313eb40016820ee5823cff0",
+  "current_source_paths": 779,
+  "candidate_source_paths": 173,
+  "patches": {
+    "docs/tool-audit/patches/TA-091-resource-consumers.diff": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+    "docs/tool-audit/patches/TA-016-preserved-report-candidate.diff": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+    "docs/tool-audit/patches/TA-091-resource-root.diff": "b50cb5c15450d7a4b856acd880a86e590e6692520896a3dc7b59c9785f0e9b4e",
+    "docs/tool-audit/patches/TA-091-runtime-resource-pilot.diff": "74f4e758ce846f2050ef609f738b37b8c381f0181d5c9b815e413fbeaab82857",
+    "docs/tool-audit/patches/TA-091-semibin-runtime.diff": "ef097d7faa8f086fc83834fb15383aa4c922da0068781828a0b493651838130e",
+    "docs/tool-audit/patches/TA-091-isescan-runtime.diff": "865acb900581a8f7706b5e7c0a9d2d6ee1a09a6cf59c910eb0d6b18dc281e5da",
+    "docs/tool-audit/patches/TA-091-semibin-fgs-runtime.diff": "b6e568cb76d0653e709813fa61a32b1b1739f6ca638ba72026d4fd65bffb9bb6",
+    "docs/tool-audit/patches/TA-091-abricate-runtime.diff": "5c42d56e0be3a9843cf33c9d526f053c6dd3d477a363b605eb053a1c00c96496",
+    "docs/tool-audit/patches/TA-092-abricate-errors.diff": "40c178138031291e1dbee786a2d8a0a289b9f1a9ea67af88d5befd94d68b6151",
+    "docs/tool-audit/patches/TA-091-abricate-framework.diff": "78bd86b53f39c776be6c2945d5e4d44185d8544f95f1549346a299f2a5f6d19d",
+    "docs/tool-audit/patches/TA-091-TA-093-integronfinder.diff": "363e01d653df36b0c6432b6aa75a26d9307201835d173bb8c5947f78bd08ef67",
+    "docs/tool-audit/patches/TA-094-TA-095-plasmidfinder-startup.diff": "b906316185b3302e6df7bd52a19af97fe79a7c376bf54a42cc23679ef5a3ccae",
+    "docs/tool-audit/patches/TA-091-plasmidfinder-resources.diff": "eefd28fc8b6ade7c48579d79219b697d16e93fc0fe075e9d02bb48aeb9ca8087",
+    "docs/tool-audit/patches/TA-091-mobsuite-readset.diff": "f6da6b382d58ef864b03ce2b058dd9fd9649658ac0f04ef02d406f7d23efbfa1"
+  },
+  "formal_source_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d"
+}

@@ -683,3 +683,100 @@ P3收尾：当前718来源全部匹配；新版混合参考候选154文件反向
 
 
 2026-10-25 报告来源第一增量：两个R生产者输出实际完整引擎脚本/原生R版本/原任务SHA，报告显式文件输入及deep缓存校验，保留原样本与图节点ID，JSON/方法/两种HTML均有来源信息。17报告单元、当前6原生任务和17缓存/1预期校验失败、旧5场景8trace及共识10完成3预期失败通过；当前gplas两个R重跑四缓存，原图/成员DNA不变。首版FASTA单行oracle和漏PATH启动错误保留，不算新增仓库缺陷。九源增量7精确718前像+2新增，实际正反应用逐字节通过；720当前身份仅候选，旧718接受清单/receipt冻结。TA-016改in_progress、继续开放；99verified/2退役/3未决不变，完整生产者/资源/环境来源未完成。
+
+
+## 2026-10-26 TA-091续接：NIO枚举、目录身份边界与COPLA现场
+
+按工作总结先处理S0，保留此前报告/缓存候选。COPLA原任务源码/包装器、输入和部分产物SHA已保存：候选1产出PTU-X4，候选2留2091/9894 ANI状态，无最终trace/exit；不能算通过，不能从当前隔离进程表推测外部后代状态。1800秒不足以覆盖已观察到的两候选工作量；重试保留2候选和全9894参考，须新目录、至少7200秒预算和进度监测，本轮未重复启动该长任务。
+
+紧凑指纹当前调用方改NIO FOLLOW_LINKS完整遍历；v2纳入相对路径/类型、目录存在、成员链接原始目标及POSIX权限，在文件读取前后核验size/mtime/fileKey。合法UTF-8特殊文件名不经glob，断链/循环/FIFO等明确失败；资源须全程不可变，非事务快照、不外推非POSIX/provider支持。22独立Python属性场景及16轮真实Nextflow26.10缓存控制（9完成7缓存）通过，reader脚本SHA不变；v1和20场景中间控制按自己的来源SHA保留。
+
+当前完整模型geNomad1.12/fullDB1.9和PLASMe1.1各4轮：1完成、2缓存、1预期失败；私有资源等长同mtime损坏正确失效，恢复复用原有效结果，共享资源未改。原检测子工作流3场景28完成，显式classifier observers与真实R消费者区分；初始PATH无Nextflow未启动，补固定runtime/bin后在新目录通过，未删除失败现场。源码锁和结果校验见results/tool-audit/20261026-resource-identity/receipt.json及docs/tool-audit/evidence/20261026-resource-identity.json。
+
+新增39条消费者—资源对清单，包含其他glob、裸目录、可选/上游模型、隐式环境/容器资源，均按机制列出剩余动作，不能当39个已过工具。TA-091仍S0 in_progress，99有界verified/2退役/4未决及718正式来源保持；新增6条运行/检查记录，不提升为正式接受批次。未创建收费云资源，未提交或推送当前增量；全流程、其他S2、OCI/AWS继续待验收。
+
+
+## 2026-10-26 显式资源消费者候选归档
+
+按S0优先级继续TA-091，完成当前显式消费者身份接线及选定原生回归。COPLA完整两个候选/9894参考冷运行、PlasX完整两阶段、PlasMAAG两样本200epochs和各自私有变异/还原对照完成；anvi’o13个固定子模块补齐并锁定，不改原始主源码/科学参数。24份证据、119条源码比较无差异，102个候选源码路径由两份补丁正反精确还原。TA-016报告候选仅保留，不算新增验收。见 `evidence/20261026-resource-consumers.json`。
+
+显式stub缓存控制、MAG/检测路由observer、mock illumina、GTDB接口与原生推理分别记账；失败尝试原样保留。发现3个未改动vendored模块既有比较链哈希失配，另记待复核。75个main旧场景重放不增加分母。当前41资源对中8个隐式环境对仍待审；可选读取集合、根定位及provider边界未全覆盖。正式718清单不改、99项有界验证/2项退役/4项未决不改，TA-091保持S0。未提交、推送或执行AWS。
+
+
+## 2026-10-26 字面资源根路径边界
+
+冻结上批消费者证据后，真实引擎复现默认glob定位拒绝含`[]`/`*`/`?`的实际根目录。共享入口添加glob:false，7个真实入口控制和13个既有observer任务精确缓存重放通过；三份顺序候选补丁覆盖103路径，正反逐字节核对。上一receipt保留为历史快照，明确共享入口随后被替代，未把旧哈希称为当前。见 `evidence/20261026-resource-root.json`。8个隐式资源入口静态复核完成但未修复/运行验收；实际安装SemiBin源码区分默认自训练、marker.hmm与可选预训练分支，未改科学方法。TA091及其余3个S2仍开放，未变更正式来源接受或AWS。
+
+
+## 2026-10-26 环境内资源探测原生试验
+
+默认SemiBin资源从固定原生环境解析，cache:false探测先于复制消费者查缓存；6轮真实引擎/默认15epoch原生验证产生6探测完成、2消费者完成、3缓存、1预期坏HMM原生失败。私有HMM等长同mtime变化/还原，结束32个包文件字节复原；原共享安装未改。source-chain四补丁106路径精确正反核对，原103候选文件未改变。见 `evidence/20261026-runtime-resource-pilot.json`。这验证机制，尚无生产环境/参数一致性接线；8隐式资源对和TA091仍开放。两次启动前失败单列。另查固定Medaka2.2.2自动选模/回退依赖reads，下一步需逐样本探测；未以文档或pilot冒充完整原生/科学/OCI/AWS验收。
+
+
+## 2026-10-26 SemiBin生产环境资源候选
+
+实际模块+MAG_HOST接入cache:false资源探测及查缓存前上下文门禁，固定原生解析器决定读取集合，验证后exec同一argv。当前默认原生/变化/损坏/还原、7个上下文不一致控制、8个读取集合方法、18路由场景及两例nf-test通过（完整冷计算与精确UUID恢复分开）。449contig/3BAM软件fixture的70bin完整DNA核对不代表生物学准确率或真实P4。失败/被替代尝试、恢复前复制cache/history、控制台计数标签源码桥接均保留；未采用未验证的task.cache钩子。
+
+来源42比较（41直接、1展示标签桥接）、120候选路径五补丁正反核对。SemiBin已接线但可选ORF/模型/GTDB/GPU/OCI/provider/when未齐，其余7隐式消费者待接线；原718清单及99/2/4不改，TA091仍S0。未提交/推送/执行AWS。见 `evidence/20261026-semibin-runtime.json`、`contracts/semibin-runtime-resources.md`。
+
+
+## ISEScan生产资源身份接线（未正式接受）
+
+按隐式资源计划完成ISEScan1.7.3+FragGeneScan1.32生产探测/执行前校验与缓存前上下文门禁，保留默认illumina_5/w0。实际SSW按加载符号定位，constants与FragGeneScan别名读取位置均按argv0验证。详见[契约](contracts/isescan-runtime-resources.md)与[候选证据](evidence/20261026-isescan-runtime.json)。
+
+完整原始NC_012624 fixture原生12阶段共22条trace：16 COMPLETED（12探测、4科学成功）、5 CACHED、1预期坏HMM失败；2次上下文不匹配在消费者提交前拒绝。pHMM/FGS模型/实际加载SSW等长同mtime变异及还原通过，四次阳性均以原工具TSV和独立完整IS/ORF DNA核对，未宣称生物学准确率。独立always-copy83包环境、全部83归档SHA和30个观察文件还原已核对。6个读取边界单元方法与166任务主流程mock通过；报告收录资源receipt，外部科学工具/资源扫描明确observer。
+
+最终17条执行源码全部直接匹配，六份顺序补丁覆盖130个候选路径并通过精确正向字节/权限、反向HEAD核对；当前748项快照与正式718项清单分别保存。失败及替代尝试保留，不重复累计。41资源对现35候选、6待接线；SemiBin可选FragGeneScan仅完成上游读取边界调查，其complete模型尚未接线。完整环境/OCI/provider/when、TA-016来源、S2、GTDB r232、真实shotgun P4、M0–M4和AWS仍待完成；正式99/2/4不变，TA-091仍S0。下一步继续剩余隐式消费者与SemiBin可选ORF依赖。
+
+
+## SemiBin可选FragGeneScan资源补齐（未正式接受）
+
+生产helper现按实际2.4.1分支条件记录FragGeneScan调用路径、二进制和完整17文件train，保留complete/w0及argv0定位；缺少9个必需模型文件则探测拒绝，默认fast-naive/外部蛋白覆盖不引入FGS依赖。详见[契约](contracts/semibin-runtime-resources.md)及[候选证据](evidence/20261026-semibin-fgs-runtime.json)。
+
+完整原始40contig/800000bp+原BAM、默认15epochs/seed0的10阶段19条trace通过：13 COMPLETED（9探测+4科学成功）、5 CACHED、1预期缺模型探测FAILED，无消费者提交。选定complete/共享gene空白与二进制非分配.comment段等长同mtime变化触发重跑，还原复用原缓存；四次成功完整bin DNA/状态核对，原生适配器FAA/FFN/GFF与原二进制直接输出逐字节一致。18个私有文件全部还原；11个单元方法包含既有8个及新增3项FGS读取集合控制，不能当11个独立科学样本。首次缺Bio、临时文件错误断言及删除模型后的权限还原不全均保留为失败尝试。
+
+9条执行源码比较直接匹配，七份补丁覆盖131个候选路径正向字节/权限与反向HEAD核对，749项当前快照不替换正式718项清单。资源对仍35候选/6待接线；SemiBin其他ORF/可执行文件读取集合（含Prodigal/hmmsearch）及完整环境/可选模型/GTDB/provider尚未完成。正式99/2/4不变，TA-091仍S0；继续6个隐式消费者及剩余读取边界，随后S2、完整GTDB r232、真实shotgun P4、全平台/M0–M4和AWS按原计划推进。
+
+
+## ABRicate资源身份与新错误发现（候选，未正式接受）
+
+完成原生1.0.1 Perl解析器/FindBin资源探测与生产接线，保留默认80/80和原始参数语义。身份覆盖选定目录、BLAST真实外部别名卷及有效输入；固定176包与完整发布归档/fixture/数据库来源已核对。详见[契约](contracts/abricate-runtime-resources.md)和[候选收据](evidence/20261026-abricate-runtime.json)。
+
+完整原始2.5MB装配与5386参考的13阶段24条trace通过：18 COMPLETED（13探测+5科学成功）、5 CACHED、1真实BLAST失败；2次上下文拒绝无消费者提交。等长同mtime的真实.nhr产品注释变化使正常/外部别名消费者重跑、只改变预期PRODUCT，恢复缓存通过。实际可选PLASMID_DOWNSTREAM的报告事件/完整5行输出与空输入分支通过；7个读取集合方法另计，非独立生物学真值。17个私有文件字节/权限均还原。
+
+新发现TA-092 S0：缺.nhr时真实BLAST报错，原ABRicate仍exit0/表头零命中。候选guard只加原pipeline的pipefail与close状态检查；真实坏卷现FAILED，两个明确晚退出7/9故障observer拒绝，合成合法零命中仍通过。已有完整正常5命中输出基线证明数值/方法未换；TA-092保持ready/未接受。开发中的Perl插值与slurp作用域失败均保留。
+
+九份顺序补丁覆盖141个候选路径并正向字节/权限、反向HEAD精确核对，当前757项快照、16条执行源码直接匹配，正式718清单未变。41资源对现36候选/5待接线。正式99项接受修复与2项用户退役不变；新增TA-092使当前问题106项、未决5项（2S0+3S2）。下一步继续5个隐式消费者、完整读取/环境边界与TA-092独立复核，随后S2、GTDB r232、真实shotgun P4、全平台/M0–M4和AWS按原计划推进。
+
+
+ABRicate后续完成元数据及vendored nf-test接口修复：原始完整Bacteroides压缩基因组（解压5.3MB）上的native/stub两例通过，原生报告原MD5未改；4条框架COMPLETED包含stub，不当4次科学计算。初始配置不一致被门禁拒绝的失败保留，修复共享测试配置后以完全相同来源的隔离副本运行，副本字节/权限另核对。原九补丁快照另存before-framework；新增第10补丁后145候选路径/759当前来源，22执行源码直接匹配。正式718清单、99接受修复/2用户退役/5未决不变。
+
+
+## IntegronFinder资源与未知拓扑规则（联合候选，未接受）
+
+接入固定2.0.5原生Config/功能库清单实际匹配文件及模型资源探测、入口解释器一致性与查缓存前上下文门禁；75原始包归档、全部23安装源码/模型文件与固定tag已核对。见[契约](contracts/integronfinder-runtime-resources.md)及[候选证据](evidence/20261026-integronfinder-runtime.json)。
+
+新TA-093 S0：原程序对单个未标注replicon隐式circ，与现有已批准未知线性规则冲突。完整原始ACBA20301bp上原默认1complete，原显式--linear为1CALIN+1In0；候选生成逐序列确定性拓扑表落实规则，显式--circ保留原结果，不主张改变输入生物学真拓扑。最终12阶段22trace（16COMPLETED、5CACHED、1真实坏CM科学FAILED）、11单元、172任务mock、原始2nf-test例通过；native/ref/stub/observer分开。NFcore Ecoli原始软件片段49200bp完整使用，不称全基因组。Matplotlib警告误入版本字段已修正；原生报告commit来自cwd，不能当上游提交，TA-016仍开。
+
+第11份联合候选补丁对157路径精确正向字节/权限、反向HEAD，768当前来源快照/26执行源码直接匹配；原10补丁与正式718清单不变。41资源对现37候选/4待办。正式99接受修复、2用户退役不变；新增TA-093后当前107项问题、6未决（3S0+3S2），新项ready待独立接受。继续4个隐式消费者、可选读取/环境边界，再按原计划处理S2、完整GTDB r232、真实shotgun P4、M0–M4/全平台和AWS。
+
+
+清理增量：核对证据与后续依赖后移除ISEScan已被v6取代的v3/v4/v5私有环境，逻辑4.06GB、实测可用空间增加1,635,164,160字节；所有固定证据哈希保留/复核，原始包元数据、锁和完整删除清单可重建。见[清理台账](cleanup.md)及`results/tool-audit/20261026-cleanup-3/cleanup.json`。历史私有路径已不存在，不能称其当前可用。
+
+
+2026-10-26：PlasmidFinder调查新TA-094/095启动候选；实际模块5phase/5trace、172mock和87archives/固定源码核对，12patches162paths；仍ready/unaccepted，资源接线未完成。清理失效Python3.15安装，逻辑1.28GB/观测502448128bytes，完整清单/84包锁与原始归档保留。详见work-summary、契约和新候选receipt。
+
+
+2026-10-26：用户明确禁止病毒元素；本轮病毒fixture未下载/未运行，未执行下载器与空目录已删，旧病毒阴性用完整固定细菌Bacteroides替换并保留原TSV MD5。PlasmidFinder资源候选13phases23trace/8unit/178mock/2细菌nf-test，48私有DB文件还原；13patches171paths，41pairs38candidate+3pending。正式清单与问题接受边界不变。
+
+
+2026-10-26：MOB3.1.9 immutable eb860648源码/选择边界19场景+未知参数拒绝；默认verify_init可触发准备，科学前需非病毒资源门禁，尚无原生安装/DB/科学执行，MOB pending不减。14patch173paths，正式718不变。清理旧失败PlasMAAG6生成BAM/BAI，逻辑1779612564bytes/实测550785024bytes，2160JSON引用/453固定证据复核，输入/成功v2/日志/trace保留。
+
+
+2026-10-26：MOB软件环境180包/归档核对，跳过确会mob_init的post-link；实际CLI3.1.9、tag3.1.8版本差异记录。独立只读预检2拒绝/8结构单元/4CLI通过，无科学分类/DB准备/生产接线；软件包附带10FASTA未使用，非另行数据下载。15patches177paths/783snapshot，正式718及99/2/8和41pairs38+3不变。
+
+
+2026-10-26：MOB两YAML改官方固定SHA wheel+同179Conda依赖，16源码raw-package exact；真实Nextflow软件4trace2COMP2CACHED/no skip-link/DB未初始化，非科学任务。补记Typer默认环境DB隐式对42=38candidate+4pending；16patch183paths/787snapshot，正式718/99/2/8不变。旧独立MOBprefix清理，逻辑2112274204bytes/实测79757312bytes，完整清单/180锁元数据归档/55固定证据保留，新最终prefix保留。
+
+
+2026-10-26：MOB3别名执行guard显式输入接线，固定native parse/path/main argv保留，真实准备点禁init/ETE3升级、taxonomy ro；6实际准备FAILED+3stub，16唯一边界/结构单元，178mock/2nf-test stub/12发布trace/52显式目录stub-cache通过。完整prepared科学案例未执行，资源身份pending4。17patch192paths/791snapshot，正式718与99/2/8不变。publication私有work按驱动清理，最终副本hash复核，无空间虚报。

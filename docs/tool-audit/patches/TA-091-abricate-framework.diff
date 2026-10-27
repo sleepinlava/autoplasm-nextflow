@@ -1,0 +1,183 @@
+diff --git a/modules/nf-core/abricate/run/meta.yml b/modules/nf-core/abricate/run/meta.yml
+--- a/modules/nf-core/abricate/run/meta.yml
++++ b/modules/nf-core/abricate/run/meta.yml
+@@ -27,11 +27,22 @@
+           - edam: "http://edamontology.org/format_1929" # FASTA
+           - edam: "http://edamontology.org/format_1936" # GenBank
+           - edam: "http://edamontology.org/format_2204" # EMBL format
++    - runtime_identity:
++        type: map
++        description: Pre-cache native runtime/resource identity from ABRICATE_RESOURCE_PROBE
++    - runtime_receipt:
++        type: file
++        description: Identity JSON verified again before scientific execution
++        pattern: "abricate_runtime_identity.json"
+   - databasedir:
+       type: directory
+       description: Optional location of local copy of database files, possibly
+         with custom databases set up with `abricate --setupdb`
+       pattern: "*/"
++  - resource_helper:
++      type: file
++      description: Fixed1.0.1 native parser/resource resolver and checked pipeline runner
++      pattern: "abricate_runtime_resources.pl"
+ output:
+   report:
+     - - meta:
+diff --git a/modules/nf-core/abricate/run/tests/main.nf b/modules/nf-core/abricate/run/tests/main.nf
+new file mode 100644
+--- /dev/null
++++ b/modules/nf-core/abricate/run/tests/main.nf
+@@ -0,0 +1,16 @@
++nextflow.enable.dsl=2
++include { ABRICATE_RUN; ABRICATE_RESOURCE_PROBE } from '../main'
++include { abricateResourceRecord } from '../../../../../lib/abricate_runtime'
++workflow ABRICATE_RUNTIME_TEST {
++    take:
++    sequence
++    database
++    main:
++    def helper = Channel.value(file("${moduleDir}/../../../../../bin/abricate_runtime_resources.pl",checkIfExists:true))
++    ABRICATE_RESOURCE_PROBE(sequence,database,helper)
++    def identity = ABRICATE_RESOURCE_PROBE.out.identity.map { meta, receipt -> abricateResourceRecord(meta,receipt) }
++    ABRICATE_RUN(sequence.join(identity,failOnDuplicate:true,failOnMismatch:true),database,helper)
++    emit:
++    report = ABRICATE_RUN.out.report
++    versions_abricate = ABRICATE_RUN.out.versions_abricate
++}
+diff --git a/modules/nf-core/abricate/run/tests/main.nf.test b/modules/nf-core/abricate/run/tests/main.nf.test
+--- a/modules/nf-core/abricate/run/tests/main.nf.test
++++ b/modules/nf-core/abricate/run/tests/main.nf.test
+@@ -1,56 +1,55 @@
+-nextflow_process {
+-
+-    name "Test Process ABRICATE_RUN"
+-    script "../main.nf"
+-    process "ABRICATE_RUN"
++nextflow_workflow {
++    name "Test ABRicate with fresh native runtime resource identity"
++    script "./main.nf"
++    workflow "ABRICATE_RUNTIME_TEST"
++    config "./nextflow.config"
+     tag "modules"
+     tag "modules_nfcore"
+     tag "abricate"
+     tag "abricate/run"
+ 
+     test("bacteroides_fragilis - genome.fa.gz") {
+-
+         when {
+-            process {
++            workflow {
+                 """
+-                input[0] = [
+-                    [ id:'test', single_end:false ], // meta map
+-                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz', checkIfExists: true)
+-                ]
+-                input[1] = []
++                input[0] = Channel.value([
++                    [id:'test',single_end:false],
++                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz',checkIfExists:true)
++                ])
++                input[1] = Channel.value([])
+                 """
+             }
+         }
+-
+         then {
+-            assertAll(
+-                { assert process.success },
+-                { assert snapshot(sanitizeOutput(process.out)).match() }
+-            )
++            assert workflow.success
++            assert workflow.out.report.size() == 1
++            def report = new File(workflow.out.report.get(0).get(1).toString())
++            // Keep the original native report oracle; process namespace is
++            // plumbing and is checked separately from scientific bytes.
++            assert java.security.MessageDigest.getInstance('MD5').digest(report.bytes).encodeHex().toString() == 'b48f4f5f78982a221038fd9f0a3aa504'
++            assert report.readLines().first().tokenize('\t').size() == 15
++            assert workflow.out.report.get(0).get(0).id == 'test'
++            assert workflow.out.versions_abricate.get(0).get(2) == '1.0.1'
+         }
+     }
+-
+     test("bacteroides_fragilis - genome.fa.gz - stub") {
+-
+         options "-stub"
+-
+         when {
+-            process {
++            workflow {
+                 """
+-                input[0] = [
+-                    [ id:'test', single_end:false ], // meta map
+-                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz', checkIfExists: true)
+-                ]
+-                input[1] = []
++                input[0] = Channel.value([
++                    [id:'test',single_end:false],
++                    file(params.modules_testdata_base_path + 'genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz',checkIfExists:true)
++                ])
++                input[1] = Channel.value([])
+                 """
+             }
+         }
+-
+         then {
+-            assertAll(
+-                { assert process.success },
+-                { assert snapshot(process.out).match() }
+-            )
++            assert workflow.success
++            assert workflow.out.report.size() == 1
++            assert new File(workflow.out.report.get(0).get(1).toString()).length() == 0
++            assert workflow.out.versions_abricate.get(0).get(2) == '1.0.1'
+         }
+     }
+ }
+diff --git a/modules/nf-core/abricate/run/tests/nextflow.config b/modules/nf-core/abricate/run/tests/nextflow.config
+new file mode 100644
+--- /dev/null
++++ b/modules/nf-core/abricate/run/tests/nextflow.config
+@@ -0,0 +1,6 @@
++process {
++    withName: 'ABRICATE_RUN|ABRICATE_RESOURCE_PROBE' {
++        ext.args = ''
++        ext.prefix = { meta.id }
++    }
++}
+diff --git a/tests/abricate-native.lock.json b/tests/abricate-native.lock.json
+--- a/tests/abricate-native.lock.json
++++ b/tests/abricate-native.lock.json
+@@ -1475,5 +1475,14 @@
+       "sha256": "9ef1ff93df358cf3b1f5c0563e88e6ce8574d631b107b153ab0f47012e0a7ee7",
+       "md5": "2cdd3d5c4d79b0f7573ea7544ebe0c57"
+     }
+-  ]
++  ],
++  "original_nfcore_framework_input": {
++    "upstream_commit": "618f1541382c4ad49eff566dadf13d5ccbd0ebb4",
++    "url": "https://raw.githubusercontent.com/nf-core/test-datasets/618f1541382c4ad49eff566dadf13d5ccbd0ebb4/data/genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz",
++    "path": "genomics/prokaryotes/bacteroides_fragilis/genome/genome.fna.gz",
++    "sha256": "983b00ab06545493d620ae8f3e2ae960a45e41b7e9072c57206e259747a43f57",
++    "bytes": 1564005,
++    "decoded_bytes": 5314727,
++    "decoded_sha256": "ac1c10d2b6aa4bfcbe1dacb57addbc8ac72d5666af33dc100ca4a7c8f0c22448"
++  }
+ }
+diff --git a/tests/test_abricate_runtime_resources.py b/tests/test_abricate_runtime_resources.py
+--- a/tests/test_abricate_runtime_resources.py
++++ b/tests/test_abricate_runtime_resources.py
+@@ -8,10 +8,11 @@
+ import unittest
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+-PREFIX = Path(os.environ['ABRICATE_NATIVE_PREFIX']).resolve()
++PREFIX = Path(os.environ.get('ABRICATE_NATIVE_PREFIX', ROOT / 'results/tool-audit/runtime/abricate-1.0.1')).resolve()
+ HELPER = ROOT / 'bin/abricate_runtime_resources.pl'
+ 
+ 
++@unittest.skipUnless((PREFIX / 'bin/abricate').is_file(), 'ABRICATE_NATIVE_PREFIX requires the fixed native1.0.1 installation')
+ class Resources(unittest.TestCase):
+     def setUp(self):
+         self.temp = tempfile.TemporaryDirectory()

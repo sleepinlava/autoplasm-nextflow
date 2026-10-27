@@ -1,0 +1,55 @@
+{
+  "run_id": "20261026-plasmidfinder-startup-candidate",
+  "result": "pass_bounded_checks_unaccepted",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "current_snapshot_paths": 771,
+  "source_direct_matches": 6,
+  "native_phases": 5,
+  "native_trace_counts": {
+    "FAILED": 1,
+    "COMPLETED": 3,
+    "CACHED": 1
+  },
+  "native_scientific_successes": 2,
+  "stub_successes": 1,
+  "mock_tasks": 172,
+  "new_findings": [
+    "TA-094",
+    "TA-095"
+  ],
+  "resource_pairs": {
+    "candidate": 37,
+    "pending": 4,
+    "total": 41
+  },
+  "cleanup_receipt": "results/tool-audit/20261026-cleanup-4/cleanup.json",
+  "remaining": [
+    "PlasmidFinder runtime resource read-set/probe/production wiring/cache mutation and corruption controls",
+    "Original vendored SARS-CoV-2 negative nf-test",
+    "Dorado/Medaka/MOBSUITE_RECON resource pairs and full optional/environment/provider boundaries",
+    "TA-016 provenance; TA-031 full GTDB r232; TT-003 genuine shotgun P4",
+    "Independent acceptance for TA-092/093/094/095 and TA-091 resource chain",
+    "All default-real/platform/M0-M4/OCI/AWS requirements"
+  ],
+  "scope": "Fix actual native startup/unsupported CLI failures discovered during resource investigation; full original upstream software positive preserved, real production module/shared config/actual Python3.10; not completed resource identity or biological/whole-workflow certification. Formal99accepted+2retired unchanged; current109findings/8unresolved (5S0+3S2). No real source index mutation/commit/push/upload/AWS/charge. Python3.15 obsolete prefix removed with84-package metadata/locks/full inventory and retained84raw archives; old historical paths no longer executable.",
+  "receipt": "results/tool-audit/20261026-plasmidfinder-runtime/receipt.json",
+  "receipt_sha256": "8704dc480b206fd430dcdb68ac9d80fabb10670ff146a094d381e46cd4a9e371",
+  "patches": {
+    "docs/tool-audit/patches/TA-091-resource-consumers.diff": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+    "docs/tool-audit/patches/TA-016-preserved-report-candidate.diff": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+    "docs/tool-audit/patches/TA-091-resource-root.diff": "b50cb5c15450d7a4b856acd880a86e590e6692520896a3dc7b59c9785f0e9b4e",
+    "docs/tool-audit/patches/TA-091-runtime-resource-pilot.diff": "74f4e758ce846f2050ef609f738b37b8c381f0181d5c9b815e413fbeaab82857",
+    "docs/tool-audit/patches/TA-091-semibin-runtime.diff": "ef097d7faa8f086fc83834fb15383aa4c922da0068781828a0b493651838130e",
+    "docs/tool-audit/patches/TA-091-isescan-runtime.diff": "865acb900581a8f7706b5e7c0a9d2d6ee1a09a6cf59c910eb0d6b18dc281e5da",
+    "docs/tool-audit/patches/TA-091-semibin-fgs-runtime.diff": "b6e568cb76d0653e709813fa61a32b1b1739f6ca638ba72026d4fd65bffb9bb6",
+    "docs/tool-audit/patches/TA-091-abricate-runtime.diff": "5c42d56e0be3a9843cf33c9d526f053c6dd3d477a363b605eb053a1c00c96496",
+    "docs/tool-audit/patches/TA-092-abricate-errors.diff": "40c178138031291e1dbee786a2d8a0a289b9f1a9ea67af88d5befd94d68b6151",
+    "docs/tool-audit/patches/TA-091-abricate-framework.diff": "78bd86b53f39c776be6c2945d5e4d44185d8544f95f1549346a299f2a5f6d19d",
+    "docs/tool-audit/patches/TA-091-TA-093-integronfinder.diff": "363e01d653df36b0c6432b6aa75a26d9307201835d173bb8c5947f78bd08ef67",
+    "docs/tool-audit/patches/TA-094-TA-095-plasmidfinder-startup.diff": "b906316185b3302e6df7bd52a19af97fe79a7c376bf54a42cc23679ef5a3ccae"
+  },
+  "candidate_source_paths_count": 162,
+  "formal_source_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d"
+}

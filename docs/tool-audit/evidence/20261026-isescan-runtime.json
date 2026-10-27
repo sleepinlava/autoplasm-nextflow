@@ -1,0 +1,112 @@
+{
+  "run_id": "20261026-isescan-runtime-candidate",
+  "result": "bounded_ISEScan_runtime_identity_native_cache_and_main_observer_pass_TA091_open",
+  "pass_bounded_checks": true,
+  "formal_acceptance": false,
+  "base_commit": "9a270d30cd5ba27e93743256dfbfdac7d9c929ec",
+  "artifacts": [
+    {
+      "path": "results/tool-audit/20261026-isescan-runtime/native-cache-v6/run.json",
+      "sha256": "962657a8065e59babf5915f65154147ab1e95a6d53020a17265335e5b99ddc10",
+      "scope": "native default/cache/failure/context controls"
+    },
+    {
+      "path": "results/tool-audit/20261026-isescan-runtime/units-v3/run.json",
+      "sha256": "0d9f6bdd502bc6f85f02fc00e222fc1b825ab46277ea5803ccc2d0ea1a9afb27",
+      "scope": "six read-set/refusal unit methods; no inference"
+    },
+    {
+      "path": "results/tool-audit/20261026-isescan-runtime/mock-v2-execution.json",
+      "sha256": "b3fac68711407793171ffba68a615220a4286abd64c28315584d9a249ac152f4",
+      "scope": "real main/Nextflow/R; explicit scientific/resource observers"
+    },
+    {
+      "path": "results/tool-audit/20261026-isescan-runtime/primary-and-restoration.json",
+      "sha256": "c4b19928763794f82160bf6c6c01a163603b574c0d6af754ff6b8ed98059d744",
+      "scope": "source/installation/native-original/observer/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-isescan-runtime/package-archives.json",
+      "sha256": "57f28cd3d21aea0d8187e4e65303ab80b1f6710694103f8e96f50b0f081e5495",
+      "scope": "source/installation/native-original/observer/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-isescan-runtime/modern-packages.json",
+      "sha256": "2ccbe6c2e99b8d95521fb37025b5052129ba2aea781d9ef8fcd72eb5baed9f63",
+      "scope": "source/installation/native-original/observer/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-isescan-runtime/modern-linux-64.lock",
+      "sha256": "608b538a45327b4a53ff262e76375fca63ba5e6a908dcc535b4db71f5abe0ebd",
+      "scope": "source/installation/native-original/observer/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-isescan-runtime/native-original/execution.json",
+      "sha256": "8f25ec536f3c8acb48bc48b176ff46bd9b230311c4843e74ffdb561ba04372dd",
+      "scope": "source/installation/native-original/observer/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-isescan-runtime/mock-illumina-v2/validation.json",
+      "sha256": "28d3ded20bd7a5304b3c403d7a36f4882d0f35bb25fdf410934c5d0c690a768d",
+      "scope": "source/installation/native-original/observer/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-isescan-runtime/attempts.json",
+      "sha256": "f8826d2164c0a156ee3d61047817a0fa21d678b6f92bfea55a25c829f8e1e956",
+      "scope": "source/installation/native-original/observer/evidence boundary"
+    },
+    {
+      "path": "results/tool-audit/20261026-isescan-runtime/patch-roundtrip.json",
+      "sha256": "bef0e5758ab75d6081e353af89d8c727d50ae9ad2ece3286255f6e915abc3117",
+      "scope": "source/installation/native-original/observer/evidence boundary"
+    }
+  ],
+  "source_direct_matches": 17,
+  "candidate_source_paths": 130,
+  "new_delta_paths": [
+    "bin/isescan_runtime_resources.py",
+    "envs/isescan.yml",
+    "lib/isescan_runtime.nf",
+    "modules/annotation/isescan.nf",
+    "subworkflows/plasmid_downstream.nf",
+    "tests/isescan-native.lock.json",
+    "tests/mock_e2e/mock_python.py",
+    "tests/mock_e2e/run.py",
+    "tests/nextflow/isescan_runtime_native.nf",
+    "tests/run_isescan_runtime_native.py",
+    "tests/test_isescan_runtime_resources.py"
+  ],
+  "patches": {
+    "docs/tool-audit/patches/TA-091-resource-consumers.diff": "e02f0b9607d02f51198c52dde2f4f3ece0d4255d11181a4dd69df6e44d4522dd",
+    "docs/tool-audit/patches/TA-016-preserved-report-candidate.diff": "94825995edf579f00672c5dac7f3c93e5db2e5b0b7c04f8e337d5eb179af785e",
+    "docs/tool-audit/patches/TA-091-resource-root.diff": "b50cb5c15450d7a4b856acd880a86e590e6692520896a3dc7b59c9785f0e9b4e",
+    "docs/tool-audit/patches/TA-091-runtime-resource-pilot.diff": "74f4e758ce846f2050ef609f738b37b8c381f0181d5c9b815e413fbeaab82857",
+    "docs/tool-audit/patches/TA-091-semibin-runtime.diff": "ef097d7faa8f086fc83834fb15383aa4c922da0068781828a0b493651838130e",
+    "docs/tool-audit/patches/TA-091-isescan-runtime.diff": "865acb900581a8f7706b5e7c0a9d2d6ee1a09a6cf59c910eb0d6b18dc281e5da"
+  },
+  "forward_current_bytes_and_modes": true,
+  "reverse_exact_HEAD_bytes": true,
+  "formal_source_manifest_unchanged": true,
+  "formal_source_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d",
+  "native_phases": 12,
+  "native_trace_counts": {
+    "COMPLETED": 16,
+    "CACHED": 5,
+    "FAILED": 1
+  },
+  "unit_methods": 6,
+  "mock_tasks": 166,
+  "watched_files_restored": 30,
+  "remaining": [
+    "Other6 implicit environment consumers remain pending",
+    "SemiBin optional FragGeneScan still unwired; source read-set investigated only; default model complete differs from ISEScan illumina_5 and is preserved",
+    "NumPy/SciPy/full Python and system library environment provenance, OCI/provider/GPU/custom-config/when validation remain incomplete",
+    "M0 deployment must preserve cache:false probe and matching runtime contexts; immutable resources assumed between probe and execution",
+    "Resource identity report event added, but full TA016 provenance remains incomplete",
+    "Full GTDB r232, real shotgun P4, default-real/platform/M0-M4 and AWS scope unchanged"
+  ],
+  "scope": "Unaccepted sixth increment. Full original NC_012624 fixture, default ISEScan1.7.3+FragGeneScan1.32 illumina_5/w0 retained. Four native positives compare original TSV and independent full IS/ORF DNA; software contract, not biological accuracy. 12 phases include2 before-cache context refusals;22 trace rows include expected real hmmsearch failure. Six unit methods and166 mock tasks are separate roles. Exact83 package lock/archives do not certify full running environment. Formal718 manifest and99bounded fixes+2user retirements+4unresolved unchanged. No commit/push/AWS/upload/charge.",
+  "full_receipt": "results/tool-audit/20261026-isescan-runtime/receipt.json",
+  "full_receipt_sha256": "1441622cd64c999e78f0b025f9ef369444622eb4c5295d9a46ef778e66353450",
+  "snapshot_path_count": 748
+}

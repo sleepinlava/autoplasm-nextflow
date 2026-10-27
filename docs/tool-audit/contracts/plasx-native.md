@@ -53,3 +53,12 @@ tests/run_plasx_native.py独立用标准库统计重复及!!!多家族的计数�
 ## 原生无命中与无基因边界
 
 实际完整COG/Pfam注释对子集AST0002_000000028801得到3基因、0注释，原生各阶段成功；1000个N的输入仍被Prodigal预测为1个基因，同样0注释，因此该文件虽曾命名zero-genes，不能作为0基因证据。60个N的短输入实际生成0基因，anvi-export-gene-calls明确报“does not seem to have any gene calls”，任务失败，未发布成功注释；此整个组装无基因的输入目前排除支持，不冒充已评估阴性或合法空预测。一个含基因的组装内单独无基因contig可按映射标记未评估。原生predict空注释表的header-only控制只验证评分边界，不证明整个0基因链路成功。见annotation-empty-boundaries/measured-results.json和short-no-genes/run.json。
+
+
+## 2026-10-26 目录身份候选续接
+
+两阶段的5个目录资源改为紧凑内容/布局身份值，保留原路径布局、完整数据库、十组搜索和原系数；不再依赖glob成员staging。完整NIO枚举发现原主归档的Git子模块未展开，3个UI链接断开；没有删除链接或放宽枚举。按原gitlink提交补齐全部13子模块，并保持原1185文件主源码摘要 `7956da22fe2d89cf113ab0416b9a98e96a6b85db32c36be543158d60ce033004`；新增2216个依赖文件另有摘要/归档锁。生产源码守卫分别验证主源码和全部子模块。
+
+当前完整原生冷执行位于 `results/tool-audit/20261026-resource-consumers/plasx-native-v3/`：196基因、39个可评分contig，独立logistic与新的官方predict对照最大差2.220446049250313e-16。这里仍是原软件fixture，不能作独立科学准确率。原始断链失败和沙箱IPC拒绝失败均保留；经本地IPC执行授权后使用相同完整输入、参数和工具版本重试。冷会话不变/私有anvi’o源码等长同mtime损坏/还原对照通过（4CACHED、1预期FAILED）；其余4个资源未逐一做原生损坏控制，不能扩写该范围。
+
+资源准备器已集成精确子模块获取/验证步骤，单独补齐入口为 `tests/prepare_anvio_submodules.py`。本轮只重复验证该准备步骤，未重复完整COG/Pfam/profile格式化。源码/缓存总契约见resource-directory-cache.md；整项TA-091继续开放。
