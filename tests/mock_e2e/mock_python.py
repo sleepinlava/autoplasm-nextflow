@@ -9,8 +9,21 @@ from pathlib import Path
 import sys
 
 args = sys.argv[1:]
-if not args or Path(args[0]).name not in ['isescan_runtime_resources.py','integronfinder_runtime_resources.py','plasmidfinder_runtime_resources.py']:
+if not args or Path(args[0]).name not in ['isescan_runtime_resources.py','integronfinder_runtime_resources.py','plasmidfinder_runtime_resources.py','mobsuite_preflight.py']:
     os.execv(sys.executable, [sys.executable] + args)
+
+if Path(args[0]).name == 'mobsuite_preflight.py':
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--tool',choices=['mob_recon','mob_typer'],default='mob_recon')
+    parser.add_argument('--output',type=Path)
+    parser.add_argument('--execute',action='store_true')
+    parser.add_argument('native_args',nargs=argparse.REMAINDER)
+    request=parser.parse_args(args[1:])
+    native=request.native_args[1:] if request.native_args[:1]==['--'] else request.native_args
+    if request.output:
+        request.output.write_text(json.dumps(dict(scope='EXPLICIT_MOCK_MOB_PREPARATION_NO_REAL_DATABASE',tool=request.tool,native_arguments=native))+'\n')
+    if request.execute:os.execvp(request.tool,[request.tool]+native)
+    sys.exit(0)
 
 if Path(args[0]).name == 'plasmidfinder_runtime_resources.py':
     parser = argparse.ArgumentParser()

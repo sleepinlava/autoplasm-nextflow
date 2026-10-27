@@ -19,7 +19,7 @@ workflow {
     def sequence = Channel.value(tuple([id: 'CACHE_OBSERVER', single_end: true], fasta))
     def resource = { name -> Channel.value(resourceInput(params.resources[name])) }
     def tagged = { label, name -> Channel.value(taggedResourceInput(label, params.resources[name])) }
-    MOB(sequence, resource.call('MOB_db'), [], [], [], [], [], [], [], false, false)
+    MOB(sequence, resource.call('MOB_db'), [], [], [], [], [], [], [], false, false,Channel.value(file("${moduleDir}/../../bin/mobsuite_preflight.py",checkIfExists:true)))
     BAKTA(sequence, resource.call('BAKTA_db'), [], [], [], [])
     AMR(sequence, resource.call('AMR_db'))
     RGI(sequence, resource.call('RGI_card'), resource.call('RGI_wildcard'),

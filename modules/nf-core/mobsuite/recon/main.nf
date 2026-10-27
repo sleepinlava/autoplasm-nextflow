@@ -1,4 +1,7 @@
+include { mobsuiteQuote } from '../../../../lib/mobsuite_runtime'
+
 process MOBSUITE_RECON {
+    cache 'deep'
     tag "$meta.id"
     label 'process_medium'
 
@@ -9,6 +12,7 @@ process MOBSUITE_RECON {
 
     input:
     tuple val(meta), path(fasta)
+    path(preflight_helper, stageAs: 'mobsuite_preflight.py')
 
     output:
     tuple val(meta), path("results/chromosome.fasta")    , emit: chromosome
@@ -27,15 +31,15 @@ process MOBSUITE_RECON {
     def fasta_name = fasta.getName().replace(".gz", "")
     """
     if [ "${is_compressed}" == "true" ]; then
-        gzip -c -d ${fasta} > ${fasta_name}
+        gzip -c -d ${mobsuiteQuote(fasta)} > ${mobsuiteQuote(fasta_name)}
     fi
 
-    mob_recon \\
-        --infile ${fasta_name} \\
+    python3 mobsuite_preflight.py --tool mob_recon --output mobsuite_preflight.json --execute -- \\
+        --infile ${mobsuiteQuote(fasta_name)} \\
         ${args} \\
         --num_threads ${task.cpus} \\
         --outdir results \\
-        --sample_id ${prefix}
+        --sample_id ${mobsuiteQuote(prefix)}
     """
 
     stub:

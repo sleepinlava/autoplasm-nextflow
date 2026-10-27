@@ -98,6 +98,10 @@ input:
   - generate_mge_report:
       type: boolean
       description: Whether to generate a mobile genetic element (MGE) report file
+  - preflight_helper:
+      type: file
+      description: Fixed native source/prepare guard; full resource identity remains pending
+      pattern: "mobsuite_preflight.py"
 output:
   report:
     - - meta:

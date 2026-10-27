@@ -1,3 +1,5 @@
+include { mobsuiteQuote } from '../../../../lib/mobsuite_runtime'
+
 process MOBSUITE_TYPER {
     cache 'deep'
     tag "${meta.id}"
@@ -20,6 +22,7 @@ process MOBSUITE_TYPER {
     path plasmid_orit_fas
     val generate_biomarker_report
     val generate_mge_report
+    path(preflight_helper, stageAs: 'mobsuite_preflight.py')
 
     output:
     tuple val(meta), path("*.txt"), emit: report
@@ -35,20 +38,20 @@ process MOBSUITE_TYPER {
     def prefix = task.ext.prefix ?: "${meta.id}"
     def biomarker_report_cmd = generate_biomarker_report ? "--biomarker_report_file ${prefix}_biomarker_report.txt" : ''
     def mge_report_cmd = generate_mge_report ? "--mge_report_file ${prefix}_mge_report.txt" : ''
-    def plasmid_mash_db_cmd = plasmid_mash_db ? "--plasmid_mash_db ${plasmid_mash_db}" : ''
-    def plasmid_meta_cmd = plasmid_meta_txt ? "--plasmid_meta ${plasmid_meta_txt}" : ''
-    def plasmid_replicons_cmd = plasmid_replicons_fas ? "--plasmid_replicons ${plasmid_replicons_fas}" : ''
-    def repetitive_mask_cmd = repetitive_mask_fas ? "--repetitive_mask ${repetitive_mask_fas}" : ''
-    def plasmid_mob_cmd = plasmid_mob_faa ? "--plasmid_mob ${plasmid_mob_faa}" : ''
-    def plasmid_mpf_cmd = plasmid_mpf_faa ? "--plasmid_mpf ${plasmid_mpf_faa}" : ''
-    def plasmid_orit_fas_cmd = plasmid_orit_fas ? "--plasmid_orit ${plasmid_orit_fas}" : ''
-    def db_cmd = db ? "--database_directory ${db}" : ''
+    def plasmid_mash_db_cmd = plasmid_mash_db ? "--plasmid_mash_db ${mobsuiteQuote(plasmid_mash_db)}" : ''
+    def plasmid_meta_cmd = plasmid_meta_txt ? "--plasmid_meta ${mobsuiteQuote(plasmid_meta_txt)}" : ''
+    def plasmid_replicons_cmd = plasmid_replicons_fas ? "--plasmid_replicons ${mobsuiteQuote(plasmid_replicons_fas)}" : ''
+    def repetitive_mask_cmd = repetitive_mask_fas ? "--repetitive_mask ${mobsuiteQuote(repetitive_mask_fas)}" : ''
+    def plasmid_mob_cmd = plasmid_mob_faa ? "--plasmid_mob ${mobsuiteQuote(plasmid_mob_faa)}" : ''
+    def plasmid_mpf_cmd = plasmid_mpf_faa ? "--plasmid_mpf ${mobsuiteQuote(plasmid_mpf_faa)}" : ''
+    def plasmid_orit_fas_cmd = plasmid_orit_fas ? "--plasmid_orit ${mobsuiteQuote(plasmid_orit_fas)}" : ''
+    def db_cmd = db ? "--database_directory ${mobsuiteQuote(db)}" : ''
     """
-    mob_typer \\
+    python3 mobsuite_preflight.py --tool mob_typer --output mobsuite_preflight.json --execute -- \\
         --num_threads ${task.cpus} \\
-        --sample_id ${prefix} \\
+        --sample_id ${mobsuiteQuote(prefix)} \\
         ${args} \\
-        --infile ${fasta} \\
+        --infile ${mobsuiteQuote(fasta)} \\
         ${plasmid_mash_db_cmd} \\
         ${plasmid_meta_cmd} \\
         ${plasmid_replicons_cmd} \\

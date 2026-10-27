@@ -20,7 +20,9 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def run(base):
+def run(base, only_resource=None):
+    selected = [only_resource] if only_resource else RESOURCES
+    assert all(name in RESOURCES for name in selected)
     base.mkdir(parents=True, exist_ok=False)
     fixture = base / 'fixture'
     fixture.mkdir()
@@ -71,7 +73,7 @@ esac
     records = []
     session = None
     cold_hashes = {}
-    for case in ['cold', 'unchanged'] + [phase + ':' + resource for resource in RESOURCES for phase in ['mutated', 'restored']]:
+    for case in ['cold', 'unchanged'] + [phase + ':' + resource for resource in selected for phase in ['mutated', 'restored']]:
         folder = base / case.replace(':', '-')
         folder.mkdir()
         if ':' in case:
@@ -111,8 +113,8 @@ esac
         print(case, 'passed', flush=True)
     assert hashes == {name: sha(ROOT / name) for name in sources}
     (base / 'run.json').write_text(json.dumps({
-        'pass': True, 'runs': records, 'source_sha256': hashes, 'session_uuid': session,
-        'scope': '15 distinct resource inputs in 13 actual consumers; synthetic LF/hidden byte changes, '
+        'pass': True, 'runs': records, 'source_sha256': hashes, 'session_uuid': session, 'mutated_resource_inputs':selected,
+        'scope': str(len(selected))+' selected mutation inputs across13actual stub consumers; synthetic LF/hidden byte changes, '
                  'per-node stub/version observers and one PHF CLI observer. No biological classifier/model inference.'
     }, indent=2) + '\n')
 
@@ -120,4 +122,6 @@ esac
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--work-dir', type=Path, required=True)
-    run(parser.parse_args().work_dir.resolve())
+    parser.add_argument('--only-resource',choices=RESOURCES)
+    args=parser.parse_args()
+    run(args.work_dir.resolve(),args.only_resource)

@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,12 +47,15 @@ if not a.observer_empty:
 pathlib.Path('observer.json').write_text(json.dumps({'observer_only':True,'sample_id':a.sample_id,'arguments':sys.argv,'dna_hex':dna.hex()}))
 ''')
     observer.chmod(0o755)
+    python_observer = bindir / 'python3'
+    python_observer.write_text('#!' + sys.executable + '\n' + (ROOT / 'tests/mock_e2e/mock_python.py').read_text().split('\n',1)[1])
+    python_observer.chmod(0o755)
     records = []
     for sid, empty, dna in [('A', False, 'ACGT' * 40), ('A__B.v1', True, 'TGCA' * 53)]:
         fasta = base / (sid + '.fa')
         fasta.write_text('>shared_id\n' + dna + '\n')
         records.append({'id': sid, 'empty': empty, 'fasta': str(fasta)})
-    sources = ['conf/nfcore_downstream.config', 'modules/nf-core/mobsuite/recon/main.nf', 'tests/nextflow/mob_publication.nf', 'tests/run_mob_publication.py']
+    sources = ['conf/nfcore_downstream.config', 'modules/nf-core/mobsuite/recon/main.nf', 'tests/nextflow/mob_publication.nf', 'tests/run_mob_publication.py', 'tests/mock_e2e/mock_python.py', 'bin/mobsuite_preflight.py', 'lib/mobsuite_runtime.nf']
     hashes = {path: sha(ROOT / path) for path in sources}
     runs = []
     work = base / 'work'

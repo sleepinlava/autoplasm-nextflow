@@ -1,56 +1,51 @@
-
 nextflow_process {
-
-    name "Test Process MOBSUITE_RECON"
+    name "MOB recon guarded entrypoint"
     script "../main.nf"
     process "MOBSUITE_RECON"
-
     tag "modules"
     tag "modules_nfcore"
     tag "mobsuite"
-    tag "mobsuite/recon"
-
-    test("test-mobsuite-recon") {
-
+    // User excludes viral input. Supply a reviewed complete plain bacterial
+    // chromosome >450kb and prepared DB for the full native case. Not yet run.
+    test("full bacterial chromosome - native prepared resources required") {
+        tag "mobsuite-native-prepared"
         when {
             process {
                 """
-                input[0] = [
-                    [ id:'test' ],
-				    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
-                ]
+                input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
+                input[1]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
                 """
             }
         }
-
         then {
-            assertAll(
-                { assert process.success },
-                { assert snapshot(sanitizeOutput(process.out)).match() }
-            )
+            assert process.success
+            def input=new File(params.mobsuite_bacterial_fasta.toString()).readLines()
+            assert input.count { it.startsWith('>') }==1
+            def dna=input.findAll { !it.startsWith('>') }.join('')
+            assert dna.size()>450000
+            def chromosome=new File(process.out.chromosome.get(0).get(1).toString()).readLines()
+            assert chromosome.findAll { !it.startsWith('>') }.join('')==dna
+            assert new File(process.out.contig_report.get(0).get(1).toString()).readLines().size()>1
+            assert !process.out.plasmids
+            assert process.out.versions_mobsuite.get(0).get(2)=='3.1.9'
         }
     }
-
-    test("test-mobsuite-recon-stub") {
-        options '-stub'
-
+    test("full bacterial input - stub interface") {
+        tag "mobsuite-guard-stub"
+        options "-stub"
         when {
             process {
                 """
-                input[0] = [
-                    [ id:'test' ],
-				    file(params.modules_testdata_base_path + 'genomics/sarscov2/genome/genome.fasta', checkIfExists: true)
-                ]
+                input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
+                input[1]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
                 """
             }
         }
-
         then {
-            assertAll(
-                { assert process.success },
-                { assert snapshot(sanitizeOutput(process.out)).match() }
-            )
+            assert process.success
+            assert new File(process.out.chromosome.get(0).get(1).toString()).length()==0
+            assert new File(process.out.contig_report.get(0).get(1).toString()).length()==0
+            assert process.out.versions_mobsuite.get(0).get(2)=='3.1.9'
         }
     }
-
 }

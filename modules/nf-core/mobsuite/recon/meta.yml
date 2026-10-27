@@ -26,6 +26,10 @@ input:
         description: A bacterial genome assembly in FASTA format
         pattern: "*.{fasta,fa,fna}"
         ontologies: []
+  - preflight_helper:
+      type: file
+      description: Fixed native source/prepare guard; full resource identity remains pending
+      pattern: "mobsuite_preflight.py"
 output:
   chromosome:
     - - meta:
