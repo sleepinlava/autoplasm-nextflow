@@ -29,9 +29,20 @@ input:
         description: BAM/CRAM/SAM file
         pattern: "*.{bam,cram}"
         ontologies: []
+    - runtime_identity:
+        type: map
+        description: Fresh environment resource identity and resolved execution context from SEMIBIN_RESOURCE_PROBE; checked before consumer cache lookup.
+    - runtime_receipt:
+        type: file
+        description: Deterministic JSON resource receipt, staged and rechecked before scientific execution.
+        pattern: "*.json"
   - autoplasm_helper_0:
       type: file
       description: Local checked adapter bin/semibin_output_state.py; staged as semibin_output_state.py. Explicit file content participates in deep task caching.
+      pattern: "*.py"
+  - resource_helper:
+      type: file
+      description: bin/semibin_runtime_resources.py; the same helper is staged in the probe and consumer.
       pattern: "*.py"
 output:
   csv:

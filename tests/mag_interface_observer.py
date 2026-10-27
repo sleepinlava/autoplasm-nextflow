@@ -5,6 +5,7 @@ The real production Nextflow processes run unchanged. This observer only
 checks staged identities and supplies controlled predictions/consumer records.
 GTDB-Tk records staged files here; its real extension filter is NOT exercised.
 """
+import base64
 import gzip
 import hashlib
 import json
@@ -156,6 +157,20 @@ elif tool == 'gtdbtk':
     for name in ['gtdbtk.log', 'gtdbtk.warnings.log']:
         (out / name).write_text('INTERFACE_OBSERVER_ONLY\n')
 elif tool == 'python':
+    if args and Path(args[0]).name == 'semibin_runtime_resources.py':
+        # This routing fixture deliberately supplies fake BAMs/classifications.
+        # The resource scan is also an explicit observer, never native evidence.
+        wrapper_args = args[1:args.index('--')]
+        runtime = json.loads(base64.b64decode(wrapper_args[wrapper_args.index('--runtime-base64') + 1]))
+        identity = {'schema_version': 1, 'runtime': runtime,
+                    'scope': 'EXPLICIT_MAG_ROUTING_OBSERVER_NO_RESOURCE_SCAN'}
+        if '--verify' in wrapper_args:
+            assert json.loads(Path(wrapper_args[wrapper_args.index('--verify')+1]).read_text()) == identity
+        if '--output' in wrapper_args:
+            Path(wrapper_args[wrapper_args.index('--output')+1]).write_text(json.dumps(identity,sort_keys=True)+'\n')
+        if '--execute' in wrapper_args:
+            os.execvp('SemiBin2', ['SemiBin2'] + args[args.index('--')+1:])
+        raise SystemExit(0)
     # Only the SemiBin CUDA version eval; no real torch/model execution.
     if args == ['-c', "import torch; print(torch.version.cuda or 'no CUDA available')"]:
         print('INTERFACE_OBSERVER_NO_CUDA')

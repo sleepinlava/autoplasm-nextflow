@@ -1,9 +1,9 @@
-nextflow_process {
+nextflow_workflow {
 
-    name "Test Process SEMIBIN_SINGLEEASYBIN"
+    name "Test SemiBin with fresh runtime resource identity"
 
-    script "../main.nf"
-    process "SEMIBIN_SINGLEEASYBIN"
+    script "./main.nf"
+    workflow "SEMIBIN_RUNTIME_TEST"
 
     tag "modules"
     tag "modules_nfcore"
@@ -12,16 +12,18 @@ nextflow_process {
     config './nextflow.config'
 
     test("metagenome - binning") {
+        options(System.getenv('AUTOPLASM_SEMIBIN_NATIVE_OPTIONS') ?: '')
 
         when {
             params {
                 module_args  = ''
                 module_args2 = '--ml-threshold 0 --minfasta-kbs 0 --min-len 0 --random-seed 0'
             }
-            process {
+            workflow {
                 """
                 input[1] = file("${new File('bin/semibin_output_state.py').absolutePath}", checkIfExists: true)
-                input[0] = [
+                input[2] = file("${new File('bin/semibin_runtime_resources.py').absolutePath}", checkIfExists: true)
+                input[0] = Channel.value([
                     [id:'test'],
                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/contigs.fasta.gz', checkIfExists:true),
                     [
@@ -29,35 +31,60 @@ nextflow_process {
                         file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/s2.sorted.bam', checkIfExists:true),
                         file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/s3.sorted.bam', checkIfExists:true)
                     ]
-                ]
+                ])
                 """
             }
         }
         then {
-            assert process.success
-            assert process.out.model.size() == 1
-            def modelValue = process.out.model.get(0).get(1)
+            assert workflow.success
+            assert workflow.out.model.size() == 1
+            def modelValue = workflow.out.model.get(0).get(1)
             def modelFiles = modelValue instanceof List ? modelValue : [modelValue]
-            assert modelFiles.size() == 1 && path(modelFiles[0]).name.endsWith('.pt')
+            assert modelFiles.size() == 1 && path(modelFiles[0]).fileName.toString().endsWith('.pt')
             assert path(modelFiles[0]).size() > 0
-            def stateValue = process.out.state.get(0).get(1)
+            def stateValue = workflow.out.state.get(0).get(1)
             def stateFiles = stateValue instanceof List ? stateValue : [stateValue]
             assert stateFiles.size() == 1
             def state = new groovy.json.JsonSlurper().parseText(path(stateFiles[0]).text)
             assert state.state == 'bins_ready'
-            def binValue = process.out.output_fasta.get(0).get(1)
+            def binValue = workflow.out.output_fasta.get(0).get(1)
             def binFiles = binValue instanceof List ? binValue : [binValue]
             assert state.bin_count == binFiles.size()
-            def bins = binFiles.collect { path(it).fasta }
-            def featurised = path(process.out.csv.get(0).get(1).find { it.endsWith('/data.csv') })
+            // Independent FASTA reader: nf-test0.9.5 has no Path.fasta API.
+            def fastaRecords = { value ->
+                def source = value.toString()
+                def stream = source.startsWith('https://') || source.startsWith('http://') ?
+                    new URL(source).openStream() : java.nio.file.Files.newInputStream(path(value))
+                if (source.endsWith('.gz')) stream = new java.util.zip.GZIPInputStream(stream)
+                def records = [:]
+                def current = null
+                stream.withReader('UTF-8') { reader ->
+                    reader.eachLine { line ->
+                        if (line.startsWith('>')) {
+                            current = line.substring(1).tokenize()[0]
+                            assert !records.containsKey(current)
+                            records[current] = new StringBuilder()
+                        } else if (line.trim()) {
+                            assert current != null
+                            records[current].append(line.trim())
+                        }
+                    }
+                }
+                assert records && records.values().every { it.length() > 0 }
+                return records.collectEntries { id, dna -> [(id): dna.toString()] }
+            }
+            def bins = binFiles.collect { fastaRecords(it) }
+            def sourceDna = fastaRecords(workflow.out.source_fasta.get(0).get(1))
+            def featurised = path(workflow.out.csv.get(0).get(1).find { path(it).fileName.toString() == 'data.csv' })
                 .readLines().drop(1).collect { it.split(',')[0] }
             assertAll(
+                { assert bins.every { records -> records.every { id, dna -> sourceDna[id] == dna } } },
                 // every contig SemiBin featurised lands in exactly one bin. Which bin varies between machines
                 { assert featurised && bins.collectMany { it.keySet().toList() }.sort() == featurised.sort() },
-                { assert process.out.csv.get(0).get(1).collect { file(it).name }.toSet() == ['data.csv', 'data_split.csv', 's1.sorted.bam_0_data_cov.csv', 's2.sorted.bam_1_data_cov.csv', 's3.sorted.bam_2_data_cov.csv'].toSet() },
-                { assert process.out.tsv.get(0).get(1).collect { file(it).name }.toSet() == ['contig_bins.tsv', 'recluster_bins_info.tsv'].toSet() },
-                { assert process.out.versions_semibin.size() == 1 && process.out.versions_semibin.get(0).get(2) == '2.4.1' },
-                { assert process.out.versions_cuda.size() == 1 && process.out.versions_cuda.get(0).get(2) == 'no CUDA available' }
+                { assert workflow.out.csv.get(0).get(1).collect { path(it).fileName.toString() }.toSet() == ['data.csv', 'data_split.csv', 's1.sorted.bam_0_data_cov.csv', 's2.sorted.bam_1_data_cov.csv', 's3.sorted.bam_2_data_cov.csv'].toSet() },
+                { assert workflow.out.tsv.get(0).get(1).collect { path(it).fileName.toString() }.toSet() == ['contig_bins.tsv', 'recluster_bins_info.tsv'].toSet() },
+                { assert workflow.out.versions_semibin.size() == 1 && workflow.out.versions_semibin.get(0).get(2) == '2.4.1' },
+                { assert workflow.out.versions_cuda.size() == 1 && workflow.out.versions_cuda.get(0).get(2) == 'no CUDA available' }
 
             )
         }
@@ -70,10 +97,11 @@ nextflow_process {
                 module_args  = ''
                 module_args2 = '--ml-threshold 0 --minfasta-kbs 0 --min-len 0 --random-seed 0'
             }
-            process {
+            workflow {
                 """
                 input[1] = file("${new File('bin/semibin_output_state.py').absolutePath}", checkIfExists: true)
-                input[0] = [
+                input[2] = file("${new File('bin/semibin_runtime_resources.py').absolutePath}", checkIfExists: true)
+                input[0] = Channel.value([
                     [id:'test'],
                     file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/contigs.fasta.gz', checkIfExists:true),
                     [
@@ -81,15 +109,15 @@ nextflow_process {
                         file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/s2.sorted.bam', checkIfExists:true),
                         file(params.modules_testdata_base_path + 'genomics/prokaryotes/metagenome/binning/s3.sorted.bam', checkIfExists:true)
                     ]
-                ]
+                ])
                 """
             }
         }
         then {
-            assert process.success
-            assert process.out.output_fasta.size() == 0
-            assert process.out.model.size() == 0
-            def stateValue = process.out.state.get(0).get(1)
+            assert workflow.success
+            assert workflow.out.output_fasta.size() == 0
+            assert workflow.out.model.size() == 0
+            def stateValue = workflow.out.state.get(0).get(1)
             def stateFiles = stateValue instanceof List ? stateValue : [stateValue]
             assert stateFiles.size() == 1
             def state = new groovy.json.JsonSlurper().parseText(path(stateFiles[0]).text)

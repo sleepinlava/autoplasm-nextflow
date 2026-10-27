@@ -1,4 +1,5 @@
 include { resourceInput; taggedResourceInput } from '../lib/resource_inputs'
+include { semibinResourceRecord } from '../lib/semibin_runtime'
 include { reportEvidence; reportSamples } from '../lib/report_events'
 include { selectedTools } from '../lib/tool_selection'
 include { magSelectionError } from '../lib/mag_selection'
@@ -23,7 +24,7 @@ include { CONCOCT_CONCOCTCOVERAGETABLE } from '../modules/nf-core/concoct/concoc
 include { CONCOCT_CONCOCT } from '../modules/nf-core/concoct/concoct/main'
 include { CONCOCT_MERGECUTUPCLUSTERING } from '../modules/nf-core/concoct/mergecutupclustering/main'
 include { CONCOCT_EXTRACTFASTABINS as CONCOCT } from '../modules/nf-core/concoct/extractfastabins/main'
-include { SEMIBIN_SINGLEEASYBIN as SEMIBIN } from '../modules/nf-core/semibin/singleeasybin/main'
+include { SEMIBIN_SINGLEEASYBIN as SEMIBIN; SEMIBIN_RESOURCE_PROBE } from '../modules/nf-core/semibin/singleeasybin/main'
 include { DASTOOL_FASTATOCONTIG2BIN as SCAFFOLDS2BIN_METABAT2 } from '../modules/nf-core/dastool/fastatocontig2bin/main'
 include { DASTOOL_FASTATOCONTIG2BIN as SCAFFOLDS2BIN_CONCOCT } from '../modules/nf-core/dastool/fastatocontig2bin/main'
 include { DASTOOL_FASTATOCONTIG2BIN as SCAFFOLDS2BIN_SEMIBIN } from '../modules/nf-core/dastool/fastatocontig2bin/main'
@@ -83,7 +84,13 @@ workflow MAG_HOST {
 
     ch_semibin_bins = Channel.empty()
     if (selectedTools(params.mag_tools).contains('semibin')) {
-        SEMIBIN(ch_assembly.join(ch_contig_bam, failOnDuplicate: true, failOnMismatch: true), Channel.value(file("${moduleDir}/../bin/semibin_output_state.py", checkIfExists: true)))
+        ch_semibin_input = ch_assembly.join(ch_contig_bam, failOnDuplicate: true, failOnMismatch: true)
+        ch_semibin_resource_helper = Channel.value(file("${moduleDir}/../bin/semibin_runtime_resources.py", checkIfExists: true))
+        SEMIBIN_RESOURCE_PROBE(ch_semibin_input, ch_semibin_resource_helper)
+        ch_semibin_identity = SEMIBIN_RESOURCE_PROBE.out.identity.map { meta, receipt -> semibinResourceRecord(meta, receipt) }
+        SEMIBIN(ch_semibin_input.join(ch_semibin_identity, failOnDuplicate: true, failOnMismatch: true),
+                Channel.value(file("${moduleDir}/../bin/semibin_output_state.py", checkIfExists: true)),
+                ch_semibin_resource_helper)
         ch_report_events = ch_report_events.mix(reportEvidence([channels: SEMIBIN.out], '07_host_prediction', 'SEMIBIN'))
         ch_semibin_bins = SEMIBIN.out.output_fasta
     }

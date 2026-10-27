@@ -94,7 +94,7 @@ def run(base, das_prefix, bgzip_prefix, concoct_prefix, cases, mag_host=None):
                           "params.publish_dir_mode='copy'\nprocess.executor='local'\nprocess.cpus=1\n"
                           "process.memory='512 MB'\nprocess.maxForks=2\nconda.enabled=false\n"
                           "docker.enabled=false\nsingularity.enabled=false\n"
-                          "process { withName: 'SEMIBIN|CHECKM2|GTDBTK' { cpus=1; memory='512 MB' } }\n")
+                          "process { withName: 'SEMIBIN|SEMIBIN_RESOURCE_PROBE|CHECKM2|GTDBTK' { cpus=1; memory='512 MB' } }\n")
         selected = {s.strip() for s in binners}
         params = {'records': records, 'outdir': str(p / 'out'), 'mag_tools': binners + (['checkm2', 'gtdbtk'] if binners else []), 'checkm2_db': str(fixtures / 'checkm2.dmnd'), 'gtdbtk_db': str(fixtures / 'gtdb'), 'host_plasmid_linking': True, 'host_linking_methods': ['sequence'], 'host_linking_optional_methods': [], 'link_min_similarity': 0}
         (p / 'params.json').write_text(json.dumps(params))
@@ -172,8 +172,8 @@ def run(base, das_prefix, bgzip_prefix, concoct_prefix, cases, mag_host=None):
                 checks['no_dropped_or_duplicate_consumer_tasks'] = consumer_count == expected_consumer_count
         runs.append({'case': name, 'command': command, 'exit': result.returncode, 'checks': checks, 'tasks': tasks})
         print(name, checks, flush=True)
-        source_names = ['main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'conf/nfcore_mag.config', 'modules/nf-core/gtdbtk/classifywf/main.nf', 'bin/normalize_gtdb_bins.py', 'modules/nf-core/semibin/singleeasybin/main.nf', 'bin/semibin_output_state.py', 'tests/nextflow/mag_selection.nf', 'tests/mag_interface_observer.py', 'tests/run_mag_routing.py', 'subworkflows/host_linking.nf', 'modules/linking/sequence.nf', 'bin/sequence_similarity_link.R']
-        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in source_names}, 'limitations': ['explicit synthetic binner/DAS/CheckM/GTDB observers, fake BAM/db inputs; no tool inference or scientific accuracy claim', 'actual original workflow + gzip/converter helper + native R host linking; per-sample bin identity/DNA/metadata/multiplicity checks', 'GTDB observer verifies private normalized staging and unchanged final-bin identities, not the actual classifier; separate real2.7.2 parser/selection tests, no image/nf-test framework/full platform']}
+        source_names = ['bin/semibin_runtime_resources.py', 'lib/semibin_runtime.nf', 'main.nf', 'lib/mag_selection.nf', 'subworkflows/mag_host.nf', 'conf/nfcore_mag.config', 'modules/nf-core/gtdbtk/classifywf/main.nf', 'bin/normalize_gtdb_bins.py', 'modules/nf-core/semibin/singleeasybin/main.nf', 'bin/semibin_output_state.py', 'tests/nextflow/mag_selection.nf', 'tests/mag_interface_observer.py', 'tests/run_mag_routing.py', 'subworkflows/host_linking.nf', 'modules/linking/sequence.nf', 'bin/sequence_similarity_link.R']
+        receipt = {'runs': runs, 'pass': all(all(r['checks'].values()) for r in runs), 'source_sha256': {n: hashlib.sha256((ROOT / n).read_bytes()).hexdigest() for n in source_names}, 'limitations': ['explicit synthetic binner/DAS/CheckM/GTDB and runtime-resource-scan observers, fake BAM/db inputs; no tool inference or scientific accuracy claim', 'actual original workflow + gzip/converter helper + native R host linking; per-sample bin identity/DNA/metadata/multiplicity checks', 'GTDB observer verifies private normalized staging and unchanged final-bin identities, not the actual classifier; separate real2.7.2 parser/selection tests, no image/nf-test framework/full platform']}
         if mag_host:
             receipt['source_sha256']['subworkflows/mag_host.nf'] = hashlib.sha256(mag_host.read_bytes()).hexdigest()
             receipt['module_override'] = str(mag_host)

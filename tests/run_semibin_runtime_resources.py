@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native default SemiBin pilot for pre-lookup runtime resource identities."""
+"""Historical fixed-baseline SemiBin resource pilot; use run_semibin_runtime_native.py for production."""
 import argparse
 import csv
 import hashlib
@@ -28,7 +28,9 @@ def run(base, prefix, fixture):
     original = marker.read_bytes()
     original_stat = marker.stat()
     original_sha = sha(package / 'marker.hmm')
-    module = ROOT / 'modules/nf-core/semibin/singleeasybin/main.nf'
+    baseline = '9a270d30cd5ba27e93743256dfbfdac7d9c929ec'
+    module = base / 'frozen_baseline.nf'
+    module.write_bytes(subprocess.check_output(['git', 'show', baseline + ':modules/nf-core/semibin/singleeasybin/main.nf'], cwd=ROOT))
     generated = module.read_text()
     needle = "    path(autoplasm_helper_0, stageAs: 'semibin_output_state.py')"
     assert generated.count(needle) == 1
@@ -140,7 +142,8 @@ def run(base, prefix, fixture):
                    source_unchanged=True, original_marker_unchanged=True,
                    generated_consumer_sha256=sha(consumer), original_module_sha256=sha(module),
                    fixture_sha256={p: sha(fixture / p) for p in ['input.fasta', 'input.sorted.bam']},
-                   scope='Pilot copied production consumer with only identity inputs/pre-CLI verification added. Actual default SemiBin2.4.1 CPU15epochs, full official40contig800000bp fixture, seed0. Probe always runs before lookup. No production wiring, custom flags/read-set, OCI/GPU/platform or biological accuracy acceptance.')
+                   baseline_commit=baseline,
+                   scope='Historical pilot copied frozen production consumer with only identity inputs/pre-CLI verification added. Actual default SemiBin2.4.1 CPU15epochs, full official40contig800000bp fixture, seed0. Probe always runs before lookup. No production wiring, custom flags/read-set, OCI/GPU/platform or biological accuracy acceptance.')
     (base / 'run.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print('PASS: runtime probe/native consumer pilot; production integration remains open', flush=True)
 
