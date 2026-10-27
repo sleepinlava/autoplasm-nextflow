@@ -4,7 +4,7 @@
 def resourceInput(location) {
     if (location == null || (location instanceof Collection && location.isEmpty()))
         return tuple([], [schema_version: 2, resource_state: 'absent'])
-    def root = file(location, checkIfExists: true)
+    def root = file(location, checkIfExists: true, glob: false)
     def identity = new GroovyClassLoader().parseClass(new File("${moduleDir}/ResourceIdentity.groovy"))
     return tuple(root, identity.capture(root))
 }
