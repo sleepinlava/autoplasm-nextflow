@@ -8,6 +8,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import shutil
 import stat
 import sys
 
@@ -60,6 +61,23 @@ def capture(runtime, native_args):
     package = Path(version.__file__).parent
     resources = {'bundled_marker': resource(package / 'marker.hmm'),
                  'package_code': {p.name: resource(p) for p in sorted(package.glob('*.py'))}}
+    if args.orf_finder == 'fraggenescan' and args.prodigal_output_faa is None:
+        # SemiBin2.4.1 calls the binary directly, with -w0 -t complete.
+        # FragGeneScan1.32 derives train/ from the *invoked argv[0]*, so do
+        # not resolve an executable symlink before locating its models.
+        binary = shutil.which('FragGeneScan')
+        if binary is None:
+            raise ValueError('Selected SemiBin FragGeneScan binary not found in PATH')
+        training = Path(binary).parent / 'train'
+        required = ['gene', 'rgene', 'noncoding', 'start', 'stop', 'stop1',
+                    'start1', 'pwm', 'complete']
+        for name in required:
+            if not (training / name).is_file():
+                raise ValueError('Missing selected FragGeneScan training file: ' + str(training / name))
+        resources['fraggenescan'] = dict(
+            invoked_binary=binary, training_directory=str(training),
+            whole_genome=0, selected_model='complete',
+            binary=resource(binary), training=resource(training))
     # Capture explicit overrides too; the real native parser applies aliases and
     # precedence. Input files already staged by Nextflow are checked as well.
     file_fields = ['contig_fasta', 'bams', 'abundances', 'depth_metabat2',

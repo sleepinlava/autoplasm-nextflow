@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('semibin_resource_test', ROOT / 'bin/semibin_runtime_resources.py')
@@ -36,6 +37,66 @@ class RuntimeResources(unittest.TestCase):
         self.assertIn('main.py', value['resources']['package_code'])
         self.assertNotIn('pretrained_model', value['resources'])
         self.assertNotIn('gtdb_reference_directory', value['resources'])
+        self.assertNotIn('fraggenescan', value['resources'])
+
+    def fgs_layout(self):
+        # Read-set observer only; native binary/model execution is tested
+        # separately against fixed FragGeneScan1.32 and the full fixture.
+        binary = self.root / 'tools/FragGeneScan'
+        binary.parent.mkdir()
+        binary.write_bytes(b'EXPLICIT_BINARY_READ_SET_OBSERVER\n')
+        binary.chmod(0o755)
+        train = binary.parent / 'train'
+        train.mkdir()
+        for name in ['gene', 'rgene', 'noncoding', 'start', 'stop', 'stop1',
+                     'start1', 'pwm', 'complete']:
+            (train / name).write_bytes(b'EXPLICIT_MODEL_READ_SET_OBSERVER\n')
+        return binary, train
+
+    def test_fgs_selected_complete_and_shared_model_same_stat_changes(self):
+        binary, train = self.fgs_layout()
+        with patch.object(resolver.shutil, 'which', return_value=str(binary)):
+            first = self.capture('--orf-finder', 'fraggenescan')
+            value = first['resources']['fraggenescan']
+            self.assertEqual(value['invoked_binary'], str(binary))
+            self.assertEqual(value['selected_model'], 'complete')
+            self.assertEqual(value['whole_genome'], 0)
+            for name in ['complete', 'gene']:
+                model = train / name
+                before = model.stat()
+                model.write_bytes(b'CHANGED__MODEL_READ_SET_OBSERVER\n')
+                self.assertEqual(model.stat().st_size, before.st_size)
+                os.utime(model, ns=(before.st_atime_ns, before.st_mtime_ns))
+                current = self.capture('--orf-finder', 'fraggenescan')
+                self.assertNotEqual(first['resources']['fraggenescan'], current['resources']['fraggenescan'])
+                first = current
+
+    def test_fgs_alias_uses_invoked_directory_and_requires_models(self):
+        binary, train = self.fgs_layout()
+        alias = self.root / 'alias/FragGeneScan'
+        alias.parent.mkdir()
+        alias.symlink_to(binary)
+        with patch.object(resolver.shutil, 'which', return_value=str(alias)):
+            with self.assertRaisesRegex(ValueError, 'Missing selected FragGeneScan'):
+                self.capture('--orf-finder', 'fraggenescan')
+            (alias.parent / 'train').symlink_to(train, target_is_directory=True)
+            value = self.capture('--orf-finder', 'fraggenescan')['resources']['fraggenescan']
+            self.assertEqual(value['training_directory'], str(alias.parent / 'train'))
+            self.assertEqual(value['binary'][0]['link'], str(binary))
+            (train / 'complete').unlink()
+            with self.assertRaisesRegex(ValueError, 'Missing selected FragGeneScan'):
+                self.capture('--orf-finder', 'fraggenescan')
+
+    def test_fgs_missing_binary_refused_only_when_used(self):
+        with patch.object(resolver.shutil, 'which', return_value=None):
+            with self.assertRaisesRegex(ValueError, 'binary not found'):
+                self.capture('--orf-finder', 'fraggenescan')
+            self.assertNotIn('fraggenescan', self.capture()['resources'])
+            proteins = self.root / 'orfs.faa'
+            proteins.write_bytes(b'>READ_SET_ONLY\nAAA\n')
+            value = self.capture('--orf-finder', 'fraggenescan', '--prodigal-output-faa', str(proteins))
+            self.assertNotIn('fraggenescan', value['resources'])
+            self.assertEqual(value['resources']['prodigal_output_faa'], [resolver.resource(proteins)])
 
     def test_native_environment_alias_resolves_real_bundled_model(self):
         value = self.capture('--environment', 'human-gut')
