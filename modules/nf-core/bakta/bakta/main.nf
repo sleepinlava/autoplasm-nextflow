@@ -29,6 +29,9 @@ process BAKTA_BAKTA {
     tuple val(meta), path("${prefix}.txt"), emit: txt
     tuple val(meta), path("${prefix}.json"), emit: json
     tuple val("${task.process}"), val('bakta'), eval("bakta --version 2>&1 | sed 's/.*bakta //'"), emit: versions_bakta, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.BAKTA_BAKTA.task_command.sh"),
+          val('bakta --version'), eval('bakta --version'),
+          eval("sha256sum '${prefix}.BAKTA_BAKTA.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -42,6 +45,7 @@ process BAKTA_BAKTA {
     def hmms_opt = hmms ? "--hmms ${hmms}" : ""
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.BAKTA_BAKTA.task_command.sh'
     ## Fake home due to fontconfig 'no writeable cache directory' issue
     mkdir nxf_home
     export HOME=\$PWD/nxf_home
@@ -61,6 +65,7 @@ process BAKTA_BAKTA {
     stub:
     prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.BAKTA_BAKTA.task_command.sh'
     export MPLCONFIGDIR=\$PWD/.matplotlib
     export FONTCONFIG_PATH=\$PWD/.fontconfig
     export XDG_CACHE_HOME=\$PWD/.cache

@@ -17,6 +17,10 @@ process PRODIGAL {
     tuple val(meta), path("${prefix}.faa.gz"),                 emit: amino_acid_fasta
     tuple val(meta), path("${prefix}_all.txt.gz"),             emit: all_gene_annotations
     tuple val("${task.process}"), val('prodigal'), eval('prodigal -v 2>&1 | sed -n "s/Prodigal V\\(.*\\):.*/\\1/p"'), emit: versions_prodigal, topic: versions
+    tuple val("${task.process}"), val(meta), path("${meta.id}.PRODIGAL.task_command.sh"),
+          val('prodigal -v'), eval('prodigal -v 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.PRODIGAL.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -25,6 +29,7 @@ process PRODIGAL {
     def args = task.ext.args   ?: ''
     prefix   = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PRODIGAL.task_command.sh'
     pigz -cdf ${genome} | prodigal \\
         $args \\
         -f $output_format \\
@@ -48,6 +53,7 @@ process PRODIGAL {
     stub:
     prefix   = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PRODIGAL.task_command.sh'
     echo "" | gzip > ${prefix}.fna.gz
     echo "" | gzip > ${prefix}.${output_format}.gz
     echo "" | gzip > ${prefix}.faa.gz

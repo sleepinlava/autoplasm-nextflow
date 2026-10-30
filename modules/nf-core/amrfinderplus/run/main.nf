@@ -19,6 +19,9 @@ process AMRFINDERPLUS_RUN {
     env 'DBVER'                                     , emit: db_version
     tuple val("${task.process}"), val("amrfinderplus"), eval("amrfinder --version"), emit: versions_amrfinderplus, topic: versions
     tuple val("${task.process}"), val("amrfinderplus_database"), eval("amrfinder --database amrfinderdb --database_version 2>&1 | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\\.[0-9]+' | tail -1"), emit: versions_amrfinderplus_database, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.AMRFINDERPLUS_RUN.task_command.sh"),
+          val('amrfinder --version'), eval('amrfinder --version'),
+          eval("sha256sum '${prefix}.AMRFINDERPLUS_RUN.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -38,6 +41,7 @@ process AMRFINDERPLUS_RUN {
         }
     }
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.AMRFINDERPLUS_RUN.task_command.sh'
     if [ "${is_compressed_fasta}" == "true" ]; then
         gzip -c -d ${fasta} > ${fasta_name}
     fi
@@ -65,6 +69,7 @@ process AMRFINDERPLUS_RUN {
     prefix = task.ext.prefix ?: "${meta.id}"
     // WARN: DB version information will not be provided for the database in the stub run, since it is not actually downloaded through the update module
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.AMRFINDERPLUS_RUN.task_command.sh'
     echo ${args}
 
     touch ${prefix}.tsv

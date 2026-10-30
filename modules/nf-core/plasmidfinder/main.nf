@@ -22,6 +22,9 @@ process PLASMIDFINDER {
     tuple val(meta), path("*-hit_in_genome_seq.fsa"), emit: genome_seq
     tuple val(meta), path("*-plasmid_seqs.fsa")     , emit: plasmid_seq
     tuple val("${task.process}"), val('plasmidfinder'), val('2.1.6'), topic: versions, emit: versions_plasmidfinder
+    tuple val("${task.process}"), val(meta), path("${prefix}.PLASMIDFINDER.task_command.sh"),
+          val('plasmidfinder.py -h'), eval('plasmidfinder.py -h'),
+          eval("sha256sum '${prefix}.PLASMIDFINDER.task_command.sh'"), emit: task_provenance
     // WARN: Version information not provided by tool on CLI. Please update this string when bumping container versions.
 
     when:
@@ -29,13 +32,14 @@ process PLASMIDFINDER {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def is_compressed = fasta.getName().endsWith(".gz") ? true : false
     def fasta_name = fasta.getName().replace(".gz", "")
     def runtime = plasmidfinderRuntime(task,workflow.containerEngine,meta)
     plasmidfinderRequireRuntime(runtime_identity,runtime)
     def encoded = plasmidfinderRuntimeBase64(runtime)
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.PLASMIDFINDER.task_command.sh'
     if [ "$is_compressed" == "true" ]; then
         gzip -c -d ${plasmidfinderQuote(fasta)} > ${plasmidfinderQuote(fasta_name)}
     fi
@@ -52,8 +56,9 @@ process PLASMIDFINDER {
 
     stub:
     plasmidfinderRequireRuntime(runtime_identity,plasmidfinderRuntime(task,workflow.containerEngine,meta))
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.PLASMIDFINDER.task_command.sh'
     touch ${prefix}.json
     touch ${prefix}.txt
     touch ${prefix}.tsv

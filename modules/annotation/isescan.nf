@@ -15,6 +15,9 @@ process ISESCAN {
 
     output:
     tuple val(meta), path("${meta.id}.isescan_out", type: 'dir'), emit: results
+    tuple val("${task.process}"), val(meta), path("${meta.id}.ISESCAN.task_command.sh"),
+          val('python3 isescan_runtime_resources.py -h'), eval('python3 isescan_runtime_resources.py -h'),
+          eval("sha256sum '${meta.id}.ISESCAN.task_command.sh'"), emit: task_provenance
 
     script:
     def runtime = isescanRuntime(task, workflow.containerEngine, meta)
@@ -23,6 +26,7 @@ process ISESCAN {
     def seqfile = isescanQuote(plasmid_contigs)
     def prefix = isescanQuote("${meta.id}.isescan_out")
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.ISESCAN.task_command.sh'
     python3 isescan_runtime_resources.py --runtime-base64 '${runtime64}' --seqfile ${seqfile} --result-prefix ${prefix} --threads ${task.cpus} --verify ${runtime_receipt} --execute
     """
 
@@ -30,6 +34,7 @@ process ISESCAN {
     isescanRequireRuntime(runtime_identity, isescanRuntime(task, workflow.containerEngine, meta))
     def prefix = isescanQuote("${meta.id}.isescan_out")
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.ISESCAN.task_command.sh'
     mkdir -p ${prefix}
     printf '%s\n' '{"state":"stub_not_validated","inference":false}' > ${prefix}/isescan_stub.json
     """

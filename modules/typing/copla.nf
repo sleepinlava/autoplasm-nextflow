@@ -22,10 +22,15 @@ process COPLA {
     output:
     tuple val(meta), path("${meta.id}.copla.tsv"), emit: typing
     tuple val(meta), path("${meta.id}.copla"), emit: raw
+    tuple val("${task.process}"), val(meta), path("${meta.id}.COPLA.task_command.sh"),
+          val('python3 run_copla_candidates.py -h'), eval('python3 run_copla_candidates.py -h'),
+          eval("sha256sum '${meta.id}.COPLA.task_command.sh'"), emit: task_provenance
+
 
     script:
     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.COPLA.task_command.sh'
     python3 run_copla_candidates.py --assembly ${shellQuote.call(plasmid_contigs)} \\
         --installation ${copla_install} --refgraph ${copla_refgraph} --reflist ${copla_reflist} \\
         --macsyfinder ${copla_macsyfinder} --threads ${task.cpus} \\

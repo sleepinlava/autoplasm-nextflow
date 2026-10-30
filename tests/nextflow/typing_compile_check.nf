@@ -1,0 +1,10 @@
+include { COPLA } from '../../modules/typing/copla'
+include { MACSYFINDER_SEARCH } from '../../modules/nf-core/macsyfinder/search/main'
+include { MACSYFINDER_DOWNLOAD } from '../../modules/nf-core/macsyfinder/download/main'
+include { BAKTA_BAKTA } from '../../modules/nf-core/bakta/bakta/main'
+include { AMRFINDERPLUS_RUN } from '../../modules/nf-core/amrfinderplus/run/main'
+include { RGI_MAIN } from '../../modules/nf-core/rgi/main/main'
+include { INTEGRONFINDER } from '../../modules/nf-core/integronfinder/main'
+include { ISESCAN } from '../../modules/annotation/isescan'
+include { PLASMIDHOSTFINDER } from '../../modules/host/plasmidhostfinder'
+workflow { println 'compiled' }

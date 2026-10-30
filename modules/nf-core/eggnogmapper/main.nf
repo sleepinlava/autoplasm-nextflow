@@ -19,6 +19,10 @@ process EGGNOGMAPPER {
     tuple val(meta), path("*.emapper.hits")          , emit: hits     , optional: true
     // emapper.py --version reports the enclosing repository's git tag when the package sits inside one, as it does under conda.
     tuple val("${task.process}"), val('eggnog-mapper'), eval('python -c "from importlib.metadata import version; import sys; print(version(sys.argv[1]))" eggnog-mapper'), topic: versions, emit: versions_eggnogmapper
+    tuple val("${task.process}"), val(meta), path("${meta.id}.EGGNOGMAPPER.task_command.sh"),
+          val('emapper.py --version'), eval('emapper.py --version 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.EGGNOGMAPPER.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -33,6 +37,7 @@ process EGGNOGMAPPER {
     def db_arg   = db && db_flags[search_mode]              ? "${db_flags[search_mode]} ${db_path}" : ''
     def dbmem    = task.memory.toMega() > 40000             ? '--dbmem'                             : ''
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.EGGNOGMAPPER.task_command.sh'
     if [ "$is_compressed" == "true" ]; then
         gzip -c -d $fasta > $fasta_name
     fi
@@ -51,6 +56,7 @@ process EGGNOGMAPPER {
     stub:
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.EGGNOGMAPPER.task_command.sh'
     echo $args
 
     touch ${prefix}.emapper.annotations

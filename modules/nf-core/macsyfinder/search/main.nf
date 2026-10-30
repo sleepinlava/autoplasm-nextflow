@@ -22,6 +22,9 @@ process MACSYFINDER_SEARCH {
     tuple val(meta), path("${prefix}/all_best_solutions*")  , emit: best_solutions, optional: true
     tuple val("${task.process}"), val('macsyfinder'), eval('macsyfinder --version 2>&1 | sed "1!d;s/^.*MacSyFinder //;s/ .*$//"'), topic: versions, emit: versions_macsyfinder
     tuple val("${task.process}"), val('hmmer'), eval('hmmsearch -h 2>&1 | sed "2!d;s/^# HMMER //;s/ .*$//"'), topic: versions, emit: versions_hmmer
+    tuple val("${task.process}"), val(meta), path("${prefix}.MACSYFINDER_SEARCH.task_command.sh"),
+          val('macsyfinder --version'), eval('macsyfinder --version'),
+          eval("sha256sum '${prefix}.MACSYFINDER_SEARCH.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -32,6 +35,7 @@ process MACSYFINDER_SEARCH {
     def model_arg = model_names ? "--models ${model_names}" : ""
     def topology_arg = topology ? "--topology-file ${topology}" : ""
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MACSYFINDER_SEARCH.task_command.sh'
     set -o pipefail
     macsyfinder \\
         --sequence-db ${proteins} \\
@@ -51,6 +55,7 @@ process MACSYFINDER_SEARCH {
     stub:
     prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MACSYFINDER_SEARCH.task_command.sh'
     mkdir -p ${prefix}
     touch ${prefix}/macsyfinder.err
     touch ${prefix}/macsyfinder.out

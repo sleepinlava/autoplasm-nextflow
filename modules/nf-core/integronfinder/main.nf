@@ -25,6 +25,9 @@ process INTEGRONFINDER {
     tuple val(meta), path("*/*.summary")          , emit: summary
     tuple val(meta), path("*/integron_finder.out"), emit: out
     tuple val("${task.process}"), val('integronfinder'), eval("integron_finder --version 2>&1 | sed -n 's/^integron_finder version //p' | cut -d ' ' -f1 | grep -Fx '2.0.5'"), emit: versions_integronfinder, topic: versions
+    tuple val("${task.process}"), val(meta), path("${meta.id}.INTEGRONFINDER.task_command.sh"),
+          val('integron_finder --version'), eval('integron_finder --version'),
+          eval("sha256sum '${meta.id}.INTEGRONFINDER.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -37,6 +40,7 @@ process INTEGRONFINDER {
     integronfinderRequireRuntime(runtime_identity,runtime)
     def encoded = integronfinderRuntimeBase64(runtime)
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.INTEGRONFINDER.task_command.sh'
     if [ '${compressed}' == 'true' ]; then
         gzip -c -d ${integronfinderQuote(fasta)} > ${integronfinderQuote(name)}
     fi
@@ -46,10 +50,11 @@ process INTEGRONFINDER {
     stub:
     integronfinderRequireRuntime(runtime_identity,integronfinderRuntime(task,workflow.containerEngine,meta))
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def gbk_create = args.contains("--gbk") ? "touch Results_Integron_Finder_${prefix}/${prefix}.gbk" : ""
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.INTEGRONFINDER.task_command.sh'
     mkdir -p Results_Integron_Finder_${prefix}
     ${gbk_create}
     touch "Results_Integron_Finder_${prefix}/${prefix}.integrons"

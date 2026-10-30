@@ -24,6 +24,9 @@ process RGI_MAIN {
     tuple val("${task.process}"), val('rgi'), eval("rgi main --version"),  emit: versions_rgi, topic: versions
     tuple val("${task.process}"), val('rgi-database'), eval("echo \$DB_VERSION"),  emit: versions_db , topic: versions
     tuple val("${task.process}"), val('kma'), eval("kma -v | sed 's/KMA-//'"),  emit: versions_kma, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.RGI_MAIN.task_command.sh"),
+          val('rgi main --version'), eval('rgi main --version'),
+          eval("sha256sum '${prefix}.RGI_MAIN.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -49,6 +52,7 @@ process RGI_MAIN {
     }
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.RGI_MAIN.task_command.sh'
     export MPLCONFIGDIR=\$PWD
     DB_VERSION=\$(python3 validate_rgi_card.py --card ${card}
     )
@@ -81,6 +85,7 @@ process RGI_MAIN {
     stub:
     prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.RGI_MAIN.task_command.sh'
     mkdir -p temp
     touch ${prefix}.json
     touch ${prefix}.txt

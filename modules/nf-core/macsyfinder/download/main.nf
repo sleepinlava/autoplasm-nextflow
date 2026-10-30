@@ -14,6 +14,9 @@ process MACSYFINDER_DOWNLOAD {
     path "models", emit: models
     tuple val("${task.process}"), val('macsyfinder'), eval('macsyfinder --version 2>&1 | sed "1!d;s/^.*MacSyFinder //;s/ .*$//"'), topic: versions, emit: versions_macsyfinder
     tuple val("${task.process}"), val('msf_data'), eval('msf_data --version 2>&1 | sed "4!d;s/^- MacSyLib //;s/ *$//"'), topic: versions, emit: versions_macsydata
+    tuple val("${task.process}"), val(['id': 'macsyfinder_download'] as Map), path("${task.process}.MACSYFINDER_DOWNLOAD.task_command.sh"),
+          val('macsyfinder --version'), eval('macsyfinder --version'),
+          eval("sha256sum '${task.process}.MACSYFINDER_DOWNLOAD.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -21,6 +24,7 @@ process MACSYFINDER_DOWNLOAD {
     script:
     def args = task.ext.args ?: ''
     """
+    cp -- "\${BASH_SOURCE[0]}" '${task.process}.MACSYFINDER_DOWNLOAD.task_command.sh'
     # msf_data installs models into the current directory by default
     # We'll create a models directory to store them
     mkdir -p models
@@ -33,6 +37,7 @@ process MACSYFINDER_DOWNLOAD {
 
     stub:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${task.process}.MACSYFINDER_DOWNLOAD.task_command.sh'
     mkdir -p models/${model_name}
     touch models/${model_name}/definitions.txt
     """

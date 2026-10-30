@@ -18,18 +18,22 @@ process ABRICATE_RUN {
     output:
     tuple val(meta), path("*.txt"), emit: report
     tuple val("${task.process}"), val('abricate'), eval("abricate --version | sed 's/^.* //' "), emit: versions_abricate, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.ABRICATE_RUN.task_command.sh"),
+          val('abricate --version'), eval('abricate --version'),
+          eval("sha256sum '${prefix}.ABRICATE_RUN.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def datadir = databasedir ? "--datadir ${abricateQuote(databasedir)}" : ''
     def runtime = abricateRuntime(task, workflow.containerEngine, meta, databasedir)
     abricateRequireRuntime(runtime_identity, runtime)
     def runtime64 = abricateRuntimeBase64(runtime)
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.ABRICATE_RUN.task_command.sh'
     if [[ ${abricateQuote(assembly)} != ${abricateQuote(prefix + '.fasta')} ]]; then
         ln -s ${abricateQuote(assembly)} ${abricateQuote(prefix + '.fasta')}
     fi
@@ -38,8 +42,9 @@ process ABRICATE_RUN {
 
     stub:
     abricateRequireRuntime(runtime_identity, abricateRuntime(task, workflow.containerEngine, meta, databasedir))
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.ABRICATE_RUN.task_command.sh'
     touch ${abricateQuote(prefix + '.txt')}
     """
 }
