@@ -29,13 +29,16 @@ process MOBSUITE_TYPER {
     tuple val(meta), path("*_biomarker_report.txt"), optional: true, emit: biomarker_report
     tuple val(meta), path("*_mge_report.txt"), optional: true, emit: mge_report
     tuple val("${task.process}"), val('mobsuite'), eval("mob_typer --version | sed 's/mob_typer //g'"), topic: versions, emit: versions_mobsuite
+    tuple val("${task.process}"), val(meta), path("${prefix}.MOBSUITE_TYPER.task_command.sh"),
+          val('mob_typer --version'), eval('mob_typer --version'),
+          eval("sha256sum '${prefix}.MOBSUITE_TYPER.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def biomarker_report_cmd = generate_biomarker_report ? "--biomarker_report_file ${prefix}_biomarker_report.txt" : ''
     def mge_report_cmd = generate_mge_report ? "--mge_report_file ${prefix}_mge_report.txt" : ''
     def plasmid_mash_db_cmd = plasmid_mash_db ? "--plasmid_mash_db ${mobsuiteQuote(plasmid_mash_db)}" : ''
@@ -47,6 +50,7 @@ process MOBSUITE_TYPER {
     def plasmid_orit_fas_cmd = plasmid_orit_fas ? "--plasmid_orit ${mobsuiteQuote(plasmid_orit_fas)}" : ''
     def db_cmd = db ? "--database_directory ${mobsuiteQuote(db)}" : ''
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MOBSUITE_TYPER.task_command.sh'
     python3 mobsuite_preflight.py --tool mob_typer --output mobsuite_preflight.json --execute -- \\
         --num_threads ${task.cpus} \\
         --sample_id ${mobsuiteQuote(prefix)} \\
@@ -68,8 +72,9 @@ process MOBSUITE_TYPER {
 
     stub:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MOBSUITE_TYPER.task_command.sh'
     echo ${args}
 
     touch ${prefix}.txt

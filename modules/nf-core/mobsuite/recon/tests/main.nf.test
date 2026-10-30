@@ -13,13 +13,16 @@ nextflow_process {
             process {
                 """
                 input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
-                input[1]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
+                input[1]=[file(params.mobsuite_db.toString(),checkIfExists:true),[schema_version:2,resource_state:'provided']]
+                input[2]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
                 """
             }
         }
         then {
             assert process.success
-            def input=new File(params.mobsuite_bacterial_fasta.toString()).readLines()
+            def fastaPath=System.getenv('MOBSUITE_BACTERIAL_FASTA')
+            assert fastaPath!=null
+            def input=new File(fastaPath).readLines()
             assert input.count { it.startsWith('>') }==1
             def dna=input.findAll { !it.startsWith('>') }.join('')
             assert dna.size()>450000
@@ -37,7 +40,8 @@ nextflow_process {
             process {
                 """
                 input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
-                input[1]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
+                input[1]=[[],[schema_version:2,resource_state:'absent']]
+                input[2]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
                 """
             }
         }

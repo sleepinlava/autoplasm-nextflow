@@ -12,6 +12,7 @@ process MOBSUITE_RECON {
 
     input:
     tuple val(meta), path(fasta)
+    tuple path(db), val(db_identity)
     path(preflight_helper, stageAs: 'mobsuite_preflight.py')
 
     output:
@@ -20,16 +21,21 @@ process MOBSUITE_RECON {
     tuple val(meta), path("results/plasmid_*.fasta")     , emit: plasmids        , optional: true
     tuple val(meta), path("results/mobtyper_results.txt"), emit: mobtyper_results, optional: true
     tuple val("${task.process}"), val('mobsuite'), eval("mob_recon --version 2>&1 | sed 's/.*mob_recon //; s/ .*//'"), emit: versions_mobsuite, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.MOBSUITE_RECON.task_command.sh"),
+          val('mob_recon --version'), eval('mob_recon --version'),
+          eval("sha256sum '${prefix}.MOBSUITE_RECON.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def is_compressed = fasta.getName().endsWith(".gz") ? true : false
     def fasta_name = fasta.getName().replace(".gz", "")
+    def db_cmd = db ? "--database_directory ${mobsuiteQuote(db)}" : ''
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MOBSUITE_RECON.task_command.sh'
     if [ "${is_compressed}" == "true" ]; then
         gzip -c -d ${mobsuiteQuote(fasta)} > ${mobsuiteQuote(fasta_name)}
     fi
@@ -37,6 +43,7 @@ process MOBSUITE_RECON {
     python3 mobsuite_preflight.py --tool mob_recon --output mobsuite_preflight.json --execute -- \\
         --infile ${mobsuiteQuote(fasta_name)} \\
         ${args} \\
+        ${db_cmd} \\
         --num_threads ${task.cpus} \\
         --outdir results \\
         --sample_id ${mobsuiteQuote(prefix)}
@@ -44,6 +51,7 @@ process MOBSUITE_RECON {
 
     stub:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MOBSUITE_RECON.task_command.sh'
     mkdir -p results
 
     touch results/chromosome.fasta

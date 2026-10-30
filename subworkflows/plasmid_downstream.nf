@@ -161,7 +161,7 @@ workflow PLASMID_DOWNSTREAM {
     if (selectedTools(params.annotation_optional_tools).contains('mob_suite')) {
         // Uses the environment DB; native3.1.9 may auto-initialize/download if unprepared.
         // Resource preflight/native validation remain pending; do not launch unprepared.
-        MOB_SUITE_ANNOT(ch_plasmids,Channel.value(file("${moduleDir}/../bin/mobsuite_preflight.py",checkIfExists:true)))
+        MOB_SUITE_ANNOT(ch_plasmids,Channel.value(resourceInput(params.mob_suite_db)),Channel.value(file("${moduleDir}/../bin/mobsuite_preflight.py",checkIfExists:true)))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_SUITE_ANNOT.out], '08_annotation', 'MOB_SUITE_ANNOT'))
     }
     if (selectedTools(params.annotation_optional_tools).contains('rgi')) {
@@ -183,7 +183,7 @@ workflow PLASMID_DOWNSTREAM {
     if (selectedTools(params.plasmid_binning_tools).contains('mob_suite') || selectedTools(params.plasmid_binning_tools).contains('mob_recon')) {
         // Uses the environment DB; native3.1.9 may auto-initialize/download if unprepared.
         // Resource preflight/native validation remain pending; do not launch unprepared.
-        MOB_RECON(ch_plasmids,Channel.value(file("${moduleDir}/../bin/mobsuite_preflight.py",checkIfExists:true)))
+        MOB_RECON(ch_plasmids,Channel.value(resourceInput(params.mob_suite_db)),Channel.value(file("${moduleDir}/../bin/mobsuite_preflight.py",checkIfExists:true)))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_RECON.out], '05_plasmid_binning', 'MOB_RECON'))
     }
     if (selectedTools(params.plasmid_binning_tools).contains('recycler')) {
