@@ -39,6 +39,57 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual(self.collect()['max_k'], 33)
         self.assertEqual(self.collect()['copy_source'], 'K33/assembly_graph.fastg')
 
+    def test_warning_completion_retains_emitted_warnings_without_summary(self):
+        message = '0:00:01  1M WARN General (model.cpp : 12) Threshold set to: 0'
+        self.log.write_text(message + '\n' + message + '\n'
+                            '== Warning == Unrecognized warning remains visible\n'
+                            '===== K33 finished. \n===== Copy files finished. \n'
+                            '======= SPAdes pipeline finished WITH WARNINGS!\n'
+                            ' * ' + message + '\n')
+        result = self.collect()
+        self.assertTrue(result['completed_with_warnings'])
+        self.assertEqual(result['warnings_count'], 3)
+        self.assertEqual(result['warnings'], [message, message,
+                         '== Warning == Unrecognized warning remains visible'])
+        self.assertEqual(result['warning_count_unit'], 'emitted_lines_excluding_summary')
+
+    def test_abnormal_completion_is_not_success(self):
+        self.log.write_text(self.log.read_text().replace(
+            '======= SPAdes pipeline finished.',
+            '======= SPAdes pipeline finished abnormally and WITH WARNINGS!'))
+        with self.assertRaisesRegex(ValueError, 'completion marker'):
+            self.collect()
+
+    def test_old_success_cannot_mask_later_abnormal_completion(self):
+        self.log.write_text(self.log.read_text() +
+                            '======= SPAdes pipeline finished abnormally and WITH WARNINGS!\n')
+        with self.assertRaisesRegex(ValueError, 'completion marker'):
+            self.collect()
+
+    def test_old_success_cannot_mask_incomplete_new_invocation(self):
+        self.log.write_text(self.log.read_text() +
+                            '======= SPAdes pipeline started. Log can be found here: spades.log\n')
+        with self.assertRaisesRegex(ValueError, 'completion marker'):
+            self.collect()
+
+    def test_completion_markers_must_be_lines_in_execution_order(self):
+        for text in [
+            'example: ===== K33 finished.\n===== Copy files finished.\n======= SPAdes pipeline finished.\n',
+            '===== K33 finished.\n===== Copy files finished.\n======= SPAdes pipeline finished.not really\n',
+            '===== Copy files finished.\n===== K33 finished.\n======= SPAdes pipeline finished.\n',
+        ]:
+            with self.subTest(text=text):
+                self.log.write_text(text)
+                with self.assertRaisesRegex(ValueError, 'completion marker'):
+                    self.collect()
+
+    def test_latest_invocation_controls_warning_state(self):
+        self.log.write_text(self.log.read_text() +
+                            '======= SPAdes pipeline started. Log can be found here: spades.log\n'
+                            '===== K33 finished.\n===== Copy files finished.\n'
+                            '======= SPAdes pipeline finished WITH WARNINGS!\n')
+        self.assertTrue(self.collect()['completed_with_warnings'])
+
     def test_graph_mismatch_rejected(self):
         self.export.write_text('>EDGE_1;\nTGCA\n')
         with self.assertRaisesRegex(ValueError, 'bytes mismatch'):

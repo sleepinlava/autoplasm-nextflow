@@ -49,15 +49,37 @@ def collect(assembly_dir, graph, log, plan):
         raise ValueError('graph source is not the main iteration')
     if graph.stat().st_size == 0 or not (digest(source) == digest(target) == digest(graph)):
         raise ValueError('final graph/source/export bytes mismatch or empty graph')
-    log_text = log.read_text()
-    for marker in ['===== K%d finished.' % k, '===== Copy files finished.',
-                   '======= SPAdes pipeline finished.']:
-        if marker not in log_text:
-            raise ValueError('missing assembler completion marker: ' + marker)
+    lines = log.read_text().splitlines()
+    # Continued/appended logs must not borrow completion from an older run.
+    starts = [i for i, line in enumerate(lines)
+              if line.startswith('======= SPAdes pipeline started.')]
+    if starts:
+        lines = lines[starts[-1]:]
+    completions = [i for i, line in enumerate(lines)
+                   if line.startswith('======= SPAdes pipeline finished')]
+    accepted = {'======= SPAdes pipeline finished.': False,
+                '======= SPAdes pipeline finished WITH WARNINGS!': True}
+    if not completions or lines[completions[-1]].strip() not in accepted:
+        raise ValueError('missing assembler completion marker: ======= SPAdes pipeline finished')
+    finished = completions[-1]
+    warnings_completed = accepted[lines[finished].strip()]
+    previous = -1
+    for marker in ['===== K%d finished.' % k, '===== Copy files finished.']:
+        positions = [i for i in range(previous + 1, finished) if lines[i].strip() == marker]
+        if not positions:
+            raise ValueError('missing or out-of-order assembler completion marker: ' + marker)
+        previous = positions[-1]
+    # These are execution markers, not assembly-quality approval. Keep all
+    # emitted warning lines, including repeated warnings in different K stages;
+    # do not count the terminal banner or SPAdes' repeated summary as warnings.
+    warnings = [line for line in lines[:finished] if not line.startswith(' * ')
+                and ('== Warning == ' in line or re.search(r'\bWARN\s', line))]
     return {'schema': 1, 'producer': 'spades', 'version': '4.1.0', 'max_k': k,
             'graph_sha256': digest(graph), 'graph_file': graph.name,
             'copy_source': str(source.relative_to(assembly_dir)),
-            'config_sha256': digest(config), 'log_sha256': digest(log)}
+            'config_sha256': digest(config), 'log_sha256': digest(log),
+            'completed_with_warnings': warnings_completed, 'warnings_count': len(warnings),
+            'warning_count_unit': 'emitted_lines_excluding_summary', 'warnings': warnings}
 
 
 def load_plan(path):
