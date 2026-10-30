@@ -7,9 +7,20 @@ nextflow_process {
     script "../main.nf"
     process "MEDAKA"
 
+    setup {
+        def fixtureParams = System.getenv('MEDAKA_TEST_PARAMS')
+        assert fixtureParams: 'MEDAKA_TEST_PARAMS must name the reviewed complete bacterial fixture JSON'
+        loadParams(fixtureParams)
+        assert params.medaka_bacterial_reads
+        assert params.medaka_bacterial_assembly
+        assert params.medaka_bacterial_expected_fasta
+        assert params.medaka_runtime_receipt
+        assert params.medaka_runtime_helpers
+    }
+
     // User excludes viral elements. All three fixture paths must come from
-    // a complete reviewed bacterial ONT case and an independent full reference.
-    // Native prepared case remains required and unexecuted.
+    // a complete reviewed bacterial ONT case and a full original-CLI software
+    // reference. A same-sample polished draft is not biological ground truth.
     test("Medaka - complete bacterial prepared case") {
 
         tag "medaka-native-prepared"
@@ -20,8 +31,11 @@ nextflow_process {
                 input[0] = [
                     [ id:'test', single_end:true ], // meta map
                     file(params.medaka_bacterial_reads, checkIfExists: true),
-                    file(params.medaka_bacterial_assembly, checkIfExists: true)
+                    file(params.medaka_bacterial_assembly, checkIfExists: true),
+                    new groovy.json.JsonSlurper().parseText(file(params.medaka_runtime_receipt).text),
+                    file(params.medaka_runtime_receipt,checkIfExists:true)
                 ]
+                input[1] = params.medaka_runtime_helpers.collect { file(it,checkIfExists:true) }
                 """
             }
         }
@@ -30,12 +44,30 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 {
-                    def expected = new File(params.medaka_bacterial_expected_fasta.toString()).readLines()
-                    assert expected.any { it.startsWith('>') }
-                    assert expected.findAll { !it.startsWith('>') }.join('').size() > 0
-                    // Exact complete reference, including sequence IDs and DNA;
-                    // no first-100-base or automatically re-recorded snapshot.
-                    assert path(process.out.assembly[0][1]).linesGzip == expected
+                    // Observed native runs emitted contigs in different orders.
+                    // Compare every full header and base, rejecting duplicate IDs,
+                    // empty records and sequence before the first header.
+                    def records = { lines ->
+                        def result = [:]
+                        def ids = [] as Set
+                        def header = null
+                        lines.each { line ->
+                            if (line.startsWith('>')) {
+                                def id = line.substring(1).tokenize().first()
+                                assert ids.add(id): "Duplicate FASTA ID: ${id}"
+                                header = line
+                                result[header] = new StringBuilder()
+                            } else {
+                                assert header != null
+                                result[header].append(line)
+                            }
+                        }
+                        assert !result.isEmpty()
+                        assert result.values().every { it.length() > 0 }
+                        result.collectEntries { key, value -> [key, value.toString()] }
+                    }
+                    def expected = records(new File(params.medaka_bacterial_expected_fasta.toString()).readLines())
+                    assert records(path(process.out.assembly[0][1]).linesGzip) == expected
                     assert process.out.versions_medaka[0][2] == '2.2.2'
                 }
             )
@@ -55,8 +87,11 @@ nextflow_process {
                 input[0] = [
                     [ id:'test', single_end:true ], // meta map
                     file(params.medaka_bacterial_reads, checkIfExists: true),
-                    file(params.medaka_bacterial_assembly, checkIfExists: true)
+                    file(params.medaka_bacterial_assembly, checkIfExists: true),
+                    new groovy.json.JsonSlurper().parseText(file(params.medaka_runtime_receipt).text),
+                    file(params.medaka_runtime_receipt,checkIfExists:true)
                 ]
+                input[1] = params.medaka_runtime_helpers.collect { file(it,checkIfExists:true) }
                 """
             }
         }

@@ -19,7 +19,8 @@ include { NANOPLOT } from '../modules/nf-core/nanoplot/main'
 include { FILTLONG } from '../modules/nf-core/filtlong/main'
 include { MULTIQC } from '../modules/nf-core/multiqc/main'
 include { FLYE as METAFLYE } from '../modules/nf-core/flye/main'
-include { MEDAKA } from '../modules/nf-core/medaka/main'
+include { MEDAKA; MEDAKA_RESOURCE_PROBE } from '../modules/nf-core/medaka/main'
+include { medakaResourceRecord } from '../lib/medaka_runtime'
 include { QUAST } from '../modules/nf-core/quast/main'
 include { CONTIG_COVERAGE } from './contig_coverage'
 include { PLASMID_DETECTION } from './plasmid_detection'
@@ -68,8 +69,15 @@ workflow ONT {
     ch_report_events = ch_report_events.mix(reportEvidence([channels: METAFLYE.out], '02_assembly', 'METAFLYE'))
     ch_assembly = METAFLYE.out.fasta
     if (selectedTools(params.polishing_tools).contains('medaka')) {
-        // nf-core medaka takes (meta, reads, assembly) — note the order.
-        MEDAKA(ch_final_long.join(METAFLYE.out.fasta))
+        ch_medaka_inputs = ch_final_long.join(METAFLYE.out.fasta,failOnDuplicate:true,failOnMismatch:true)
+        ch_medaka_helpers = Channel.value(['medaka_runtime_resources.py','medaka_model_resources.py',
+                                          'medaka_model_selection.py','medaka_index_resources.py'].collect {
+            file("${moduleDir}/../bin/${it}",checkIfExists:true)
+        })
+        MEDAKA_RESOURCE_PROBE(ch_medaka_inputs,ch_medaka_helpers)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels: MEDAKA_RESOURCE_PROBE.out], '02_assembly', 'MEDAKA_RESOURCE_PROBE'))
+        ch_medaka_identity = MEDAKA_RESOURCE_PROBE.out.identity.map { meta,receipt -> medakaResourceRecord(meta,receipt) }
+        MEDAKA(ch_medaka_inputs.join(ch_medaka_identity,failOnDuplicate:true,failOnMismatch:true),ch_medaka_helpers)
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MEDAKA.out], '02_assembly', 'MEDAKA'))
         ch_assembly = MEDAKA.out.assembly
     }
