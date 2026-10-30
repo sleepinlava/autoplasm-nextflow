@@ -6,6 +6,7 @@
  * not used as workflow inputs.
  */
 process PLASMID_CATALOG_PREPARE {
+    cache 'deep'
     tag 'catalog_prepare'
     label 'process_single'
     conda "${projectDir}/envs/r_analysis.yml"
@@ -16,9 +17,15 @@ process PLASMID_CATALOG_PREPARE {
 
     input:
     path contigs
+    path catalogue_builder, stageAs: 'plasmid_catalog_prepare.R'
 
     output:
     path "plasmid_catalog_input.fasta", emit: combined
+    path "catalogue_samples.tsv", emit: samples
+    tuple val("${task.process}"), path('PLASMID_CATALOG_PREPARE.task_command.sh'),
+          val('Rscript --version'), eval('Rscript --version'),
+          eval("sha256sum 'PLASMID_CATALOG_PREPARE.task_command.sh'"),
+          eval("cut -f1 catalogue_samples.tsv | tail -n +2 | paste -sd, -"), emit: cohort_provenance
 
     script:
     def files = (contigs in List ? contigs : [contigs])
@@ -28,8 +35,9 @@ process PLASMID_CATALOG_PREPARE {
     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
     def contigArgs = files.collect { shellQuote.call(it) }.join(' ')
     """
-    plasmid_catalog_prepare.R \\
+    cp -- "\${BASH_SOURCE[0]}" 'PLASMID_CATALOG_PREPARE.task_command.sh'
+    Rscript ${catalogue_builder} \\
         --contigs ${contigArgs} \\
-        --out plasmid_catalog_input.fasta
+        --out plasmid_catalog_input.fasta --out-samples catalogue_samples.tsv
     """
 }

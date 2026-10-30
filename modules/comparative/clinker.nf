@@ -15,9 +15,13 @@ process CLINKER {
 
     output:
     tuple val(meta), path("${meta.id}.clinker.html"), emit: html
+    tuple val("${task.process}"), val(meta), path("${meta.id}.CLINKER.task_command.sh"),
+          val('clinker --version'), eval('clinker --version'),
+          eval("sha256sum '${meta.id}.CLINKER.task_command.sh'"), emit: task_provenance
 
     script:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CLINKER.task_command.sh'
     clinker ${bakta_dir}/*.gbff -p ${meta.id}.clinker.html
     """
 }

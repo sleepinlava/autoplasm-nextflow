@@ -32,12 +32,18 @@ workflow COMPARATIVE {
             .map { meta, fasta -> fasta }
             .collect()
             .filter { files -> !files.isEmpty() }
-        PLASMID_CATALOG_PREPARE(ch_catalog_files)
+        PLASMID_CATALOG_PREPARE(ch_catalog_files,
+            file("${moduleDir}/../bin/plasmid_catalog_prepare.R", checkIfExists:true))
         ch_report_events = ch_report_events.mix(reportEvidence([channels: PLASMID_CATALOG_PREPARE.out], '09_comparative_genomics', 'PLASMID_CATALOG_PREPARE'))
         // The nf-core module takes a meta-tagged sequence channel; the meta id
         // doubles as the easy-cluster output prefix, so published file names
         // stay plasmid_catalog_cluster.tsv / plasmid_catalog_rep_seq.fasta.
-        MMSEQS2(PLASMID_CATALOG_PREPARE.out.combined.map { fasta -> tuple([id: 'plasmid_catalog'], fasta) })
+        ch_catalog_domain = PLASMID_CATALOG_PREPARE.out.samples
+            .splitCsv(header:true, sep:'\t').map { row -> row.sample_id }.toList()
+            .map { ids -> [samples: ids] }
+        MMSEQS2(PLASMID_CATALOG_PREPARE.out.combined.combine(ch_catalog_domain).map { fasta, domain ->
+            tuple([id:'plasmid_catalog', cohort:true, cohort_samples:domain.samples], fasta)
+        })
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MMSEQS2.out], '09_comparative_genomics', 'MMSEQS2'))
     }
     if (selectedTools(params.comparative_optional_tools).contains('blast')) {

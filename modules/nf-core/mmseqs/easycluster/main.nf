@@ -15,6 +15,9 @@ process MMSEQS_EASYCLUSTER {
     tuple val(meta), path("*all_seqs.fasta"), emit: fasta
     tuple val(meta), path("*.tsv"), emit: tsv
     tuple val("${task.process}"), val('mmseqs'), eval('mmseqs version'), topic: versions, emit: versions_mmseqs
+    tuple val("${task.process}"), val(meta), path("${meta.id}.MMSEQS_EASYCLUSTER.task_command.sh"),
+          val('mmseqs version'), eval('mmseqs version'),
+          eval("sha256sum '${meta.id}.MMSEQS_EASYCLUSTER.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -23,6 +26,7 @@ process MMSEQS_EASYCLUSTER {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.MMSEQS_EASYCLUSTER.task_command.sh'
     mmseqs \\
         easy-cluster \\
         ${sequence} \\
@@ -37,6 +41,7 @@ process MMSEQS_EASYCLUSTER {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.MMSEQS_EASYCLUSTER.task_command.sh'
     echo ${args}
 
     touch ${prefix}.tsv

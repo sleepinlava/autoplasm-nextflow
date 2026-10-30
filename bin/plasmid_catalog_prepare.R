@@ -137,6 +137,7 @@ main <- function() {
   spec <- list(
     contigs = list(mode = "multi", required = TRUE, default = NULL),
     out = list(mode = "single", required = TRUE, default = NULL),
+    out_samples = list(mode = "single", default = NULL),
     min_length = list(mode = "single", default = "0")
   )
   args <- parse_cli(commandArgs(trailingOnly = TRUE), spec)
@@ -148,9 +149,11 @@ main <- function() {
   paths <- sort(as.character(args$contigs), method = "radix")
   seen <- new.env(hash = TRUE, parent = emptyenv())
   records <- list()
+  samples <- character(0)
   skipped <- 0L
   for (path in paths) {
     sample <- infer_sample_id(path)
+    samples <- c(samples, sample)
     for (rec in read_fasta_records(path)) {
       if (min_length > 0L && nchar(rec$seq) < min_length) {
         skipped <- skipped + 1L
@@ -167,6 +170,9 @@ main <- function() {
   }
 
   out <- args$out
+  if (!is.null(args$out_samples) &&
+      normalizePath(args$out_samples, mustWork = FALSE) == normalizePath(out, mustWork = FALSE))
+    die("Catalog and sample manifest must have distinct output paths")
   out_dir <- dirname(out)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   tmp <- tempfile(pattern = paste0(".", basename(out), "."), tmpdir = out_dir,
@@ -175,6 +181,13 @@ main <- function() {
     seqs <- BStringSet(vapply(records, function(r) r$seq, character(1)))
     names(seqs) <- vapply(records, function(r) r$header, character(1))
     writeXStringSet(seqs, tmp, width = 80L)
+    if (!is.null(args$out_samples)) {
+      dir.create(dirname(args$out_samples), recursive = TRUE, showWarnings = FALSE)
+      samples_tmp <- tempfile(pattern = ".catalog_samples.", tmpdir = dirname(args$out_samples))
+      on.exit(unlink(samples_tmp), add = TRUE)
+      writeLines(c("sample_id", unique(samples)), samples_tmp, useBytes = TRUE)
+      if (!file.rename(samples_tmp, args$out_samples)) die(paste0("Cannot write samples ", args$out_samples))
+    }
     if (!file.rename(tmp, out)) die(paste0("Cannot write catalog ", out))
   }, error = function(e) {
     unlink(tmp)

@@ -16,6 +16,7 @@ nextflow_process {
             process {
                 """
                 input[0] = [ file("${System.getenv('AUTOPLASM_TEST_DATA')}/pUTI89.plasmid_contigs.fasta", checkIfExists: true) ]
+                input[1] = file("${new File('bin/plasmid_catalog_prepare.R').absolutePath}", checkIfExists: true)
                 """
             }
         }
@@ -27,6 +28,8 @@ nextflow_process {
             assert lines.count { it.startsWith('>') } == 1
             assert lines[0] == '>pUTI89|NC_007941.1'
             assert lines.drop(1).join().replaceAll(/\s/, '').length() == 114230
+            assert path(process.out.samples[0]).text.readLines() == ['sample_id', 'pUTI89']
+            assert process.out.cohort_provenance[0][5] == 'pUTI89'
         }
     }
 }

@@ -18,6 +18,9 @@ process BLAST_BLASTN {
     output:
     tuple val(meta), path('*.txt'), emit: txt
     tuple val("${task.process}"), val("blastn"), eval("blastn -version 2>&1 | sed 's/^.*blastn: //; s/ .*\$//'"), topic: versions, emit: versions_blastn
+    tuple val("${task.process}"), val(meta), path("${meta.id}.BLAST_BLASTN.task_command.sh"),
+          val('blastn -version'), eval('blastn -version'),
+          eval("sha256sum '${meta.id}.BLAST_BLASTN.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -35,6 +38,7 @@ process BLAST_BLASTN {
     }
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.BLAST_BLASTN.task_command.sh'
     if [ "${is_compressed}" == "true" ]; then
         gzip -c -d ${fasta} > ${fasta_name}
     fi
@@ -61,6 +65,7 @@ process BLAST_BLASTN {
     stub:
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.BLAST_BLASTN.task_command.sh'
     touch ${prefix}.txt
 
     """

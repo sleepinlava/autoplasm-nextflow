@@ -18,9 +18,14 @@ class CatalogPrepareTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def run_cli(self, *paths):
+    def run_cli(self, *paths, sample_manifest=None, min_length=None):
+        extra = []
+        if sample_manifest is not None:
+            extra += ['--out-samples', str(sample_manifest)]
+        if min_length is not None:
+            extra += ['--min-length', str(min_length)]
         return subprocess.run(
-            ["Rscript", str(SCRIPT), "--contigs", *map(str, paths), "--out", str(self.out)],
+            ["Rscript", str(SCRIPT), "--contigs", *map(str, paths), "--out", str(self.out), *extra],
             text=True, capture_output=True, check=False,
         )
 
@@ -61,6 +66,31 @@ class CatalogPrepareTests(unittest.TestCase):
         result = self.run_cli(empty, good)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.out.read_text().splitlines(), [">S1|contig_1", "ACGTACGT"])
+
+    def test_sample_manifest_retains_empty_filtered_and_literal_ids(self):
+        inputs = [self.fasta('001.plasmid_contigs.fasta', ''),
+                  self.fasta('1.plasmid_contigs.fasta', '>short\nACGT\n'),
+                  self.fasta('NA.plasmid_contigs.fasta', '>long\nACGTACGT\n')]
+        manifest = self.root / 'samples.tsv'
+        result = self.run_cli(*inputs, sample_manifest=manifest, min_length=8)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(manifest.read_text().splitlines(), ['sample_id', '001', '1', 'NA'])
+        self.assertEqual(self.out.read_text().splitlines(), ['>NA|long', 'ACGTACGT'])
+
+    def test_multiple_files_for_one_sample_do_not_duplicate_manifest_members(self):
+        inputs = [self.fasta('S1.plasmid_contigs.fasta', '>a\nACGT\n'),
+                  self.fasta('S1__plasmid_contigs.fasta', '>b\nACGT\n')]
+        manifest = self.root / 'samples.tsv'
+        result = self.run_cli(*inputs, sample_manifest=manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(manifest.read_text().splitlines(), ['sample_id', 'S1'])
+
+    def test_sample_manifest_cannot_replace_sequence_output(self):
+        source = self.fasta('S1.plasmid_contigs.fasta')
+        result = self.run_cli(source, sample_manifest=self.out)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('distinct output paths', result.stderr)
+        self.assertFalse(self.out.exists())
 
     def test_empty_and_invalid_sample_names_fail_without_partial_output(self):
         cases = [".plasmid_contigs.fasta", "__plasmid_contigs.fasta", "bad id.plasmid_contigs.fasta",
