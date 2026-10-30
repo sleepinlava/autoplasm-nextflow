@@ -17,19 +17,23 @@ process SAMTOOLS_FASTQ {
     tuple val(meta), path("*_singleton.fastq.gz"), optional: true, emit: singleton
     tuple val(meta), path("*_other.fastq.gz"), optional: true, emit: other
     tuple val("${task.process}"), val('samtools'), eval("samtools version | sed '1!d;s/.* //'"), emit: versions_samtools, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.SAMTOOLS_FASTQ.task_command.sh"),
+          val('samtools --version'), eval('samtools --version'),
+          eval("sha256sum '${prefix}.SAMTOOLS_FASTQ.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def output = interleave && !meta.single_end
         ? "> ${prefix}_interleaved.fastq"
         : meta.single_end
             ? "-1 ${prefix}_1.fastq.gz -s ${prefix}_singleton.fastq.gz"
             : "-1 ${prefix}_1.fastq.gz -2 ${prefix}_2.fastq.gz -s ${prefix}_singleton.fastq.gz"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_FASTQ.task_command.sh'
     # Note: --threads value represents *additional* CPUs to allocate (total CPUs = 1 + --threads).
     samtools \\
         fastq \\
@@ -41,7 +45,7 @@ process SAMTOOLS_FASTQ {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def output_command = interleave && !meta.single_end
         ? "touch ${prefix}_interleaved.fastq"
         : meta.single_end
@@ -49,6 +53,7 @@ process SAMTOOLS_FASTQ {
             : "echo | bgzip -c > ${prefix}_1.fastq.gz && echo | bgzip -c > ${prefix}_2.fastq.gz && echo | bgzip -c > ${prefix}_singleton.fastq.gz"
     def other_command = "echo | bgzip -c > ${prefix}_other.fastq.gz"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_FASTQ.task_command.sh'
     ${output_command}
     ${other_command}
     """

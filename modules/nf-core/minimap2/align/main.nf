@@ -21,6 +21,9 @@ process MINIMAP2_ALIGN {
     tuple val(meta), path("*.bam")                       , optional: true, emit: bam
     tuple val(meta), path("*.bam.${bam_index_extension}"), optional: true, emit: index
     tuple val("${task.process}"), val("minimap2"), eval("minimap2 --version"), topic: versions, emit: versions_minimap2
+    tuple val("${task.process}"), val(meta), path("${prefix}.MINIMAP2_ALIGN.task_command.sh"),
+          val('minimap2 --version'), eval('minimap2 --version'),
+          eval("sha256sum '${prefix}.MINIMAP2_ALIGN.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -30,7 +33,7 @@ process MINIMAP2_ALIGN {
     def args2 = task.ext.args2 ?: ''
     def args3 = task.ext.args3 ?: ''
     def args4 = task.ext.args4 ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def bam_index = bam_index_extension ? "${prefix}.bam##idx##${prefix}.bam.${bam_index_extension} --write-index" : "${prefix}.bam"
     def bam_output = bam_format ? "-a | samtools sort -@ ${task.cpus-1} -o ${bam_index} ${args2}" : "-o ${prefix}.paf"
     def cigar_paf = cigar_paf_format && !bam_format ? "-c" : ''
@@ -40,6 +43,7 @@ process MINIMAP2_ALIGN {
     def query = bam_input ? "-" : reads
     def target = reference ?: (bam_input ? error("Error: minimap2/align BAM input mode requires reference") : reads)
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MINIMAP2_ALIGN.task_command.sh'
     # Local audit patch: do not accept a valid downstream BAM if an upstream
     # mapper/reset/FASTQ command failed after writing some output.
     set -o pipefail
@@ -55,7 +59,7 @@ process MINIMAP2_ALIGN {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def output_file = bam_format ? "${prefix}.bam" : "${prefix}.paf"
     def bam_index = bam_index_extension ? "touch ${prefix}.bam.${bam_index_extension}" : ""
     def bam_input = "${reads.extension}".matches('sam|bam|cram')
@@ -63,6 +67,7 @@ process MINIMAP2_ALIGN {
         error("Error: minimap2/align BAM input mode requires reference!")
 	}
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MINIMAP2_ALIGN.task_command.sh'
     touch $output_file
     ${bam_index}
     """

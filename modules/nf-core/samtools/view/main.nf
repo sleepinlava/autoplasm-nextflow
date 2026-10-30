@@ -24,6 +24,9 @@ process SAMTOOLS_VIEW {
     tuple val(meta), path("${prefix}.unselected.${file_type}"), emit: unselected, optional: true
     tuple val(meta), path("${prefix}.unselected.${file_type}.{csi,crai}"), emit: unselected_index, optional: true
     tuple val("${task.process}"), val('samtools'), eval('samtools version | sed "1!d;s/.* //"'), emit: versions_samtools, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.SAMTOOLS_VIEW.task_command.sh"),
+          val('samtools --version'), eval('samtools --version'),
+          eval("sha256sum '${prefix}.SAMTOOLS_VIEW.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -58,6 +61,7 @@ process SAMTOOLS_VIEW {
         }
     }
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_VIEW.task_command.sh'
     # Note: --threads value represents *additional* CPUs to allocate (total CPUs = 1 + --threads).
     samtools \\
         view \\
@@ -101,6 +105,7 @@ process SAMTOOLS_VIEW {
         }
     }
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_VIEW.task_command.sh'
     touch ${prefix}.${file_type}
     ${index}
     ${unselected}

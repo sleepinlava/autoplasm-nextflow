@@ -25,6 +25,9 @@ process BOWTIE2_ALIGN {
     tuple val("${task.process}"), val('bowtie2'), eval("bowtie2 --version 2>&1 | sed -n 's/.*bowtie2-align-s version //p'"), emit: versions_bowtie2, topic: versions
     tuple val("${task.process}"), val('samtools'), eval("samtools version | sed '1!d;s/.* //'"), emit: versions_samtools, topic: versions
     tuple val("${task.process}"), val('pigz'), eval("pigz --version 2>&1 | sed 's/pigz //'"), emit: versions_pigz, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.BOWTIE2_ALIGN.task_command.sh"),
+          val('bowtie2 --version'), eval('bowtie2 --version'),
+          eval("sha256sum '${prefix}.BOWTIE2_ALIGN.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -32,7 +35,7 @@ process BOWTIE2_ALIGN {
     script:
     def args = task.ext.args ?: ""
     def args2 = task.ext.args2 ?: ""
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def rg = args.contains("--rg-id") ? "" : "--rg-id ${prefix} --rg SM:${prefix}"
 
     def unaligned = ""
@@ -53,6 +56,7 @@ process BOWTIE2_ALIGN {
     if (!fasta && extension=="cram") error "Fasta reference is required for CRAM output"
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.BOWTIE2_ALIGN.task_command.sh'
     INDEX=`find -L ./ -name "*.rev.1.bt2" | sed "s/\\.rev.1.bt2\$//"`
     [ -z "\$INDEX" ] && INDEX=`find -L ./ -name "*.rev.1.bt2l" | sed "s/\\.rev.1.bt2l\$//"`
     [ -z "\$INDEX" ] && echo "Bowtie2 index files not found" 1>&2 && exit 1
@@ -78,7 +82,7 @@ process BOWTIE2_ALIGN {
 
     stub:
     def args2 = task.ext.args2 ?: ""
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def extension_pattern = /(--output-fmt|-O)+\s+(\S+)/
     def extension = (args2 ==~ extension_pattern) ? (args2 =~ extension_pattern)[0][2].toLowerCase() : "bam"
     def create_unmapped = ""
@@ -97,6 +101,7 @@ process BOWTIE2_ALIGN {
     }
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.BOWTIE2_ALIGN.task_command.sh'
     touch ${prefix}.${extension}
     ${create_index}
     touch ${prefix}.bowtie2.log

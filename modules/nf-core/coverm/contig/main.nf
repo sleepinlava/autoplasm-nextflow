@@ -22,13 +22,16 @@ process COVERM_CONTIG {
     tuple val(meta), path('*.tsv')   , emit: coverage
     tuple val(meta), path('*.bam')   , emit: bam, optional: true
     tuple val("${task.process}"), val('coverm'), eval('coverm --version | sed "s/coverm //"'), emit: versions_coverm, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.COVERM_CONTIG.task_command.sh"),
+          val('coverm --version'), eval('coverm --version'),
+          eval("sha256sum '${prefix}.COVERM_CONTIG.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args           = task.ext.args ?: ""
-    def prefix         = task.ext.prefix ?: "${meta.id}"
+    prefix         = task.ext.prefix ?: "${meta.id}"
     def suffix         = task.ext.suffix ?: ".depth.tsv"
     def fastq_input    = meta.single_end ? "--single" : interleaved ? "--interleaved" : "--coupled"
     def input_type     = bam_input ? "--bam-files" : "${fastq_input}"
@@ -36,6 +39,7 @@ process COVERM_CONTIG {
     def reference_str  = bam_input ? "" : "--reference ${reference}"
     def bam_output_str = enable_bam_output ? "--bam-file-cache-directory _bam_cache/" : ""
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.COVERM_CONTIG.task_command.sh'
     TMPDIR=.
 
     coverm contig \\
@@ -50,9 +54,10 @@ process COVERM_CONTIG {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def suffix = task.ext.suffix ?: ".depth.tsv"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.COVERM_CONTIG.task_command.sh'
     touch ${prefix}${suffix}
     touch ${prefix}.bam
     """

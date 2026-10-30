@@ -18,6 +18,9 @@ process SAMTOOLS_SORT {
     tuple val(meta), path("${prefix}.sam"), emit: sam, optional: true
     tuple val(meta), path("${prefix}.${extension}.{crai,csi,bai}"), emit: index, optional: true
     tuple val("${task.process}"), val('samtools'), eval("samtools version | sed '1!d;s/.* //'"), topic: versions, emit: versions_samtools
+    tuple val("${task.process}"), val(meta), path("${prefix}.SAMTOOLS_SORT.task_command.sh"),
+          val('samtools --version'), eval('samtools --version'),
+          eval("sha256sum '${prefix}.SAMTOOLS_SORT.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -60,6 +63,7 @@ process SAMTOOLS_SORT {
     def pre_command = is_sam ? "" : "samtools cat ${bam} | "
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_SORT.task_command.sh'
     ${pre_command}samtools sort \\
         ${args} \\
         -T ${prefix} \\
@@ -91,6 +95,7 @@ process SAMTOOLS_SORT {
     index = index_format ? "touch ${prefix}.${extension}.${index_format}" : ""
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_SORT.task_command.sh'
     touch ${prefix}.${extension}
     ${index}
     """

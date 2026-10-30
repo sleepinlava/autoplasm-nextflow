@@ -13,6 +13,10 @@ process BOWTIE2_BUILD {
     output:
     tuple val(meta), path('bowtie2')    , emit: index
     tuple val("${task.process}"), val('bowtie2'), eval("bowtie2 --version 2>&1 | sed -n 's/.*bowtie2-align-s version //p'"), emit: versions_bowtie2, topic: versions
+    tuple val("${task.process}"), val(meta), path("${meta.id}.BOWTIE2_BUILD.task_command.sh"),
+          val('bowtie2 --version'), eval('bowtie2 --version 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.BOWTIE2_BUILD.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -20,13 +24,14 @@ process BOWTIE2_BUILD {
     script:
     def args = task.ext.args ?: ''
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.BOWTIE2_BUILD.task_command.sh'
     mkdir bowtie2
     bowtie2-build $args --threads $task.cpus $fasta bowtie2/${fasta.baseName}
     """
 
     stub:
     """
-    mkdir bowtie2
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.BOWTIE2_BUILD.task_command.sh'
     touch bowtie2/${fasta.baseName}.{1..4}.bt2
     touch bowtie2/${fasta.baseName}.rev.{1,2}.bt2
     """

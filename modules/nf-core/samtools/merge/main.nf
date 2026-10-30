@@ -17,6 +17,9 @@ process SAMTOOLS_MERGE {
     tuple val(meta), path("${prefix}.cram"), optional: true, emit: cram
     tuple val(meta), path("${prefix}.${file_type}.{bai,crai,csi}"), optional: true, emit: index
     tuple val("${task.process}"), val('samtools'), eval("samtools version | sed '1!d;s/.* //'"), topic: versions, emit: versions_samtools
+    tuple val("${task.process}"), val(meta), path("${prefix}.SAMTOOLS_MERGE.task_command.sh"),
+          val('samtools --version'), eval('samtools --version'),
+          eval("sha256sum '${prefix}.SAMTOOLS_MERGE.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -39,6 +42,7 @@ process SAMTOOLS_MERGE {
         output_file = "${prefix}.${file_type}##idx##${prefix}.${file_type}.${index_format}"
     }
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_MERGE.task_command.sh'
     # Note: --threads value represents *additional* CPUs to allocate (total CPUs = 1 + --threads).
     samtools \\
         merge \\
@@ -63,6 +67,7 @@ process SAMTOOLS_MERGE {
     def index = index_format ? "touch ${prefix}.${file_type}.${index_format}" : ""
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_MERGE.task_command.sh'
     touch ${prefix}.${file_type}
     ${index}
     """
