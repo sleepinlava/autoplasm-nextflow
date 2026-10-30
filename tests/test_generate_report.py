@@ -216,6 +216,61 @@ class GenerateReportTests(unittest.TestCase):
         self.records.append(self.records[-1].copy())
         self.assert_rejected('Duplicate runtime command identity')
 
+    def cohort_record(self, members):
+        self.sample('001', 0, 0, 'genomad')
+        command = self.root / 'cohort_command.sh'
+        command.write_text('#!/bin/bash -ue\nprintf "controlled cohort\\n"\n')
+        record = {'section': '11_diversity', 'producer': 'CONTROL', 'kind': 'runtime_command',
+                  'cohort': True, 'cohort_samples': members,
+                  'sample_id': 'cohort:DIVERSITY', 'analysis_sample_id': 'cohort:DIVERSITY',
+                  'task_process': 'DIVERSITY', 'files': [str(command)],
+                  'script_sha256': hashlib.sha256(command.read_bytes()).hexdigest(),
+                  'runtime_probe': {'command': 'Rscript --version', 'stdout': 'R version 4.4'}}
+        self.records.append(record)
+        return command, record
+
+    def test_cohort_runtime_command_with_full_domain_is_accepted(self):
+        command, record = self.cohort_record(['001'])
+        data = self.run_report()
+        result, = data['runtime_commands']
+        self.assertEqual(result['sample_id'], 'cohort:DIVERSITY')
+        self.assertEqual(result['script_sha256'], hashlib.sha256(command.read_bytes()).hexdigest())
+        self.assertTrue(result['cohort'])
+        self.assertEqual(result['cohort_samples'], ['001'])
+        self.assertIn('cohort samples: 001', data['methods'])
+
+    def test_cohort_subset_and_literal_ids_are_preserved(self):
+        self.cohort_record(['001', 'NA'])
+        self.sample('1', 0, 0, 'controlled')
+        self.sample('NA', 0, 0, 'controlled')
+        result, = self.run_report()['runtime_commands']
+        self.assertEqual(result['cohort_samples'], ['001', 'NA'])
+
+    def test_cohort_duplicate_or_nonstring_members_are_rejected(self):
+        _, record = self.cohort_record(['001'])
+        self.sample('1', 0, 0, 'controlled')
+        for members in [['001', '001'], [1], {'member': '001'}, '001', [None]]:
+            with self.subTest(members=members):
+                record['cohort_samples'] = members
+                self.assert_rejected('Invalid cohort runtime command sample domain')
+
+    def test_cohort_identity_must_match_its_process(self):
+        _, record = self.cohort_record(['001'])
+        for field in ['sample_id', 'analysis_sample_id']:
+            for value in [None, '', [], 'cohort:OTHER']:
+                with self.subTest(field=field, value=value):
+                    record[field] = value
+                    self.assert_rejected('Invalid cohort runtime command identity')
+            record[field] = 'cohort:DIVERSITY'
+
+    def test_cohort_runtime_command_with_empty_domain_is_rejected(self):
+        self.cohort_record([])
+        self.assert_rejected('Invalid cohort runtime command sample domain')
+
+    def test_cohort_runtime_command_with_unknown_member_is_rejected(self):
+        self.cohort_record(['001', 'unknown_sample'])
+        self.assert_rejected('Invalid cohort runtime command sample domain')
+
 
 if __name__ == "__main__":
     unittest.main()

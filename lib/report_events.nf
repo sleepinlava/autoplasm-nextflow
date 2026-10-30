@@ -12,14 +12,37 @@ def reportValue(value) {
 def reportEvidence(recordedOutputs, section, producer) {
     def outputs = recordedOutputs.channels
     def streams = outputs.getNames().collect { outputName ->
-        if (outputName == 'task_provenance') {
-            return outputs.getProperty(outputName).map { process, meta, command, probe, stdout, checksum ->
-                def original = meta.gplas_original_meta ?: meta
-                tuple([section: section, producer: producer, kind: 'runtime_command',
-                       task_process: process.toString(), sample_id: original.id.toString(),
-                       analysis_sample_id: meta.id.toString(),
+        if (outputName == 'cohort_provenance') {
+            return outputs.getProperty(outputName).map { process, command, probe, stdout, checksum, cohort_csv ->
+                def members = cohort_csv.toString().trim() ? cohort_csv.toString().trim().split(',') as List : []
+                tuple([section: section, producer: producer, kind: 'runtime_command', cohort: true,
+                       task_process: process.toString(),
+                       sample_id: 'cohort:' + process.toString(),
+                       analysis_sample_id: 'cohort:' + process.toString(),
+                       cohort_samples: members,
                        script_sha256: checksum.toString().tokenize()[0],
                        runtime_probe: [command: probe.toString(), stdout: stdout.toString()]], [command])
+            }
+        }
+        if (outputName == 'task_provenance') {
+            return outputs.getProperty(outputName).map { process, meta, command, probe, stdout, checksum ->
+                def is_cohort = meta.cohort == true
+                def original = meta.gplas_original_meta ?: meta
+                def record = [section: section, producer: producer, kind: 'runtime_command',
+                              task_process: process.toString(),
+                              script_sha256: checksum.toString().tokenize()[0],
+                              runtime_probe: [command: probe.toString(), stdout: stdout.toString()]]
+                if (is_cohort) {
+                    def members = meta.cohort_samples
+                    record['sample_id'] = 'cohort:' + process.toString()
+                    record['analysis_sample_id'] = 'cohort:' + process.toString()
+                    record['cohort'] = true
+                    record['cohort_samples'] = members instanceof Collection ? members.collect { it.toString() } : []
+                } else {
+                    record['sample_id'] = original.id.toString()
+                    record['analysis_sample_id'] = meta.id.toString()
+                }
+                tuple(record, [command])
             }
         }
         outputs.getProperty(outputName).map { value ->

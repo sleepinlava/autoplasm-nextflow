@@ -168,11 +168,26 @@ for (record in records) {
     inputs[[key]] <- files
   } else if (identical(record$kind, "runtime_command")) {
     scalar_text <- function(value) is.character(value) && length(value) == 1L && !is.na(value) && nzchar(value)
-    if (!scalar_text(record$sample_id) || !record$sample_id %in% expected ||
-        !scalar_text(record$analysis_sample_id) || !scalar_text(record$task_process) ||
+    if (!scalar_text(record$task_process) ||
         !scalar_text(record$script_sha256) || !grepl("^[0-9a-f]{64}$", record$script_sha256) ||
         !is.list(record$runtime_probe) || !scalar_text(record$runtime_probe$command) ||
         !scalar_text(record$runtime_probe$stdout)) die("Invalid runtime command identity/probe")
+    if (isTRUE(record$cohort)) {
+      if (!is.list(record$cohort_samples) || !is.null(names(record$cohort_samples)) ||
+          !length(record$cohort_samples) ||
+          !all(vapply(record$cohort_samples, scalar_text, logical(1))))
+        die("Invalid cohort runtime command sample domain")
+      members <- unlist(record$cohort_samples, use.names = FALSE)
+      if (anyDuplicated(members) || !all(members %in% expected))
+        die("Invalid cohort runtime command sample domain")
+      cohort_id <- paste0("cohort:", record$task_process)
+      if (!scalar_text(record$sample_id) || !identical(record$sample_id, cohort_id) ||
+          !scalar_text(record$analysis_sample_id) || !identical(record$analysis_sample_id, cohort_id))
+        die("Invalid cohort runtime command identity")
+    } else {
+      if (!scalar_text(record$sample_id) || !record$sample_id %in% expected ||
+          !scalar_text(record$analysis_sample_id)) die("Invalid runtime command identity/probe")
+    }
     files <- unlist(record$files, use.names = FALSE)
     if (length(files) != 1L || !file.exists(files) || dir.exists(files))
       die("Missing declared task command file")
@@ -190,6 +205,10 @@ for (record in records) {
       script_sha256 = command_sha256,
       script = command, runtime_probe = record$runtime_probe,
       origin = "Declared originating task artifact; resume may reuse that task's outputs")
+    if (isTRUE(record$cohort)) {
+      runtime_commands[[key]]$cohort <- TRUE
+      runtime_commands[[key]]$cohort_samples <- as.list(members)
+    }
   } else if (!record$kind %in% c("evidence", "provided_input")) {
     die("Unknown report event kind")
   }
@@ -282,7 +301,9 @@ methods <- paste0("# Methods\n\n",
   "\n\nRecorded originating task commands and runtime probes (full scripts in report_data.json):\n\n",
   if (length(runtime_commands)) paste(vapply(runtime_commands, function(record) {
     paste0("- ", record$task_process, " / ", record$sample_id, " (analysis ID ", record$analysis_sample_id,
-           "): SHA256 ", record$script_sha256, "; ", record$runtime_probe$command, " => ", record$runtime_probe$stdout)
+           "): SHA256 ", record$script_sha256,
+           if (isTRUE(record$cohort)) paste0("; cohort samples: ", paste(unlist(record$cohort_samples), collapse = ", ")) else "",
+           "; ", record$runtime_probe$command, " => ", record$runtime_probe$stdout)
   }, character(1)), collapse = "\n") else "- No explicit task command records received.",
   "\nThese records describe their originating tasks; resume can reuse those outputs.\n",
   "\n\nRequested settings (configuration, not evidence that a tool ran):\n\n```json\n",
