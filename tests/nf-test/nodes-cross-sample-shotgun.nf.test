@@ -1,0 +1,132 @@
+// Real shotgun multi-sample P4 execution contract (TT-003).
+// Cohort: ENA PRJDB5375 marine metagenomics, 3 Sendai-Bay vs 3 Aline runs,
+// per-run library_strategy=WGS verified; locked in shotgun-multisample.lock.json
+// (SHOTGUN_TEST_DATA points at the prepared directory). User approved this
+// cohort 2026-10-28; background phage content of real metagenomes is accepted
+// (constraint targets virus-specific fixtures/DBs/models).
+// geNomad test database still comes from AUTOPLASM_TEST_DATA.
+// network_min_samples is lowered from the production default (20) to 6 to
+// exercise the code path; this tests execution, not statistical power.
+// Backend: podman. No snapshots; assertions are structural contracts.
+nextflow_pipeline {
+    name 'Real shotgun 3v3 execution contracts (TT-003 P4 portion)'
+    script '../../main.nf'
+    config './integration.config'
+    tag 'shotgun-multi'
+    tag 'backend-podman'
+
+    test('six real shotgun samples, sendai_bay vs aline, to cross-sample outputs') {
+        when {
+            params {
+                platform = 'illumina'
+                samplesheet = "${System.getenv('SHOTGUN_TEST_DATA')}/illumina.tsv"
+                outdir = "$outputDir"
+                run_diversity = true
+                run_differential_internal = true
+                run_differential_deseq2 = true
+                run_network = true
+                network_min_samples = 6
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.trace.failed().isEmpty()
+            def samples = ['DRR083096', 'DRR083153', 'DRR083252',
+                           'DRR083116', 'DRR083259', 'DRR083184']
+            // merged contig abundance is long format:
+            // contig_id, sample_id, rpkm, tpm, coverage, raw_count, mapper
+            def contig = path("${params.outdir}/tables/contig_abundance.tsv").text.readLines()
+            def header = contig[0].split('\t', -1).toList()
+            assert header[0] == 'contig_id'
+            assert header.contains('sample_id')
+            def seenSamples = contig.drop(1).collect { it.split('\t', -1)[1] }.toSet()
+            assert seenSamples == samples.toSet()
+            assert contig.size() > 6
+            // diversity on real replicates (long format: sample_id, metric, value, group)
+            def metrics = path("${params.outdir}/11_diversity/diversity_metrics.tsv").text.readLines()
+            assert metrics.size() == samples.size() * 4 + 1
+            assert metrics[0].split('\t', -1).toList() == ['sample_id', 'metric', 'value', 'group']
+            def mSamples = metrics.drop(1).collect { it.split('\t', -1)[0] }.toSet()
+            assert mSamples == samples.toSet()
+            assert metrics.drop(1).any { it.endsWith('\tsendai_bay') }
+            assert metrics.drop(1).any { it.endsWith('\taline') }
+            // Independent alpha formula over the actual coverage measurements.
+            def coverageIndex = header.indexOf('coverage')
+            def values = samples.collectEntries { [(it): []] }
+            contig.drop(1).each { line ->
+                def cells = line.split('\t', -1)
+                def value = Double.parseDouble(cells[coverageIndex])
+                assert Double.isFinite(value) && value >= 0
+                values[cells[header.indexOf('sample_id')]] << value
+            }
+            samples.each { sid ->
+                def cells = metrics.drop(1).collect { it.split('\t', -1) }.findAll { it[0] == sid }
+                assert cells.size() == 4
+                assert cells.collect { it[1] }.toSet() == ['richness','shannon','simpson','pielou'].toSet()
+                def positive = values[sid].findAll { it > 0 }
+                def total = positive.sum() ?: 0.0
+                def proportions = positive.collect { it / total }
+                def richness = positive.size()
+                def shannon = -(proportions.collect { it * Math.log(it) }.sum() ?: 0.0)
+                def simpson = proportions ? 1.0 - proportions.collect { it * it }.sum() : 0.0
+                def expected = [richness:richness, shannon:shannon, simpson:simpson,
+                                pielou:richness > 1 ? shannon / Math.log(richness) : 0.0]
+                cells.each { row ->
+                    def actual = Double.parseDouble(row[2])
+                    assert Double.isFinite(actual)
+                    assert Math.abs(actual - expected[row[1]]) <= 1e-6
+                }
+            }
+            def inputState = new groovy.json.JsonSlurper().parse(path("${params.outdir}/tables/statistics_inputs/validation.json").toFile())
+            assert inputState.status == 'validated'
+            assert inputState.sample_ids.toSet() == samples.toSet()
+            // internal differential between the two real groups
+            assert path("${params.outdir}/11_diversity/differential_abundance.tsv").text.readLines().size() >= 1
+            def unquote = { value -> value.startsWith('"') && value.endsWith('"') ?
+                value.substring(1,value.length()-1).replace('""','"') : value }
+            def dsLines = path("${params.outdir}/11_diversity/deseq2_status.tsv").text.readLines()
+            def dsHeader = dsLines[0].split('\t',-1).collect(unquote)
+            def dsRows = dsLines.drop(1).collect { line ->
+                def fields = line.split('\t',-1).collect(unquote)
+                assert fields.size() == dsHeader.size()
+                dsHeader.withIndex().collectEntries { name,index -> [(name):fields[index]] }
+            }
+            assert dsRows.size() == samples.size()
+            assert dsRows.collect { it.sample_id }.toSet() == samples.toSet()
+            assert dsRows.every { it.min_replicates == '3' && it.failed_contrasts == '0' }
+            def dsResults = path("${params.outdir}/11_diversity/differential_plasmids.tsv").text.readLines()
+            if (dsRows.every { it.model_fitted == 'TRUE' }) {
+                assert dsRows.every { it.analysis_status == 'completed' && it.deseq2_version == '1.42.0' }
+                assert dsResults.size() > 1
+                def pIndex = dsResults[0].split('\t',-1).toList().indexOf('p_value')
+                assert pIndex >= 0
+                assert dsResults.drop(1).any { row ->
+                    def value = row.split('\t',-1)[pIndex]
+                    value && Double.isFinite(Double.parseDouble(value))
+                }
+            } else {
+                assert dsRows.every { it.model_fitted == 'FALSE' && it.used_in_fit == 'FALSE' }
+                assert dsRows.every { it.analysis_status in ['not_run','not_estimable'] && it.reason }
+                assert dsResults.size() == 1
+            }
+            // Nonempty source rows do not prove final network eligibility.
+            def networkState = new groovy.json.JsonSlurper().parse(path("${params.outdir}/12_network/network_status.json").toFile())
+            def estimators = workflow.trace.succeeded().findAll { it.name.contains('FASTSPAR') }
+            if (networkState.eligible) {
+                assert networkState.features_after >= 4
+                assert networkState.included_sample_ids.size() >= 6
+                assert estimators.size() == 1
+                assert path("${params.outdir}/12_network/correlation.tsv").exists()
+            } else {
+                assert estimators.isEmpty()
+                assert !path("${params.outdir}/12_network/correlation.tsv").exists()
+                assert networkState.reason in ['insufficient_features','insufficient_samples']
+            }
+            // final report
+            def report = path("${params.outdir}/report/report.md").text
+            assert report.contains('- Samples: 6')
+            assert report.contains('- Platform: `illumina`')
+            assert path("${params.outdir}/report/report.html").size() > 0
+        }
+    }
+}

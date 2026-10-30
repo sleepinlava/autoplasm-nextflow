@@ -1,0 +1,97 @@
+{
+ "schema_version": 1,
+ "source": "ENA PRJDB5375 (Metagenomics in the northeast coast of Japan)",
+ "documented_assay": "WGS metagenomic (per-run library_strategy=WGS verified 2026-10-28 via ENA portal API)",
+ "cohort_design": "2 locations x 3 runs: sendai_bay (DRR083116/167/184) vs aline (DRR083096/252/153), natural sampling-site groups; not technical replicates",
+ "constraint_note": "user approved this marine cohort on 2026-10-28; background phage content of real metagenomes is accepted, the no-virus constraint targets virus-specific fixtures/DBs/models",
+ "ena_groups": {
+  "DRR083116": "sendai_bay",
+  "DRR083184": "sendai_bay",
+  "DRR083096": "aline",
+  "DRR083252": "aline",
+  "DRR083153": "aline",
+  "DRR083259": "sendai_bay"
+ },
+ "files": [
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083096/DRR083096_1.fastq.gz",
+   "dest": "ena/DRR083096_1.fastq.gz",
+   "size": 117289223,
+   "md5": "744fc2eb62c4b7a1ce87c35cec1d0317"
+  },
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083096/DRR083096_2.fastq.gz",
+   "dest": "ena/DRR083096_2.fastq.gz",
+   "size": 108515779,
+   "md5": "f82ac28c5f2a3f7a542fddabce1d4ff4"
+  },
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083116/DRR083116_1.fastq.gz",
+   "dest": "ena/DRR083116_1.fastq.gz",
+   "size": 119979253,
+   "md5": "cc45499a6c6f05704dcdbeb507e5239e"
+  },
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083116/DRR083116_2.fastq.gz",
+   "dest": "ena/DRR083116_2.fastq.gz",
+   "size": 114602342,
+   "md5": "8dbfa9004c3e80a9a3344e20b701c3c9"
+  },
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083153/DRR083153_1.fastq.gz",
+   "dest": "ena/DRR083153_1.fastq.gz",
+   "size": 186728098,
+   "md5": "fdf7b7d82fff266406c7475639434296"
+  },
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083153/DRR083153_2.fastq.gz",
+   "dest": "ena/DRR083153_2.fastq.gz",
+   "size": 194799367,
+   "md5": "89d7fd49b07c65a6368a52de5e27e9ea"
+  },
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083184/DRR083184_1.fastq.gz",
+   "dest": "ena/DRR083184_1.fastq.gz",
+   "size": 119170847,
+   "md5": "604fbad42a5235a75aa2192f54103166"
+  },
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083184/DRR083184_2.fastq.gz",
+   "dest": "ena/DRR083184_2.fastq.gz",
+   "size": 110669636,
+   "md5": "529c1caa274b161ef74a0f03b439e164"
+  },
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083252/DRR083252_1.fastq.gz",
+   "dest": "ena/DRR083252_1.fastq.gz",
+   "size": 172932817,
+   "md5": "43f05e97ee7106e38592820a4094cb12"
+  },
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083252/DRR083252_2.fastq.gz",
+   "dest": "ena/DRR083252_2.fastq.gz",
+   "size": 180377454,
+   "md5": "7761c2578ea1596551b3b16fa2c1514e"
+  },
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083259/DRR083259_1.fastq.gz",
+   "dest": "ena/DRR083259_1.fastq.gz",
+   "size": 103351141,
+   "md5": "172d66d7aeb83e4be8d1e1407514f263"
+  },
+  {
+   "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR083/DRR083259/DRR083259_2.fastq.gz",
+   "dest": "ena/DRR083259_2.fastq.gz",
+   "size": 103555132,
+   "md5": "a21f6374d735da801ab23e0cfced08f6"
+  }
+ ],
+ "substitutions": [
+  {
+   "removed": "DRR083167",
+   "added": "DRR083259",
+   "reason": "DRR083167_2.fastq.gz listed in ENA API but absent on FTP (301 to directory index, 2026-10-28); DRR083259 is the next-smallest Sendai-Bay run, both mates verified HTTP 200",
+   "date": "2026-10-28"
+  }
+ ]
+}
