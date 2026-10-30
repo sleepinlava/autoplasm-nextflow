@@ -26,12 +26,16 @@ process PLASME {
     tuple val(meta), path("${meta.id}.plasme.fasta"), emit: plasmid_fasta
     tuple val(meta), path("${meta.id}.plasme_report.csv"), emit: report
     tuple val(meta), path("${meta.id}.plasme_runtime.json"), emit: runtime
+    tuple val("${task.process}"), val(meta), path("${meta.id}.PLASME.task_command.sh"),
+          val('python3 plasme_runtime.py -h'), eval('python3 plasme_runtime.py -h'),
+          eval("sha256sum '${meta.id}.PLASME.task_command.sh'"), emit: task_provenance
 
     script:
     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
     def input_fasta = 'plasme_input.fasta'
     def prepare = assembly.name.toLowerCase().endsWith('.gz') ? "gzip -cd -- ${shellQuote.call(assembly)} > ${input_fasta}" : "ln -s -- ${shellQuote.call(assembly)} ${input_fasta}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLASME.task_command.sh'
     ${prepare}
     python3 plasme_runtime.py run --source-dir ${plasme_source} \\
         --assembly ${input_fasta} --database ${plasme_db} --output ${meta.id}.plasme \\

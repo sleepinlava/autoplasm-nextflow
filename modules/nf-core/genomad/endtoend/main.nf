@@ -31,6 +31,9 @@ process GENOMAD_ENDTOEND {
     tuple val(meta), path("${prefix}/*_summary/*_virus_summary.tsv")                                 , emit: virus_summary
     tuple val("${task.process}"), val('genomad'), eval("genomad --version 2>&1 | sed 's/^.*geNomad, version //; s/ .*//'"), topic: versions, emit: versions_genomad
     tuple val("${task.process}"), val('genomad_db'), eval("if [ -s ${genomad_db}/version.txt ]; then cat ${genomad_db}/version.txt; else echo 'unknown'; fi"), topic: versions, emit: versions_genomad_db
+    tuple val("${task.process}"), val(meta), path("${prefix}.GENOMAD.task_command.sh"),
+          val('genomad --version'), eval('genomad --version'),
+          eval("sha256sum '${prefix}.GENOMAD.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -39,6 +42,7 @@ process GENOMAD_ENDTOEND {
     def args = task.ext.args ?: ''
     prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.GENOMAD.task_command.sh'
     genomad \\
         end-to-end \\
         ${fasta} \\
@@ -56,6 +60,7 @@ process GENOMAD_ENDTOEND {
     def filename = "${fasta}"[0..<"${fasta}".lastIndexOf('.')]
     prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.GENOMAD.task_command.sh'
     echo ${args}
 
     mkdir ${prefix}

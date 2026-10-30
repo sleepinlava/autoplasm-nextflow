@@ -23,10 +23,14 @@ process PLATON {
     tuple val(meta), path("${meta.id}.json"), emit: details
     tuple val(meta), path("${meta.id}.platon_state.json"), emit: state
     tuple val(meta), path("${meta.id}.platon_runtime.json"), emit: runtime
+    tuple val("${task.process}"), val(meta), path("${meta.id}.PLATON.task_command.sh"),
+          val('platon --version'), eval('platon --version'),
+          eval("sha256sum '${meta.id}.PLATON.task_command.sh'"), emit: task_provenance
 
     script:
     def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLATON.task_command.sh'
     python3 platon_checked.py --assembly ${quote.call(assembly)} --database platon_database \\
         --prefix ${quote.call(meta.id)} --record ${quote.call(meta.id + '.platon_runtime.json')} \\
         --threads ${task.cpus}
