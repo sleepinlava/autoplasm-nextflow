@@ -23,13 +23,16 @@ process FASTP {
     tuple val(meta), path('*.fail.fastq.gz')  , optional:true, emit: reads_fail
     tuple val(meta), path('*.merged.fastq.gz'), optional:true, emit: reads_merged
     tuple val("${task.process}"), val('fastp'), eval('fastp --version 2>&1 | sed -e "s/fastp //g"'), emit: versions_fastp, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.FASTP.task_command.sh"),
+          val('fastp --version'), eval('fastp --version'),
+          eval("sha256sum '${prefix}.FASTP.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def adapter_list = adapter_fasta ? "--adapter_fasta ${adapter_fasta}" : ""
     def fail_fastq = save_trimmed_fail && meta.single_end ? "--failed_out ${prefix}.fail.fastq.gz" : save_trimmed_fail && !meta.single_end ? "--failed_out ${prefix}.paired.fail.fastq.gz --unpaired1 ${prefix}_R1.fail.fastq.gz --unpaired2 ${prefix}_R2.fail.fastq.gz" : ''
     def out_fq1 = discard_trimmed_pass ?: ( meta.single_end ? "--out1 ${prefix}.clean.fastq.gz" : "--out1 ${prefix}_R1.clean.fastq.gz" )
@@ -41,6 +44,7 @@ process FASTP {
     // Use single ended for interleaved. Add --interleaved_in in config.
     if ( is_interleaved ) {
         """
+cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTP.task_command.sh'
         [ ! -f  ${prefix}.fastq.gz ] && ln -sf $reads ${prefix}.fastq.gz
 
         fastp \\
@@ -57,6 +61,7 @@ process FASTP {
         """
     } else if (meta.single_end) {
         """
+cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTP.task_command.sh'
         [ ! -f  ${prefix}.fastq.gz ] && ln -sf $reads ${prefix}.fastq.gz
 
         fastp \\
@@ -73,6 +78,7 @@ process FASTP {
     } else {
         def merge_fastq = save_merged ? "-m --merged_out ${prefix}.merged.fastq.gz" : ''
         """
+cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTP.task_command.sh'
         [ ! -f  ${prefix}_R1.fastq.gz ] && ln -sf ${reads[0]} ${prefix}_R1.fastq.gz
         [ ! -f  ${prefix}_R2.fastq.gz ] && ln -sf ${reads[1]} ${prefix}_R2.fastq.gz
         fastp \\
@@ -93,12 +99,13 @@ process FASTP {
     }
 
     stub:
-    def prefix              = task.ext.prefix ?: "${meta.id}"
+    prefix              = task.ext.prefix ?: "${meta.id}"
     def is_single_output    = task.ext.args?.contains('--interleaved_in') || meta.single_end
     def touch_reads         = (discard_trimmed_pass) ? "" : (is_single_output) ? "echo '' | gzip > ${prefix}.clean.fastq.gz" : "echo '' | gzip > ${prefix}_R1.clean.fastq.gz ; echo '' | gzip > ${prefix}_R2.clean.fastq.gz"
     def touch_merged        = (!is_single_output && save_merged) ? "echo '' | gzip >  ${prefix}.merged.fastq.gz" : ""
     def touch_fail_fastq    = (!save_trimmed_fail) ? "" : meta.single_end ? "echo '' | gzip > ${prefix}.fail.fastq.gz" : "echo '' | gzip > ${prefix}.paired.fail.fastq.gz ; echo '' | gzip > ${prefix}_R1.fail.fastq.gz ; echo '' | gzip > ${prefix}_R2.fail.fastq.gz"
     """
+cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTP.task_command.sh'
     $touch_reads
     $touch_fail_fastq
     $touch_merged

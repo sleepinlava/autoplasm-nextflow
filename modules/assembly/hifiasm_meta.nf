@@ -18,9 +18,13 @@ process HIFIASM_META {
     output:
     tuple val(meta), path("${meta.id}.hifiasm.fasta"), emit: assembly
     tuple val(meta), path("${meta.id}.p_ctg.gfa"), emit: graph
+    tuple val("${task.process}"), val(meta), path("${meta.id}.HIFIASM_META.task_command.sh"),
+          val('hifiasm_meta --version'), eval('hifiasm_meta --version'),
+          eval("sha256sum '${meta.id}.HIFIASM_META.task_command.sh'"), emit: task_provenance
 
     script:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.HIFIASM_META.task_command.sh'
     hifiasm_meta -t ${task.cpus} -o ${meta.id} ${long_reads}
     # Convert primary contig graph to FASTA
     awk '/^S/{printf ">%s\\n%s\\n", \$2, \$3}' ${meta.id}.p_ctg.gfa > ${meta.id}.hifiasm.fasta

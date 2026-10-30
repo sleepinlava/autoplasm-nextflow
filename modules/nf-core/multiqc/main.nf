@@ -16,6 +16,9 @@ process MULTIQC {
     tuple val(meta), path("*_plots"), emit: plots, optional: true
     // MultiQC should not push its versions to the `versions` topic. Its input depends on the versions topic to be resolved thus outputting to the topic will let the pipeline hang forever
     tuple val("${task.process}"), val('multiqc'), eval('multiqc --version | sed "s/.* //g"'), emit: versions
+    tuple val("${task.process}"), val(meta), path("${meta.id}.MULTIQC.task_command.sh"),
+          val('multiqc --version'), eval('multiqc --version'),
+          eval("sha256sum '${meta.id}.MULTIQC.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -28,6 +31,7 @@ process MULTIQC {
     def replace = replace_names ? "--replace-names ${replace_names}" : ''
     def samples = sample_names ? "--sample-names ${sample_names}" : ''
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.MULTIQC.task_command.sh'
     multiqc \\
         --force \\
         ${args} \\
@@ -41,6 +45,7 @@ process MULTIQC {
 
     stub:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.MULTIQC.task_command.sh'
     mkdir multiqc_data
     touch multiqc_data/.stub
     mkdir multiqc_plots

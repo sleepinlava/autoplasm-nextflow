@@ -19,6 +19,9 @@ process QUAST {
     tuple val(meta), path("${prefix}_misassemblies.tsv") , optional: true , emit: misassemblies
     tuple val(meta), path("${prefix}_unaligned.tsv")     , optional: true , emit: unaligned
     tuple val("${task.process}"), val('quast'), eval('quast.py --version 2>&1 | grep "QUAST" | sed \'s/^.*QUAST v//; s/ .*\$//\''), emit: versions_quast, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.QUAST.task_command.sh"),
+          val('quast.py --version'), eval('quast.py --version'),
+          eval("sha256sum '${prefix}.QUAST.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
@@ -29,6 +32,7 @@ process QUAST {
     def features  = gff             ?  "--features $gff" : ''
     def reference = fasta           ?  "-r $fasta"       : ''
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.QUAST.task_command.sh'
     quast.py \\
         --output-dir $prefix \\
         $reference \\
@@ -49,6 +53,7 @@ process QUAST {
 
     """
     mkdir -p $prefix
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.QUAST.task_command.sh'
     touch $prefix/report.tsv
     touch $prefix/report.html
     touch $prefix/report.pdf

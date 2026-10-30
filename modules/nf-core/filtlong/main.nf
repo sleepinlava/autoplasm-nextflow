@@ -14,16 +14,20 @@ process FILTLONG {
     tuple val(meta), path("*.fastq.gz"), emit: reads
     tuple val(meta), path("*.log")     , emit: log
     tuple val("${task.process}"), val('filtlong'), eval('filtlong --version | sed -e "s/Filtlong v//g"'), topic: versions, emit: versions_filtlong
+    tuple val("${task.process}"), val(meta), path("${prefix}.FILTLONG.task_command.sh"),
+          val('filtlong --version'), eval('filtlong --version'),
+          eval("sha256sum '${prefix}.FILTLONG.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def short_reads = !shortreads ? "" : meta.single_end ? "-1 $shortreads" : "-1 ${shortreads[0]} -2 ${shortreads[1]}"
     if ("$longreads" == "${prefix}.fastq.gz") error "Longread FASTQ input and output names are the same, set prefix in module configuration to disambiguate!"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.FILTLONG.task_command.sh'
     filtlong \\
         $short_reads \\
         $args \\
@@ -33,8 +37,9 @@ process FILTLONG {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.FILTLONG.task_command.sh'
     echo "" | gzip > ${prefix}.fastq.gz
     touch ${prefix}.log
     """

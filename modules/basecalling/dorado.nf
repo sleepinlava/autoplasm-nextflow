@@ -17,10 +17,15 @@ process DORADO_BASECALL {
 
     output:
     tuple val(meta), path("${meta.id}.dorado.fastq"), emit: long_reads
+    tuple val("${task.process}"), val(meta), path("${meta.id}.DORADO_BASECALL.task_command.sh"),
+          val('dorado --version'), eval('dorado --version'),
+          eval("sha256sum '${meta.id}.DORADO_BASECALL.task_command.sh'"), emit: task_provenance
+
 
     script:
     def model = params.dorado_model ?: 'hac'
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.DORADO_BASECALL.task_command.sh'
     dorado basecaller ${model} ${pod5} --emit-fastq > ${meta.id}.dorado.fastq
     """
 }

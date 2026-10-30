@@ -33,13 +33,16 @@ process SPADES {
     tuple val(meta), path('*.warnings.log')         , optional:true, emit: warnings
     tuple val(meta), path('*.spades.log')         , emit: log
     tuple val("${task.process}"), val('spades'), eval("spades.py --version 2>&1 | sed -n 's/^.*SPAdes genome assembler v//p'"), topic: versions, emit: versions_spades
+    tuple val("${task.process}"), val(meta), path("${prefix}.SPADES.task_command.sh"),
+          val('spades.py --version'), eval('spades.py --version'),
+          eval("sha256sum '${prefix}.SPADES.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     def maxmem = task.memory.toGiga()
     def illumina_reads = illumina ? ( meta.single_end ? "-s $illumina" : "-1 ${illumina[0]} -2 ${illumina[1]}" ) : ""
     def pacbio_reads = pacbio ? "--pacbio $pacbio" : ""
@@ -49,6 +52,7 @@ process SPADES {
     def export_plasmaag = task.ext.plasmaag ?: false
     // The provenance helper is an explicit deeply hashed file input.
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SPADES.task_command.sh'
     spades.py \\
         $args \\
         --threads $task.cpus \\
@@ -102,8 +106,9 @@ process SPADES {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SPADES.task_command.sh'
     echo "" | gzip > ${prefix}.scaffolds.fa.gz
     echo "" | gzip > ${prefix}.contigs.fa.gz
     echo "" | gzip > ${prefix}.transcripts.fa.gz

@@ -14,13 +14,16 @@ process FASTQC {
     tuple val(meta), path("*.html"), emit: html
     tuple val(meta), path("*.zip"), emit: zip
     tuple val("${task.process}"), val('fastqc'), eval('fastqc --version | sed "/FastQC v/!d; s/.*v//"'), emit: versions_fastqc, topic: versions
+    tuple val("${task.process}"), val(meta), path("${prefix}.FASTQC.task_command.sh"),
+          val('fastqc --version'), eval('fastqc --version'),
+          eval("sha256sum '${prefix}.FASTQC.task_command.sh'"), emit: task_provenance
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     // Local patch (refactor/nf-core-modules): input symlinks keep the legacy
     // alias scheme <prefix>.R1.fastq.gz / <prefix>.R2.fastq.gz (upstream uses
     // <prefix>_N.<extension>), preserving the full .fastq/.fq(+gz) suffix.
@@ -48,6 +51,7 @@ process FASTQC {
     def fastqc_memory_arg = fastqc_memory ? "--memory ${fastqc_memory}" : ''
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTQC.task_command.sh'
     printf "%s %s\\n" ${rename_to} | while read old_name new_name; do
         [ -f "\${new_name}" ] || ln -s \$old_name \$new_name
     done
@@ -60,8 +64,9 @@ process FASTQC {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTQC.task_command.sh'
     touch ${prefix}.html
     touch ${prefix}.zip
     """

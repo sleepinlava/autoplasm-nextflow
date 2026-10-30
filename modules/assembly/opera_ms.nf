@@ -18,6 +18,9 @@ process OPERA_MS {
     output:
     tuple val(meta), path("${meta.id}.opera_ms.contigs.fasta"), emit: assembly
     tuple val(meta), path("${meta.id}.opera_ms_out"), emit: output_dir
+    tuple val("${task.process}"), val(meta), path("${meta.id}.OPERA_MS.task_command.sh"),
+          val('perl -S OPERA-MS.pl --help'), eval("perl -S OPERA-MS.pl --help 2>&1 | sed -n '1p'"),
+          eval("sha256sum '${meta.id}.OPERA_MS.task_command.sh'"), emit: task_provenance
 
     script:
     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
@@ -29,6 +32,7 @@ process OPERA_MS {
     // Upstream v0.8.3 ships OPERA-MS.pl without a shebang (first line is a
     // comment), so invoke it through perl explicitly and search PATH (-S).
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.OPERA_MS.task_command.sh'
     ${decode}
     perl -S OPERA-MS.pl \\
         --short-read1 ${read1} --short-read2 ${read2} \\
