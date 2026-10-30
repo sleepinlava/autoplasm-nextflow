@@ -13,6 +13,10 @@ process CONCOCT_EXTRACTFASTABINS {
     output:
     tuple val(meta), path("${prefix}/*.fa.gz"), emit: fasta, optional: true
     tuple val("${task.process}"), val('concoct'), eval("concoct --version 2>&1 | sed -n 's/concoct //p'"), topic: versions, emit: versions_concoct
+    tuple val("${task.process}"), val(meta), path("${meta.id}.CONCOCT_EXTRACTFASTABINS.task_command.sh"),
+          val('concoct --version'), eval('concoct --version'),
+          eval("sha256sum '${meta.id}.CONCOCT_EXTRACTFASTABINS.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -23,6 +27,7 @@ process CONCOCT_EXTRACTFASTABINS {
     def compressed = original_fasta.name.toLowerCase().endsWith('.gz')
     def input_fasta = compressed ? '.concoct_input/assembly.fna' : original_fasta
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_EXTRACTFASTABINS.task_command.sh'
     mkdir ${prefix}
 
     if ${compressed}; then
@@ -47,6 +52,7 @@ process CONCOCT_EXTRACTFASTABINS {
     stub:
     prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_EXTRACTFASTABINS.task_command.sh'
     mkdir -p ${prefix}
     echo "" | gzip > ${prefix}/${prefix}.fa.gz
     """

@@ -17,6 +17,10 @@ process PLASMAAG {
     output:
     tuple val(meta), path("${meta.id}.plasmaag", type: 'dir'), emit: bins
     tuple val(meta), path("${meta.id}.plasmaag_runtime.json"), emit: runtime
+    tuple val("${task.process}"), val(meta), path("${meta.id}.PLASMAAG.task_command.sh"),
+          val('python3 plasmaag_inputs.py -h'), eval('python3 plasmaag_inputs.py -h 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.PLASMAAG.task_command.sh'"), emit: task_provenance
+
 
     script:
     if (task.cpus < 8) error('Fixed PlasMAAG Node2Vec uses 8 workers; allocate at least 8 CPUs')
@@ -33,6 +37,7 @@ process PLASMAAG {
     def vamb = runtime_options.vamb_arguments ? "--vamb_arguments ${q.call(runtime_options.vamb_arguments)}" : ''
     def snake = runtime_options.conda_prefix ? "--snakemake_arguments ${q.call('--conda-prefix ' + runtime_options.conda_prefix)}" : ''
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLASMAAG.task_command.sh'
     cat > cohort-spec.json <<'PLASMAAG_COHORT_JSON'
 ${spec}
 PLASMAAG_COHORT_JSON

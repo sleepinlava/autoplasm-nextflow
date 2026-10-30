@@ -13,6 +13,10 @@ process METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS {
     output:
     tuple val(meta), path("*.txt.gz"), emit: depth
     tuple val("${task.process}"), val('metabat2'), eval('metabat2 --help 2>&1 | sed -n "2s/.*:\\([0-9]*\\.[0-9]*\\).*/\\1/p"'), emit: versions_metabat2, topic: versions
+    tuple val("${task.process}"), val(meta), path("${meta.id}.METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.task_command.sh"),
+          val('metabat2 --help'), eval('metabat2 --help 2>&1 | sed -n "2p"'),
+          eval("sha256sum '${meta.id}.METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -21,6 +25,7 @@ process METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.task_command.sh'
     export OMP_NUM_THREADS=${task.cpus}
 
     jgi_summarize_bam_contig_depths \\
@@ -34,6 +39,7 @@ process METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS {
     stub:
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.task_command.sh'
     echo "" | gzip > ${prefix}.txt.gz
     """
 }

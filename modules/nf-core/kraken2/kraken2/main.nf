@@ -21,6 +21,10 @@ process KRAKEN2_KRAKEN2 {
     tuple val(meta), path('*report.txt')                           , emit: report
     tuple val("${task.process}"), val('kraken2'), eval('kraken2 --version 2>&1 | head -1 | sed "s/^.*Kraken version //; s/ .*//"'), topic: versions, emit: versions_kraken2
     tuple val("${task.process}"), val('pigz'), eval('pigz --version 2>&1 | sed "s/pigz //g"'), topic: versions, emit: versions_pigz
+    tuple val("${task.process}"), val(meta), path("${meta.id}.KRAKEN2_KRAKEN2.task_command.sh"),
+          val('kraken2 --version'), eval('kraken2 --version 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.KRAKEN2_KRAKEN2.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -37,6 +41,7 @@ process KRAKEN2_KRAKEN2 {
     def compress_reads_command = save_output_fastqs ? "pigz -p $task.cpus *.fastq" : ""
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.KRAKEN2_KRAKEN2.task_command.sh'
     kraken2 \\
         --db $db \\
         --threads $task.cpus \\
@@ -58,6 +63,7 @@ process KRAKEN2_KRAKEN2 {
     def unclassified = meta.single_end ? "${prefix}.unclassified.fastq.gz" : "${prefix}.unclassified_1.fastq.gz ${prefix}.unclassified_2.fastq.gz"
 
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.KRAKEN2_KRAKEN2.task_command.sh'
     touch ${prefix}.kraken2.report.txt
     if [ "$save_output_fastqs" == "true" ]; then
         touch $classified

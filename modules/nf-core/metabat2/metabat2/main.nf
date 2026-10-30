@@ -17,6 +17,10 @@ process METABAT2_METABAT2 {
     tuple val(meta), path("*.tsv.gz"), optional: true, emit: membership
     tuple val(meta), path("*[!lowDepth|tooShort|unbinned].fa.gz"), optional: true, emit: fasta
     tuple val("${task.process}"), val('metabat2'), eval('metabat2 --help 2>&1 | sed -n "2s/.*:\\([0-9]*\\.[0-9]*\\).*/\\1/p"'), emit: versions_metabat2, topic: versions
+    tuple val("${task.process}"), val(meta), path("${meta.id}.METABAT2.task_command.sh"),
+          val('metabat2 --help'), eval('metabat2 --help 2>&1 | sed -n "2p"'),
+          eval("sha256sum '${meta.id}.METABAT2.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -28,6 +32,7 @@ process METABAT2_METABAT2 {
     def decompress_depth = depth && depth.toString() != clean_depth ? "gzip -d -f ${depth}" : ""
     def depth_input = depth ? "-a ${clean_depth}" : ""
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.METABAT2.task_command.sh'
     ${decompress_depth}
 
     metabat2 \\
@@ -48,6 +53,7 @@ process METABAT2_METABAT2 {
     def decompress_depth = depth ? "gzip -d -f ${depth}" : ""
     def depth_file = depth ? "-a ${depth.baseName}" : ""
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.METABAT2.task_command.sh'
     echo "" | gzip > ${prefix}.1.fa.gz
     echo "" | gzip > ${prefix}.1.tooShort.fa.gz
     echo "" | gzip > ${prefix}.1.lowDepth.fa.gz

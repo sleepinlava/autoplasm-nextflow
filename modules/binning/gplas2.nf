@@ -20,10 +20,15 @@ process GPLAS2 {
     output:
     tuple val(meta), path("${meta.gplas_original_meta.id}.gplas2"), emit: bins
     tuple val(meta), path("${meta.gplas_original_meta.id}.gplas_runtime.json"), emit: runtime
+    tuple val("${task.process}"), val(meta), path("${meta.id}.GPLAS2.task_command.sh"),
+          val('python3 .gplas_checked.py --help'), eval('python3 .gplas_checked.py --help 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.GPLAS2.task_command.sh'"), emit: task_provenance
+
 
     script:
     def originalId = meta.gplas_original_meta.id
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.GPLAS2.task_command.sh'
     python3 .gplas_checked.py --source '${source}' --graph '${assembly_graph}' \\
         --predictions '${node_predictions}' --name '${originalId}' \\
         --record '${originalId}.gplas_runtime.json'

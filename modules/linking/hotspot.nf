@@ -29,9 +29,14 @@ process LINK_HOTSPOT {
     tuple val(meta), path("${meta.id}.host_lineage.tsv"), emit: lineage
     tuple val(meta), path("${meta.id}.hotspot_conversion.json"), emit: conversion
     tuple val(meta), path("${meta.id}.hotspot_runtime.json"), emit: runtime
+    tuple val("${task.process}"), val(meta), path("${meta.id}.LINK_HOTSPOT.task_command.sh"),
+          val('python3 hotspot_runtime.py -h'), eval('python3 hotspot_runtime.py -h 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.LINK_HOTSPOT.task_command.sh'"), emit: task_provenance
+
 
     script:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.LINK_HOTSPOT.task_command.sh'
     python3 hotspot_runtime.py --source-dir hotspot_program --database hotspot_database --models hotspot_models \\
         --fasta "${plasmid_contigs}" --threads ${task.cpus} \\
         --runtime-record "${meta.id}.hotspot_runtime.json"

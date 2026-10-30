@@ -19,9 +19,14 @@ process LINK_LONGREAD {
 
     output:
     tuple val(meta), path("${meta.id}.longread_bridge_links.tsv"), emit: links
+    tuple val("${task.process}"), val(meta), path("${meta.id}.LINK_LONGREAD.task_command.sh"),
+          val('Rscript --version'), eval('Rscript --version'),
+          eval("sha256sum '${meta.id}.LINK_LONGREAD.task_command.sh'"), emit: task_provenance
+
 
     script:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.LINK_LONGREAD.task_command.sh'
     longread_bridge_link.R \\
         --sam ${bam} \\
         --plasmid-contigs ${plasmid_contigs} \\

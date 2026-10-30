@@ -29,6 +29,10 @@ process GTDBTK_CLASSIFYWF {
     tuple val(meta), path("${prefix}.genome_inputs.json")            , emit: genome_inputs
     tuple val("${task.process}"), val('gtdbtk'), eval("gtdbtk --version 2>&1 | grep -Eo '[0-9]+(\\.[0-9]+)+' | head -1") , topic: versions, emit: versions_gtdbtk
     tuple val("${task.process}"), val('gtdb_db'), eval('grep VERSION_DATA \$GTDBTK_DATA_PATH/metadata/metadata.txt | sed "s/VERSION_DATA=//"'), topic: versions, emit: versions_gtdbtk_db
+    tuple val("${task.process}"), val(meta), path("${meta.id}.GTDBTK_CLASSIFYWF.task_command.sh"),
+          val('gtdbtk --version'), eval('gtdbtk --version'),
+          eval("sha256sum '${meta.id}.GTDBTK_CLASSIFYWF.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -38,6 +42,7 @@ process GTDBTK_CLASSIFYWF {
     prefix              = task.ext.prefix ?: "${meta.id}"
     def pplacer_scratch = use_pplacer_scratch_dir ? "--scratch_dir pplacer_tmp" : ""
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.GTDBTK_CLASSIFYWF.task_command.sh'
     export GTDBTK_DATA_PATH="\$(find -L ${db} -name 'metadata' -type d -exec dirname {} \\;)"
 
     python3 normalize_gtdb_bins.py \\
@@ -65,6 +70,7 @@ process GTDBTK_CLASSIFYWF {
     stub:
     prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.GTDBTK_CLASSIFYWF.task_command.sh'
     export GTDBTK_DATA_PATH="\$(find -L ${db} -name 'metadata' -type d -exec dirname {} \\;)"
 
     mkdir ${prefix}

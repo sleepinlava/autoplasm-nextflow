@@ -16,6 +16,10 @@ process CHECKM2_PREDICT {
     tuple val(meta), path("${prefix}")                   , emit: checkm2_output
     tuple val(meta), path("${prefix}_checkm2_report.tsv"), emit: checkm2_tsv
     tuple val("${task.process}"), val('checkm2'), eval('checkm2 --version'), topic: versions, emit: versions_checkm2_predict
+    tuple val("${task.process}"), val(meta), path("${meta.id}.CHECKM2_PREDICT.task_command.sh"),
+          val('checkm2 --version'), eval('checkm2 --version'),
+          eval("sha256sum '${meta.id}.CHECKM2_PREDICT.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -24,6 +28,7 @@ process CHECKM2_PREDICT {
     def args = task.ext.args ?: ''
     prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CHECKM2_PREDICT.task_command.sh'
     # Passing the database via CHECKM2DB instead of --database_path skips CheckM2's
     # hardcoded checksum check, allowing custom/reduced databases (e.g. for testing)
     export CHECKM2DB=${db}
@@ -41,7 +46,7 @@ process CHECKM2_PREDICT {
     stub:
     prefix = task.ext.prefix ?: "${meta.id}"
     """
-    mkdir ${prefix}/
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CHECKM2_PREDICT.task_command.sh'
     touch ${prefix}_checkm2_report.tsv
     """
 }

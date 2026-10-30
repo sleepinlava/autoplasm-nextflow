@@ -15,9 +15,14 @@ process GPLAS2_NODES {
     output:
     tuple val(meta), path("${meta.id}.gplas.gfa"), path("${meta.id}.gplas_nodes.fasta"), emit: nodes
     tuple val(meta), path("${meta.id}.gplas_nodes.json"), emit: state
+    tuple val("${task.process}"), val(meta), path("${meta.id}.GPLAS2_NODES.task_command.sh"),
+          val('python3 .gplas_inputs.py --help'), eval('python3 .gplas_inputs.py --help 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.GPLAS2_NODES.task_command.sh'"), emit: task_provenance
+
 
     script:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.GPLAS2_NODES.task_command.sh'
     python3 .gplas_inputs.py prepare --graph '${graph}' --prefix '${meta.id}' \\
         --sample-id '${meta.gplas_original_meta.id}'
     """
@@ -40,9 +45,14 @@ process GPLAS2_PREDICTIONS {
     tuple val(meta), path(graph), path("${meta.id}.gplas_prediction.tab"), path("${meta.id}.gplas_prediction.tab.ready"), optional: true, emit: ready
     tuple val(meta), path("${meta.id}.gplas_prediction.tab"), emit: predictions
     tuple val(meta), path("${meta.id}.gplas_prediction.state.json"), emit: state
+    tuple val("${task.process}"), val(meta), path("${meta.id}.GPLAS2_PREDICTIONS.task_command.sh"),
+          val('python3 .gplas_inputs.py --help'), eval('python3 .gplas_inputs.py --help 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.GPLAS2_PREDICTIONS.task_command.sh'"), emit: task_provenance
+
 
     script:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.GPLAS2_PREDICTIONS.task_command.sh'
     python3 .gplas_inputs.py predictions --graph '${graph}' --consensus '${consensus}' \\
         --genomad-assessment '${assessment}' \\
         --output '${meta.id}.gplas_prediction.tab' --sample-id '${meta.gplas_original_meta.id}' \\

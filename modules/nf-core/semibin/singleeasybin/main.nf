@@ -29,6 +29,10 @@ process SEMIBIN_SINGLEEASYBIN {
     tuple val(meta), path("${prefix}/binning_status.json"), emit: state
     tuple val("${task.process}"), val('SemiBin'), eval("SemiBin2 --version"), emit: versions_semibin, topic: versions
     tuple val("${task.process}"), val('cuda'), eval('python -c "import torch; print(torch.version.cuda or \'no CUDA available\')"'), emit: versions_cuda, topic: versions
+    tuple val("${task.process}"), val(meta), path("${meta.id}.SEMIBIN_SINGLEEASYBIN.task_command.sh"),
+          val('SemiBin2 --version'), eval('SemiBin2 --version'),
+          eval("sha256sum '${meta.id}.SEMIBIN_SINGLEEASYBIN.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -42,6 +46,7 @@ process SEMIBIN_SINGLEEASYBIN {
     semibinRequireRuntime(runtime_identity, runtime)
     def runtime64 = semibinRuntimeBase64(runtime)
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.SEMIBIN_SINGLEEASYBIN.task_command.sh'
 
     python semibin_runtime_resources.py --runtime-base64 '${runtime64}' --verify ${runtime_receipt} --execute -- ${args} single_easy_bin --input-fasta ${fasta} --input-bam ${bam} --output ${prefix} -t ${task.cpus} --engine ${engine} ${args2}
 
@@ -52,6 +57,7 @@ process SEMIBIN_SINGLEEASYBIN {
     semibinRequireRuntime(runtime_identity, semibinRuntime(task, workflow.containerEngine, meta))
     prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.SEMIBIN_SINGLEEASYBIN.task_command.sh'
     mkdir ${prefix}
     touch ${prefix}/{contig_bins,recluster_bins_info}.tsv
     touch ${prefix}/{data,data_split}.csv

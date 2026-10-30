@@ -13,6 +13,10 @@ process CONCOCT_CONCOCTCOVERAGETABLE {
     output:
     tuple val(meta), path("*.tsv"), emit: tsv
     tuple val("${task.process}"), val('concoct'), eval('concoct --version | cut -d " " -f2'), emit: versions_concoct, topic: versions
+    tuple val("${task.process}"), val(meta), path("${meta.id}.CONCOCT_CONCOCTCOVERAGETABLE.task_command.sh"),
+          val('concoct --version'), eval('concoct --version'),
+          eval("sha256sum '${meta.id}.CONCOCT_CONCOCTCOVERAGETABLE.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -21,6 +25,7 @@ process CONCOCT_CONCOCTCOVERAGETABLE {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_CONCOCTCOVERAGETABLE.task_command.sh'
     concoct_coverage_table.py \\
         ${args} \\
         ${bed} \\
@@ -32,6 +37,7 @@ process CONCOCT_CONCOCTCOVERAGETABLE {
     stub:
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_CONCOCTCOVERAGETABLE.task_command.sh'
     touch ${prefix}.tsv
 
     """

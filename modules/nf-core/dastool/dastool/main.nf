@@ -26,6 +26,10 @@ process DASTOOL_DASTOOL {
     tuple val(meta), path("*.b6")                       , optional: true, emit: b6
     tuple val(meta), path("*.seqlength")                , optional: true, emit: seqlength
     tuple val("${task.process}"), val('dastool'), eval('DAS_Tool --version 2>&1 | grep "DAS Tool" | sed "s/DAS Tool //"'), topic: versions, emit: versions_dastool
+    tuple val("${task.process}"), val(meta), path("${meta.id}.DASTOOL_DASTOOL.task_command.sh"),
+          val('DAS_Tool --version'), eval('DAS_Tool --version 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.DASTOOL_DASTOOL.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -55,6 +59,7 @@ process DASTOOL_DASTOOL {
     def decompress_proteins = proteins && (proteins.toString() != clean_proteins) ? "gunzip -f ${proteins}" : ""
     def proteins_pred = proteins ? "-p ${clean_proteins}" : ""
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.DASTOOL_DASTOOL.task_command.sh'
     ${check_db}
     ${decompress_proteins}
     ${decompress_contigs}
@@ -72,6 +77,7 @@ process DASTOOL_DASTOOL {
     stub:
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.DASTOOL_DASTOOL.task_command.sh'
     touch ${prefix}_DASTool.log
     touch ${prefix}_DASTool_summary.tsv
     touch ${prefix}_DASTool_contig2bin.tsv

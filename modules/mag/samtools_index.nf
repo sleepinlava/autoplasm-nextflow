@@ -17,9 +17,14 @@ process SAMTOOLS_INDEX {
 
     output:
     tuple val(meta), path("${bam}.bai"), emit: bai
+    tuple val("${task.process}"), val(meta), path("${meta.id}.SAMTOOLS_INDEX.task_command.sh"),
+          val('samtools --version'), eval('samtools --version | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.SAMTOOLS_INDEX.task_command.sh'"), emit: task_provenance
+
 
     script:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.SAMTOOLS_INDEX.task_command.sh'
     samtools index -@ ${task.cpus} ${bam}
     """
 }

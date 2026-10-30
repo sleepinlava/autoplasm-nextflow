@@ -21,6 +21,10 @@ process LINK_SEQUENCE {
     tuple val(meta), path("${meta.id}.sequence_links.tsv"), emit: links
     tuple val(meta), path("${meta.id}.sequence_scores.tsv"), emit: scores
     tuple val(meta), path("${meta.id}.sequence_method.json"), emit: method
+    tuple val("${task.process}"), val(meta), path("${meta.id}.LINK_SEQUENCE.task_command.sh"),
+          val('Rscript --version'), eval('Rscript --version'),
+          eval("sha256sum '${meta.id}.LINK_SEQUENCE.task_command.sh'"), emit: task_provenance
+
 
     script:
     def binPaths = (mag_bins in List ? mag_bins : (mag_bins ? [mag_bins] : []))
@@ -34,6 +38,7 @@ process LINK_SEQUENCE {
     def taxList = taxPaths.collect { shellQuote.call(it) }.join(' ')
     def mergeTax = taxPaths ? "head -n 1 ${shellQuote.call(taxPaths[0])} > taxonomy.tsv && tail -q -n +2 ${taxList} >> taxonomy.tsv" : ''
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.LINK_SEQUENCE.task_command.sh'
     ${mergeTax}
     sequence_similarity_link.R \\
         --plasmid-contigs ${shellQuote.call(plasmid_contigs)} \\

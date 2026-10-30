@@ -18,9 +18,14 @@ process RECYCLER {
 
     output:
     tuple val(meta), path("${meta.id}.recycler_out", type: 'dir'), emit: output_dir
+    tuple val("${task.process}"), val(meta), path("${meta.id}.RECYCLER.task_command.sh"),
+          val('python3 run_recycler_checked.py -h'), eval('python3 run_recycler_checked.py -h 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.RECYCLER.task_command.sh'"), emit: task_provenance
+
 
     script:
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.RECYCLER.task_command.sh'
     python validate_recycler_inputs.py --graph "${assembly_graph}" --bam "${bam}" \\
         --provenance "${provenance}" --out ${meta.id}.recycler.inputs.json
     python run_recycler_checked.py --graph "${assembly_graph}" --bam "${bam}" \\

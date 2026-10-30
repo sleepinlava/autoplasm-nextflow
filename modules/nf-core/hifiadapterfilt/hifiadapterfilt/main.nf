@@ -16,6 +16,10 @@ process HIFIADAPTERFILT_HIFIADAPTERFILT {
     tuple val(meta), path("${prefix}.contaminant.blastout"), emit: blastout
     tuple val(meta), path("${prefix}.blocklist")           , emit: blocklist
     tuple val("${task.process}"), val('hifiadapterfilt'), eval("hifiadapterfilt.sh --version 2>&1 | head -1"), topic: versions, emit: versions_hifiadapterfilt
+    tuple val("${task.process}"), val(meta), path("${meta.id}.HIFIADAPTERFILT_HIFIADAPTERFILT.task_command.sh"),
+          val('hifiadapterfilt.sh --version'), eval('hifiadapterfilt.sh --version 2>&1 | sed -n "1p"'),
+          eval("sha256sum '${meta.id}.HIFIADAPTERFILT_HIFIADAPTERFILT.task_command.sh'"), emit: task_provenance
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -33,6 +37,7 @@ process HIFIADAPTERFILT_HIFIADAPTERFILT {
         ? "ln -s \$(realpath ${db}) HiFiAdapterFilt/DB"
         : "ln -s \$(dirname \$(command -v hifiadapterfilt.sh))/DB HiFiAdapterFilt/DB"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.HIFIADAPTERFILT_HIFIADAPTERFILT.task_command.sh'
     # Workaround: BusyBox sed in this container lacks GNU step-address syntax (1~4,2~4).
     # hifiadapterfilt.sh uses `sed -n '1~4s/^@/>/p;2~4p'` to convert FASTQ→FASTA for
     # BLAST, but BusyBox sed silently produces empty output, preventing adapter detection.
@@ -71,6 +76,7 @@ SEDWRAP
     stub:
     prefix = task.ext.prefix ?: "${meta.id}"
     """
+    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.HIFIADAPTERFILT_HIFIADAPTERFILT.task_command.sh'
     echo "" | gzip > ${prefix}.filt.fastq.gz
     touch ${prefix}.stats
     touch ${prefix}.contaminant.blastout
