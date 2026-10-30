@@ -1,0 +1,18 @@
+{
+  "date": "2026-10-27",
+  "finding": "TA-094",
+  "scope": "independent re-confirmation of the ready candidate, not a consolidated formal acceptance",
+  "fresh_checks": {
+    "env_python": "results/tool-audit/runtime/plasmidfinder-2.1.6-py310 is Python 3.10.22, matching the declared py310 pin in modules/nf-core/plasmidfinder/environment.yml",
+    "native_positive_rerun": "fresh run of the exact historical command (PATH-prefixed env, shebang '#!/usr/bin/env python3'), complete original 569-byte/540bp upstream test.fsa, exit 0; results_tab.tsv, Hit_in_genome_seq.fsa, Plasmid_seqs.fsa byte-identical to the 2026-10-26 py310-native baseline; data.json differs only in run_info date/time (26.10.2026 16:35:41 -> 27.10.2026 12:10:24), all 22 other flattened keys identical"
+  },
+  "original_failure_mode": "the solved Python 3.15.1 environment was cleaned up per the 2026-10-26 ledger; the distutils ModuleNotFoundError startup failure is retained as historical evidence and was not re-solved (network/heavy)",
+  "current_source": "environment.yml pins conda-forge::python=3.10; production config unchanged by this review",
+  "outcome": "core claim re-confirmed; recommend acceptance in the next consolidated batch",
+  "limits": [
+    "relies on the 2026-10-26 87-archive/package verification chain, not re-executed",
+    "single software fixture, not a biological accuracy claim",
+    "findings ledger and 718-item accepted-source list unchanged",
+    "no OCI/platform/provider acceptance"
+  ]
+}

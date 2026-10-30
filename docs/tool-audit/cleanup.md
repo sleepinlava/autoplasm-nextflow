@@ -69,3 +69,44 @@ publication-v1由测试驱动在保存.command脚本/运行器/输出/退出值/
 逐文件大小/权限/mtime/SHA及删除计划见 `results/tool-audit/20261027-cleanup-7/plan.json`、cleanup.json。2585个递归JSON索引无既有固定产物路径引用，前批74固定证据与正式718清单不变。第一次核对因本轮已明确修改的Medaka测试不再等于旧source snapshot而提前拒绝、没有删除；随后绑定第19顺序候选补丁的精确往返证明，仅允许该已知来源差异，其余核对保留。
 
 逻辑删除15,573,586字节，窗口内实测可用空间delta为0，不声明物理释放15.6MB。FASTQ正文不保留，来源调查如需重放须从固定blob完整重取并核对已保留SHA256/git blob SHA；原解压参考可从保留gzip无损恢复。后续仍须真实完整匹配细菌ONT案例，不因清理或候选控制通过而缩减验收范围。
+
+
+## 废弃工具构建缓存与重复HOTSPOT模型/COPLA库（20261027-cleanup-8）
+
+按用户再次明确授权，删除50个已确认不再复用目标：47个无当前安装环境引用的旧Conda包解压缓存（包括失效Python3.13/3.15、旧TensorFlow等构建），两份HOTSPOT私有测试模型目录，以及COPLA缓存试验的私有databases目录。没有删除任何已安装工具环境或唯一主数据库/模型。57个保留Conda prefix、1730个实际使用包构建参与核对；47份原始包归档全部保留并校验，历史旧解压路径不再存在，可从包归档重新解压。
+
+两份HOTSPOT副本逐文件等于保留的20261023-hotspot/assets/models，COPLA私有库逐文件等于runtime/copla-install-1.0/databases，共20,142份替代文件SHA核对。原测试的模型变异/损坏/还原与科学结果证据、全部日志/trace/JUnit仍保留；若需重放这些私有旧attempt，先从保留主资源重建目录，不能再称已删除路径当前可用。PLASMe/PlasX/Platon等仍需主库、当前Medaka模型/完整1.11GB真实细菌样本以及所有现存工具环境保留。
+
+删除前审查2650份递归JSON证据索引，无目标内固定文件hash绑定；检查71,914个已安装环境符号链接无指向目标，宿主同用户进程复查无目标程序/目录/打开文件占用。67,707普通文件/8279目录/188符号链接的模式、mtime、大小、SHA/链接目标及硬链接数完整清单保存在deleted-files.ndjson.gz；原始包元数据、重建归档及替代主文件SHA列表另存。
+
+逻辑删除7,384,706,875字节，删除窗口实测可用空间增加4,540,817,408字节（约4.23GiB）。后者受硬链接/共享extent和同期文件系统活动影响，不等同于逻辑总量或独占回收保证。删除后116项固定证据与270项已提交源码/文档逐项核对不变，正式718来源清单不改，未移除任何已安装环境。
+
+最初只读引用扫描因重复路径构造耗时，宿主CPU/堆栈检查后仅中断自己的审查进程，退出130且未开始删除。优化为预计算/记忆匹配后同样50目标/2650索引重新完成；357个匹配等价控制通过，范围未缩减。所有准备尝试和实际清理结果在results/tool-audit/20261027-cleanup-8/保留；cleanup.json、plan.json、reference-index-review.json、installed-prefix-review.json、host-process-review.json为权威记录。
+
+清理后原生geNomad --version为1.12.0；Medaka须使用其原prefix/bin PATH（入口为env python），首次未设置该PATH误选全局Python而导入失败，按原环境PATH重跑、未重装依赖或改科学代码。实际结果另存同批medaka-version.json；版本检查不等同于原生推理/科学验收。
+
+
+## Medaka已完成阶段中间产物与冗余缓存（20261027-cleanup-9，用户当日明确授权）
+
+用户明确要求清理退役/不再使用的大文件。两批执行，逐文件清单（路径/大小/模式/mtime/SHA256/硬链接数）保存于 `results/tool-audit/20261027-cleanup-9/deleted-files.ndjson.gz` 与 `deleted-files-2.ndjson.gz`。
+
+批一：Medaka已完成验证的中间产物570文件、逻辑13,171,180,717字节、实测可用+12,256,165,888字节——cache-v2/framework-gzip-v1/podman-v1的work目录、optional-exec v1失败轮与v2通过轮的BAM/HDF。全部run.json/exit.json/trace/log/最终consensus/gaps BED及钉住哈希证据保留；ordinary-gzip-v1被引用为结果的work产品明确保留；完整NO-MISS样本、模型、索引、环境不变。一个目标（optional-exec/production-b/work）在执行时已不存在（v1未走到该阶段），如实记录。删除后旧缓存队列不可原样resume，重建须用保留输入/环境。
+
+批二：plasmaag-remote-url-pkg-cache与results/nf-test/uv-cache，65,240文件、逻辑9,105,961,114字节、实测+1,280,614,400字节。pkg-cache全部158个.conda与保留的mamba-root/pkgs逐字节SHA256一致，其余硬链接字节经pkgs/https命名空间仍可达；uv-cache为可重建工具缓存而非证据。实测增量小于逻辑量系硬链接与共享extent，不虚构回收量。
+
+正式718来源清单、钉住证据与各接受receipt不变；PlasX/PlasMe/HOTSPOT主库、全部安装环境、当前完整样本与MOB新建库均保留。SCAPP退役目录（约8M）为退役证据，体量小且属历史记录，未删。
+
+
+## 已通过轮中间work、PlasMAAG中间映射与已解包/可重下归档（20261028-cleanup-10，用户当日授权）
+
+用户当日要求清理本目录大文件，并清理不再使用的相关副本。三批执行；逐文件路径/大小/模式/mtime/SHA256/硬链接数清单与归档SHA、解包映射、provenance一并保存在 `results/tool-audit/20261028-cleanup-10/`。
+
+批一（中间产物与可重建缓存）：删除 `20261028-shotgun-p4-deployment-v4/work/tests/f8bd…/work` 内层Nextflow intermediate；5份 `plasmaag-*/…/.plasmaag_native/intermidiate_files`（plasmaag-production-native-v2、plasmaag-nf-test-remote-pin-v5、plasmaag-nf-test-declared-v3、plasmaag-megahit-compatible-native、20261026-resource-consumers/plasmaag-native-v2）；以及 `runtime/mamba-root/pkgs/cache` repodata缓存。共2,561普通文件、557目录、311符号链接，逻辑18,513,239,431字节；窗口实测可用+8,141,934,592字节（btrfs共享extent，逻辑量不等于物理回收）。保留v4 `output/`（4.3G，456文件）、junit/stdout/stderr/nf-test.log，以及各run其余work、最终产物和全部receipt/selected-artifacts/run.json；清单为 `deleted-files.ndjson.gz`。删除前扫描64,279份JSON/JSONL索引：v4/v5内层work无外部引用；5份intermidiate_files无selected-artifacts/receipt哈希绑定；无外部符号链接指向目标。
+
+批二（逐成员核对已解包的下载归档与Conda包归档）：`20261024-platon-native/platon-db-v1.5.0.tar.gz` 1,690,687,855字节（31成员逐一等大存在于 `database/db`）、`genomad_db_v1.9.tar.gz` 842,023,773字节（27成员存在于 `genomad-db/genomad_db`），以及 `runtime/mamba-root/pkgs` 下1,945份 `.conda`/`.tar.bz2` 包归档 7,673,545,912字节。逻辑10,206,257,540字节，实测+9,209,925,632字节；清单 `deleted-archives.ndjson.gz`。
+
+批三（其余已解包下载归档）：`20261023-opera-native/downloads/complete_ref_genomes.tar.gz` 2,934,421,515字节（5,242成员等于 `runtime/opera-ms-0.8.3/complete_ref_genomes`）、`20261023-hotspot/models.tar.gz` 1,764,744,646字节（19成员等于 `assets/models`）、`20261024-plasx-native/PlasX_mmseqs_profiles.tar.gz` 1,700,322,242字节（54成员等于 `profiles/`）。逻辑6,399,488,403字节，窗口实测+5,703,544,832字节；清单 `deleted-archives-3.ndjson.gz`。三批逻辑合计35,118,985,374字节；文件系统可用空间4,597,522,432→29,386,518,528字节（约+23.09GiB，含btrfs延迟回收窗口）。
+
+保留：全部解包主库/模型（OPERA 9.2G参考树、HOTSPOT assets/models、PlasX 54 profiles、Platon database/db、两份geNomad DB）、全部已安装Conda prefix及conda-meta/显式锁、下载provenance JSON（database-lock、models-response、assets-download、database-proof、genomad-db-download）、各run最终产物/日志/receipt。删除后冒烟通过：genomad-1.12.0 prefix可导入TensorFlow 2.21.0，plasmaag-a6b39ac prefix可导入torch 2.13.0+cpu；Conda包归档删除不影响已安装环境。
+
+删除后上述tar与包归档路径不再存在，不能声称当前可用；重建须按保留的锁/conda-meta与记录URL/SHA重新下载。历史receipt与selected-artifacts未改写。未清理：失败轮 `20261028-shotgun-p4-deployment-v5/work`（约3.0G，保留Join mismatch诊断证据）、`tests/nf-test/.venv`（约3.8G，活跃开发环境）、`runtime/plasme-DB-8046934/DB/plsdb.zip`（约1.1G，PLASMe主库组成部分）、真实样本与输入fixture。

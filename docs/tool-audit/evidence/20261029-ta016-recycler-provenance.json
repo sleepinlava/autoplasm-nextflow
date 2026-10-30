@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidate: RECYCLER task_provenance real verification; not accepted",
+  "verification": "real Nextflow 26.10, tests/nf-test/workflows/recycler_real.nf with retained minigut reads (20261023-opera-native/real-data): SPADES 4.1.0 (beforeScript PATH pin) + RECYCLER_INPUTS + RECYCLER 0.7 all COMPLETED; recycler_out contains real graph-derived products incl. input_contract.json; provenance sha256: RECYCLER c38cd252ce35de8f307388df4a40131c7852bc57e6f4885d71231271978fcf6f, SPADES dc4f1f1a750f49e69eb74ad20b0bdd9231fd7db9dd8162a78cec9dc3c0cc6962",
+  "patch": "included in docs/tool-audit/patches/TA-016-mag-linking-provenance.diff sha256 abdeaf418784d21f8e0675d386678c93901771d8cf23892cdc3dff3de8e6a890",
+  "failed_attempt": "v1 stopped before launch damage: params.test_data pointed at retired real-data dir; harness expects a root containing test_data/, corrected to 20261023-opera-native/real-data",
+  "limits": ["candidate not accepted; TA-016 remains in_progress"]
+}

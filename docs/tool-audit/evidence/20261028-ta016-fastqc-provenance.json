@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to FASTQC; not accepted",
+  "change": "modules/nf-core/fastqc/main.nf: provenance tuple + cp of BASH_SOURCE[0] in script and stub; 'def prefix' -> shared 'prefix =' (script and stub) so the output block sees it",
+  "verification": "real Nextflow 26.10 + podman fastqc:0.13.0, PE pair of locked SRR19638267: task COMPLETED, provenance sha256 1cc86161… matches the actual task command file",
+  "patch": "docs/tool-audit/patches/TA-016-fastqc-provenance.diff sha256 7354cba75295586129edc2e6a4e6daeea2e6bc2d60beb12fc62262c377fe8186",
+  "harness": "tests/nextflow/fastqc_provenance.nf",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "single PE fixture", "report end-to-end rerun pending"]
+}

@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to FLYE (assembler producer); not accepted",
+  "change": "modules/nf-core/flye/main.nf: provenance tuple after the QUAST pattern; prefix assignments changed from 'def prefix' to shared 'prefix =' in script and stub (def-scoped prefix is invisible to the output block — compile error 'prefix is not defined', then 'already declared' in stub; both failed runs retained)",
+  "verification": "real Nextflow 26.10 + podman flye:2.9.5 (image pulled, digest recorded in run dir) on an explicit interface control: first 20,000 reads (by record lines) of the retained full sample — a technical control, NOT a scientific sample or subsampled science claim. Task COMPLETED; provenance sha256 1a3d5d0c… matches the actual task command file bytes",
+  "patch": "docs/tool-audit/patches/TA-016-flye-provenance.diff sha256 5c009b66417fbfa29bb126ae5299a62aeb9d5d8fd51b44a2182bd8dd3da996f4",
+  "harness": "tests/nextflow/flye_provenance.nf",
+  "limits": [
+    "candidate not accepted; TA-016 remains in_progress",
+    "interface-level only; no assembly-quality evaluation of the control run",
+    "report end-to-end rerun and remaining producers pending"
+  ]
+}

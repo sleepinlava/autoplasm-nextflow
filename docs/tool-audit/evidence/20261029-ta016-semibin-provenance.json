@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidate: SEMIBIN_SINGLEEASYBIN task_provenance real verification; not accepted",
+  "verification": "real Nextflow 26.10 via nextflow-no-log, native semibin-2.4.1 env, official SemiBin single_sample_data fixtures: SEMIBIN_RESOURCE_PROBE + SEMIBIN both COMPLETED; probe identity pins SemiBin 2.4.1; real binning products (model.pt, output_bins/SemiBin_30.fa.gz, binning_status.json state=bins_ready); provenance file sha256 99937f1d65f91e24c6bd11127bbe3d3b0a9fecabe8476c1d98ab643ed25609d5",
+  "patch": "included in docs/tool-audit/patches/TA-016-mag-linking-provenance.diff sha256 d937845182db04eaf8b7927ebbbaacb2267c52574c775b0ec6d62bf8311f446f",
+  "harness": "tests/nextflow/semibin_runtime_native.nf (pre-existing probe+consumer harness)",
+  "limits": ["candidate not accepted; TA-016 remains in_progress"]
+}

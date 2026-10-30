@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-30",
+  "finding": "TA-097",
+  "status": "bounded_verified",
+  "receipt": "results/tool-audit/20261029-ta097-review/receipt.json",
+  "receipt_sha256": "18be1ce5320adf2a512edc8520ab3c687a8dde1e3c8f3237c4986840e708790c",
+  "scope": "SPAdes 4.1.0 graph completion guard: allow fixed upstream normal completion with warnings, reject absent/abnormal/spoofed/out-of-order terminal evidence, preserve emitted warning lines; execution acceptance only.",
+  "source_sha256": {
+    "bin/spades_graph_provenance.py": "ae89ffec974068d16546eea57c2035256595955cde5bd4d456ff32f913fa411f",
+    "tests/test_spades_graph_provenance.py": "88dedea83a81b9148680d96aca4e37f5e6b240c67523272c9657122482e2b0e1",
+    "modules/nf-core/spades/main.nf": "b81eee2a0520e14dedb3c298b9007704483fc6ddae03e19aa3b1ac60027a79f9",
+    "tests/nextflow/spades_provenance.nf": "8a6ec79647969e957a765ff86ccc9a2737c1321073386fb1e794e04e9e789fec",
+    "results/tool-audit/runtime/spades-4.1.0/bin/spades.py": "24170adc31cb4ae25166f85d01365f31bf377aa34ca16a04d0ca534c38864542",
+    "results/tool-audit/runtime/spades-4.1.0/share/spades/spades_pipeline/support.py": "e604ba7c8bba2edabf3065db3ded942ae8eac99e455c509cd079b89c3a652015"
+  },
+  "checks": {
+    "real_current_module": "one native minigut SPADES task completed; staged helper and command bytes verified",
+    "retained_clean": "actual k33-fixed-runtime graph/plan/config/log re-read",
+    "old_helper": "frozen accepted helper rejects same current warning-completed native result",
+    "cli_controls": 10,
+    "unit_methods": {
+      "spades_provenance": 14,
+      "recycler_graph_reference": 10
+    },
+    "downstream_graph_nodes": 290,
+    "warnings_count": 2,
+    "warning_count_unit": "emitted_lines_excluding_summary"
+  },
+  "limitations": [
+    "Initial sandboxed native attempt failed Python multiprocessing local socket bind; authorized retry outside sandbox passed.",
+    "Warning records are not a quality pass: threshold-estimation warnings retained verbatim; no scientific accuracy claim.",
+    "No all restart-from/continue combinations, remote executors, full platform or independent biological benchmarking.",
+    "TA-016 provenance and TA-091 resource contracts remain open; this accepts no unrelated source changes."
+  ]
+}

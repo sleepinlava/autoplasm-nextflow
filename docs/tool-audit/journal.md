@@ -780,3 +780,246 @@ ABRicate后续完成元数据及vendored nf-test接口修复：原始完整Bacte
 
 
 2026-10-26：MOB3别名执行guard显式输入接线，固定native parse/path/main argv保留，真实准备点禁init/ETE3升级、taxonomy ro；6实际准备FAILED+3stub，16唯一边界/结构单元，178mock/2nf-test stub/12发布trace/52显式目录stub-cache通过。完整prepared科学案例未执行，资源身份pending4。17patch192paths/791snapshot，正式718与99/2/8不变。publication私有work按驱动清理，最终副本hash复核，无空间虚报。
+
+
+2026-10-27：Medaka cache-v2队列终态独立复核：14阶段真实完成/返回0，probe逐次重跑、不变与三处还原consumer CACHED同hash 9a/2d5a60，有效同大小同mtime模型归档身份变化consumer重算（f4/c0d632），坏模型trailer/坏MMI/坏FAI在probe exit1拒绝、运行上下文不匹配在消费者script闭包查缓存前拒绝，plain/ordinary-gzip/BGZF完整FASTA均对应原生基线；队列后11源码guard+4原始资源SHA256复核不变。TA-091/096仍in_progress不关闭，正式99/2/718不变。见[复核](contracts/medaka-cache-queue-review-20261027.md)与[证据](evidence/20261027-medaka-cache-queue-review.json)。
+
+
+2026-10-27：Medaka可选分支探测级验证通过：-x下损坏相邻FAI/MMI被跳过（force_indexes=true/source_indexes=null，对应固定脚本170-172行mini_align -f），同fixture默认分支rc1拒绝；-B单区间BED内容身份入receipt（原生186-204行仅传medaka inference）；RLE检测三方等价（原生CLI/helper/receipt均false），包内无已准备RLE模型，变换分支仅源码级依据；调用端共享选择器与符号链接解析边界复核健全。原始资源不变，TA-091仍in_progress。见[契约](contracts/medaka-optional-branches-20261027.md)与[证据](evidence/20261027-medaka-optional-branches.json)。
+
+
+2026-10-27：Medaka -x/-B完整真实推理验证通过：原生-x共识=默认native-v1，生产-x输出/gaps BED一致、receipt force_indexes=true；原生-B仍输出全部contig、contig_1由draft回填（gaps BED contig_1 0 4724790），生产-B与原生基线逐字节一致。新原生行为记录：-B只限推理区间不限输出contig；已抛光fixture下序列oracle弱，判别靠gaps BED。v1误设断言失败目录保留。TA-091仍in_progress（RLE真实执行缺），正式99/2/718不变。见[契约](contracts/medaka-optional-exec-20261027.md)与[证据](evidence/20261027-medaka-optional-exec.json)。
+
+
+2026-10-27：TA-095独立复核通过：固定2.1.6原生parser在钉住py310环境对--legacy仍exit2 "unrecognized arguments"（完整原569B/540bp fixture作-i），同env --help exit0（旁证TA-094启动修复）；当前config无--legacy、mock断言在位、environment.yml钉python=3.10，历史py310-legacy/run.json完整。建议下一合并批接受；台账与718清单不变。见[证据](evidence/20261027-ta095-review.json)。
+
+
+2026-10-27：TA-094独立复核通过：钉住py310环境实际Python3.10.22，按历史同命令真实重跑完整540bp阳性exit0，results_tab.tsv与两份FSA逐字节等同2026-10-26基线，data.json仅run_info日期/时间不同（其余22键一致）；3.15.1失败环境已按台账清理、历史失败证据保留不重解。建议下一合并批接受；台账/718不变。见[证据](evidence/20261027-ta094-review.json)。
+
+
+2026-10-27：TA-093独立复核通过：evidence钉住的20项artifact全部重哈希匹配；完整原ACBA fixture（SHA不变）在固定2.0.5环境真实重跑三模式——默认隐式circ得1complete、--linear得1CALIN+1In0、--circ保留原1complete，与topology-before-after.json逐项一致；候选拓扑表helper仍在模块两调用点。建议下一合并批接受；台账/718不变。见[证据](evidence/20261027-ta093-review.json)。
+
+
+2026-10-27：TA-092独立复核通过：22项钉住artifact全部匹配；钉住驱动/tests/run_abricate_errors.py（SHA一致）真实重跑三例——converter/blast晚失败下原1.0.1仍exit0且带5真实命中，守卫exit1；合法零结果两者均exit0零命中，无误伤；fixture/源码SHA全不变。四项ready S0候选（TA-092/093/094/095）独立复核均完成并建议接受，待合并批次。台账/718不变。见[证据](evidence/20261027-ta092-review.json)。
+
+
+2026-10-27：合并接受批次20261027-consolidated-acceptance完成：TA-092/093/094/095经独立复核转为bounded verified，台账110项=103verified+2退役+5未决（S0 TA-091/096；S2 TA-016/031、TT-003），findings.tsv与acceptance.md已更新；四项候选补丁层9/11/12/13所涉文件与HEAD一致，进行中Medaka接线不在本批；正式718清单不变。见[receipt](../../results/tool-audit/20261027-consolidated-acceptance/receipt.json)与[复核](../../results/tool-audit/20261027-consolidated-acceptance/review.md)。
+
+
+2026-10-27：TA-091/096首个OCI后端边界通过：rootless Podman拉取钉住镜像quay.io/biocontainers/medaka:2.2.2--py312h3050eb1_0（digest sha256:18d5d73a…），未修改生产probe+consumer在容器内均COMPLETED，helper全部钉住校验（2.2.2源码/medaka_consensus/mini_align/模型选择加载）对镜像内安装成立，完整FASTA与conda native-v1基线逐字节一致，原始资源不变。仅单镜像单后端、plain draft；Docker/Singularity/远程/AWS与-x/-B/RLE容器内分支未覆盖，TA-091/096仍in_progress。驱动tests/run_medaka_podman_exec.py，见[证据](evidence/20261027-medaka-podman.json)。
+
+
+2026-10-27：对当前工作区（含未提交TA-091/096 Medaka接线）全量重放P0 main拒绝注册表：83/83通过（75注册main拒绝含8 MAG依赖矩阵+8 direct MAG_HOST），每例精确诊断、0分析任务、0 .command.sh；main.nf SHA仍绑定39f4d062（Medaka接线未改main），重放不增分母、非端到端/框架认证。磁盘余量8.2G，未启动大下载。见[证据](evidence/20261027-main-p0-replay.json)。
+
+
+2026-10-27：磁盘97%满（余8.2G）阻碍MOB/GTDB资源准备；完成清理候选审查（只出计划未删除）：Medaka已完成阶段的中间BAM/HDF/任务私有副本合计约13.7G逻辑字节可清（cache-v2/work、production work、framework-gzip-v1、optional-exec v1失败轮与v2、podman-v1），各阶段receipt/trace/log/最终FASTA与钉住哈希保留；plasmaag-remote-url-pkg-cache6.7G须先核对归档留存。明确非候选：plasmaag-native-env-v4（在57保留prefix清单）、PlasX主库、HOTSPOT assets、medaka-nomiss完整样本、runtime环境。删除需用户授权，见results/tool-audit/20261027-cleanup-candidates/medaka-intermediates-plan.json。
+
+
+## 2026-10-27重试与TA-096有界接受
+
+实际早期版本检查注入失败后Nextflow两attempt不同workdir，第二次完整原生推理及全序列复核通过；首attempt无成功产品。补实际原模块ordinarygzip冷失败，重核14阶段guard与10完整FASTA后TA-096有界verified，TA-091保持开放。既有TA-092～095状态字段与生成器/registry同步，未增加这四项范围。当前110=104verified+2退役+4未决；13测试来源补登记不增加用例分母。冻结718来源当前123差异已列出，原清单不替换。详见contracts/medaka-retry-and-acceptance-20261027.md。
+
+
+2026-10-27：718清单对账独立复核：重哈希全部718项，0缺失、123不匹配、0不可归因——与既有evidence/20261027-accepted-manifest-drift.json的123计数一致；本复核补充归因明细：122项最后提交均不早于2026-10-25（各候选/接受增量层），唯一例外modules/nf-core/medaka/main.nf（末次提交10-16）差异来自已知未提交TA-091 Medaka接线。718清单字节不变。另见并发完成的TA-096有界接受（104verified+2退役+4未决）。见[补充证据](evidence/20261027-manifest-reconciliation.json)。
+
+
+2026-10-27：TA-096接受独立复核通过：5项钉住哈希全匹配；retry-v2 trace两attempt不同workdir、attempt1磁盘上确无test.fa.gz/consensus_probs.hdf、attempt2完整FASTA对应原生基线；修复前原模块冷失败任务日志含真实samtools "Cannot index files compressed with gzip"。接受范围回读无越界，TA-091保持唯一开放S0。见[复核证据](evidence/20261027-ta096-independent-review.json)。
+
+
+2026-10-27：MOB默认库归档取得并核验：Zenodo10304948 data.tar.gz 472,851,578字节，MD5与官方元数据一致，SHA256 531f2124…；内容9数据文件（rep/mob/mpf/orit/repetitive/ncbi_plasmid_full_seqs等），文件名与全部31,888条FASTA头部筛查0病毒/噬菌体命中（头部级，不排除质粒内病毒同源片段）。未解包建库、未跑mob_init（其禁TLS校验且自动初始化taxonomy）、无科学运行。归档保留于results/tool-audit/20261027-mobsuite-db/。见[证据](evidence/20261027-mobsuite-db-archive.json)。
+
+
+2026-10-27：MOB受控建库完成（不用mob_init）：按固定3.1.9 wheel环境的原生makeblastdb/mash调用精确复制mob_init步骤2-5，29文件2.2G，逐文件SHA256清单已存；status.txt带诚实的受控构建来源说明。生产preflight复核mob_recon/mob_typer均仅缺ETE3DBTAXAFILE，其余必需路径全部就绪。未跑科学用例；磁盘余6.2G。下一步受控ETE3 taxa.sqlite准备后跑阳性/阴性对照。见[证据](evidence/20261027-mobsuite-db-build.json)。
+
+
+2026-10-27：用户授权清理执行（cleanup-9两批）：Medaka已完成阶段中间产物逻辑13.17G/实测+12.26G；冗余pkg-cache（158/158与保留缓存SHA256一致）+uv-cache逻辑9.11G/实测+1.28G（硬链接差异如实记录）。可用空间6.2G→20G。全部证据/receipt/主库/环境/当前样本保留，详见cleanup.md与results/tool-audit/20261027-cleanup-9/。
+
+
+2026-10-27：MOB默认库准备闭合：NCBI taxdump经TLS校验下载（79,933,488字节，SHA256 6056adf8…，NCBI无官方校验值，记录观测值），以ete3显式taxdump_file路径受控构建taxa.sqlite（777MB，无隐式下载）。生产preflight现对mob_recon（11路径）/mob_typer（10路径）全部通过，taxonomy schema DB_VERSION=2。31文件清单SHA256 5977aa77…。无科学运行；磁盘余19G。下一步MOB科学阳性/阴性对照。见[证据](evidence/20261027-mobsuite-taxonomy.json)。
+
+
+2026-10-27：MOB首个科学对照通过：经生产preflight guard（固定3.1.9源码/资源路径/ETE3只读schema核对后调原main）跑mob_typer——pUTI89完整质粒阳性得IncFIA+IncFIB、MOBF+MOBP、MPF_F（符合IncF预期），4.7Mbp无质粒染色体阴性全'-'且non-mobilizable，均exit0。首次PATH缺blast系工具的exit255为harness错误已记录。mob_recon与缓存身份接线未覆盖。见[证据](evidence/20261027-mobsuite-science-controls.json)。
+
+
+2026-10-27：mob_recon对照经生产guard完成：阳性（pUTI89+无质粒染色体69contig）中pUTI89独立重建为plasmid AA337并正确分型IncFIA+IncFIB/MOBF+MOBP/MPF_F，染色体contig保持chromosome；阴性中2条小contig（4965+1683bp）被判plasmid AF232——边界观察：仅mash最近邻CP034740@0.0593（恰低于原生默认阈值）而零biomarker，属原生默认行为非管道缺陷，下游不应把小contig无biomarker的plasmid标签当强证据。两例exit0。见[证据](evidence/20261027-mobsuite-recon-controls.json)。
+
+
+2026-10-27：MOB生产模块集成通过：真实Nextflow26.10+micromamba复用钉住环境，MOBSUITE_TYPER输出与直接guard CLI阳性逐字段一致（仅前缀不同），MOBSUITE_RECON的plasmid_AA337与直接CLI逐字节一致。v1/v2/v3失败尝试（占位符/conda缺失/-log重复）保留。明确TA-091边界：RECON的DB经ext.args传递、不在deep缓存键内，TYPER显式携带；MOB对缓存身份接线仍开放。harness为tests/nextflow/mobsuite_prepared.nf。见[证据](evidence/20261027-mobsuite-prepared-modules.json)。
+
+
+2026-10-27：Dorado隐式模型合约级审查（TA-091最后pending资源对）：确认三重隐式——'hac'浮动模型名自动下载最新版、模型搜索路径隐式（模块三处都不用，落CWD不入缓存键）、无容器钉住（:latest浮动）+PATH软件无版本断言；官方文档依据已引，本机无dorado未执行。建议门禁设计记录于契约，不构成接受、无下载无科学运行。见[契约](contracts/dorado-implicit-model.md)。
+
+
+2026-10-27：TA-091候选补丁TA-091-mobsuite-recon-db-input.diff（SHA 0bc678a3…）：MOBSUITE_RECON新增显式tuple path(db),val(db_identity)输入入deep缓存键，两个生产调用端与TYPER同样经resourceInput(params.mob_suite_db)接线，缺省为显式absent身份、保留原生默认目录分支。集成v5真实通过（.command.sh含--database_directory 'db'，AA337与直接CLI/旧轮逐字节一致）；stub nf-test2/2通过，三次harness失败（PATH/-log/eval）保留。候选未接受，TA-091仍in_progress；recon的native prepared nf-test例未跑。见[证据](evidence/20261027-mobsuite-recon-db-input.json)。
+
+
+2026-10-27：MOB native prepared nf-test首次真实运行2/2通过：recon对单contig 5,150,703bp B.fragilis完整染色体（自保留genome.fna提取的完整复制子，非下采样）输出chromosome==输入DNA、无质粒、版本3.1.9；typer报告断言通过。发现并修复测试接口缺陷：nf-test0.9.5的then上下文取不到nextflow params（null路径撞上仓库根null/目录），改用MOBSUITE_BACTERIAL_FASTA环境变量；params{}块不受0.9.5支持，失败尝试保留。候选补丁更新为5文件SHA 72c47151…。TA-091仍in_progress（候选未接受）。见[证据](evidence/20261027-mobsuite-recon-db-input.json)。
+
+
+2026-10-27：删除游离null/目录（约88K，未跟踪未引用）——某运行params.outdir未设置时Groovy把null插值为字面目录名；它正是此前nf-test "null（是一个目录）"失败的环境陷阱。清单管道写入失败（xargs空输入），仅记录文件名清单并如实标注未捕获哈希；不影响任何证据链。
+
+
+2026-10-27：refresh_status.py重生成status.md并核对一致：110项=104verified+2退役+4未决（S0仅TA-091；S2 TA-016/031、TT-003），最近接受批次TA-096；718清单当前工作区匹配=False如实显示（123差异已另列归因）。TT-003核查：legacy ENA 16S数据与integration测试数据均已被此前清理删除，重跑需重下载（6样本约250MB）+podman长运行；完整shotgun P4仍需适当非空shotgun队列。
+
+
+2026-10-27：TT-003基础准备：legacy ENA 16S六样本按锁重下载并逐文件SHA256核验（238MB，12/12），geNomad子集库按git blob sha1核验（避开real-nodes锁中sarscov2病毒文件，仅取非病毒必需项）；legacy ENA nf-test以podman后端启动（长运行，结果下轮核对）。完整非空shotgun P4仍需适当shotgun队列，本运行仅覆盖更新后断言的真实框架执行部分。
+
+
+2026-10-28：TT-003框架部分通过：legacy ENA 16S六样本nf-test在podman后端真实执行SUCCESS 1/1（1825s，100任务全成功0失败），更新后Groovy断言（含独立alpha公式复核与低重复门控）真实执行。环境修复：pullPolicy=missing覆盖层（wave注册表瞬时失败）、本地构建autoplasm-r-analysis（5.05GB）、python:3.12-slim缺procps致ps失败→本地覆盖镜像（上游digest已记录，模块未改）；v3一次bowtie2 flaky挂起撞1h时限如实记录。数据：ENA按锁SHA256核验12/12，geNomad子集按git blob sha1核验，real-nodes锁中sarscov2病毒文件未下载。TT-003仍开放：16S非shotgun，需适当非空shotgun队列P4。见[证据](evidence/20261027-ena-legacy-framework.json)。
+
+
+2026-10-28：TT-003 shotgun队列选定并锁定：用户明确PRJDB5375海洋宏基因组可接受（本底噬菌体不算病毒专用元素，约束针对病毒专用fixture/库）。按ENA portal实测library_strategy=WGS、天然采样点分组选定2×3队列：sendai_bay(DRR083116/167/184) vs aline(DRR083096/252/153)，12个PE文件共1.73GB，锁tests/nf-test/shotgun-multisample.lock.json含MD5/大小/设计说明；下载+MD5核验进行中。Zymo（大体积无分组）、唾液（单条件）候选排除理由保留于contracts/tt003-shotgun-cohort-candidates.md。
+
+
+2026-10-28：TT-003 shotgun P4测试已写就：tests/nf-test/nodes-cross-sample-shotgun.nf.test（镜像legacy ENA契约：独立alpha公式、deseq2状态两分支、网络资格两分支、报告断言；config用integration.config即生产QUAST阈值，16S的min-contig200覆盖不适用）；samplesheet 2×3（sendai_bay vs aline）已建。队列下载进行中（193MB/1.73GB）。
+
+
+2026-10-28：TA-016范围核查（只读）：当前仅consensus/structure两个R生产者有task_provenance，其余生产者为静态版本声明；报告bin/generate_report.R:278已诚实区分"static, not runtime probes"。扩展接入是系统性实现工作，需在无并行长任务窗口进行。shotgun队列下载642MB/1.73GB继续中。
+
+
+2026-10-28：shotgun队列下载发现真实上游缺文件：DRR083167_2.fastq.gz在ENA API列出但FTP上不存在（301到目录索引，780B HTML），重试7次一致；按预定规则换成同组次小run DRR083259（两mate均HTTP200），锁与samplesheet同步更新并在锁内记录替换原因；测试样本列表同步。已下载7/12文件MD5全通过，剩余5+2续传中。
+
+
+2026-10-28：shotgun队列12/12文件下载+MD5核验全通过（DRR083252_2一次SSL重试成功）；TT-003 P4真实测试nodes-cross-sample-shotgun.nf.test以podman后端启动运行（20261028-shotgun-p4-v1）。
+
+
+2026-10-28：shotgun P4运行中磁盘一度降至3.3G：清理ena-legacy失败轮work、podman悬空镜像（4个none层，实回收约1.6G）及v5通过轮任务work（1,947文件SHA清单保存于20261027-ena-legacy-v5/task-work-manifest.txt，最终产物与junit保留）。回到5.1G后运行稳定。逻辑删除量与实测差异受硬链接影响，不虚构。
+
+
+2026-10-28：TT-003首个真实shotgun P4执行通过但质粒特征为零：3 Sendai-Bay vs 3 Aline（PRJDB5375，含换人DRR083259）nf-test SUCCESS 1/1、100任务全成功；contig丰度391,344行、diversity 24行非空且独立alpha公式通过；geNomad测试子集库零质粒→DESeq2零特征合法no-fit、FastSpar insufficient_features正确跳过，两分支均以明确机器可读原因执行——空路径静默许可的缺陷类已覆盖。但严格"非空质粒统计"未满足，TT-003保持开放，需富质粒（肠道/粪便）队列让fitted/eligible分支也在真实数据上执行。见[证据](evidence/20261028-shotgun-p4.json)。
+
+
+2026-10-28：决定性灵敏度检查：测试子集geNomad（--disable-nn-classification）在已知质粒阳性B.fragilis完整基因组上也零质粒调用（47kb质粒contig未被调用；另正确报出染色体内44kb原噬菌体，非我方引入的病毒fixture）。结论：非空质粒统计分支在钉住测试库下不可达，与队列无关——需要完整geNomad库+NN（即TT-003要求的部署级P4）。见[证据](evidence/20261028-genomad-sensitivity.json)。
+
+
+2026-10-28：完整geNomad DB v1.9取得：NERSC官方portal下载842,023,773字节（与content-length一致；两次504+一次SSL重试成功），SHA256 47a54faa…，解包1.4G、version.txt=1.9。部署级shotgun P4启动（20261028-shotgun-p4-deployment-v2）：完整库+NN启用（去掉测试only的--disable-nn-classification），同一PRJDB5375契约。磁盘应急修剪：P4 v1通过轮任务work（6.4G，1,886文件SHA清单保留）与medaka-retry-v2 work已清，最终产物/junit/断言输出保留。
+
+
+2026-10-28：真实系统状态变化记录：SELinux于当日10:07–12:02间从可用状态转为Enforcing（非本审计操作所致），致绑定挂载Permission denied、部署P4 v2/v3失败。诊断链：probe逐级定位MCS类别不匹配；chcon一次性误带--reference=/dev/null被其自身参数冲突校验拒绝、未发生任何重标记（已核实抽查）；正确chcon -R -t container_file_t -l s0整树重标记完成（69s，0错误），podman读挂载探针恢复。部署P4 v4重跑中。v3失败为重复挂载destination（runOptions与Nextflow自身挂载冲突）。
+
+
+2026-10-28：部署P4 v4核实未生效：configFile附加的params.genomad_db与GENOMAD ext.args被测试config链（integration.config→test.config）覆盖，实际仍跑子集库+disable-nn（.command.sh实证）；v2/v3另受SELinux影响。v5改用AUTOPLASM_TEST_DATA指向完整库目录重跑；NN仍被harness钉为disabled，属测试范围限制如实记录。另v1通过轮output已带清单删除（456文件SHA），v5 legacy output亦同法处置；磁盘回到4G量级。
+
+
+2026-10-28：TT-003完整geNomad库部署运行v5失败于真实资源约束：mmseqs prefilter对228k profile完整库需临时空间"最多22G"，本机当时仅4G（含应急修剪后）。另确认v5的GENOMAD仍带harness钉住的--disable-nn-classification（ext.args来自test.config链，configFile不覆盖）。海洋队列装配/前段任务在完整库staging前正常。状态：测试配置P4已通过（v1）；完整库部署P4受磁盘容量阻塞，需用户决策退役可重建主资源（如PlasMe 19G/PlasX 17G库）或外部存储。mmseqs splits等降峰值参数受harness钉住的ext.args阻挡，需先解除该覆盖链。
+
+
+2026-10-28：TA-016扩展候选：QUAST接入task_provenance（首个非R生产者），真实podman quast5.3.0/pUTI89验证COMPLETED，命令文件SHA256与实发一致；补丁TA-016-quast-provenance.diff已存。候选未接受；其余生产者未接线，报告端到端未重跑。磁盘应急：medaka-nomiss四轮BAM/HDF中间产物带清单删除（证据哈希在案），v1通过轮output亦带清单处置。
+
+
+2026-10-28：TA-016 QUAST候选报告层复核：现有17/17报告单元全过；runtime_command通用校验（字节保留/校验不符拒绝/缺失拒绝/重复拒绝）覆盖QUAST形态记录，无需新增用例。报告端到端重跑仍未做。
+
+
+2026-10-28：TA-016 FLYE接入候选：真实podman flye2.9.5在2万条接口控制读段（明确技术控制非科学样本）COMPLETED，provenance SHA与实际命令文件一致。修复两个作用域问题（def prefix对output不可见/stub重复声明，失败轮保留）。补丁TA-016-flye-provenance.diff已存，候选未接受。
+
+
+2026-10-28：TA-016 FASTP接入候选：3脚本分支+stub均接provenance；真实podman fastp1.3.6 PE分支在锁定ENA读段对上COMPLETED，SHA与实际命令文件一致。v1参数个数/v2 Groovy转义两轮失败保留。补丁TA-016-fastp-provenance.diff已存；interleaved/SE分支同改未单独执行。
+
+
+2026-10-28：TA-016 FASTQC接入候选：真实podman fastqc0.13.0/锁定ENA PE对COMPLETED，SHA一致。补丁TA-016-fastqc-provenance.diff已存。已接入6生产者：consensus/structure/QUAST/FLYE/FASTP/FASTQC。
+
+
+2026-10-28：TA-016 NANOPLOT接入候选：模块声明的1.47.0镜像拉取并在接口控制读段（2万条ONT，技术控制）上COMPLETED，SHA一致；注意本地旧1.46.2镜像存在但按声明用1.47.0。补丁TA-016-nanoplot-provenance.diff已存。已接入7生产者。
+
+
+2026-10-28：TA-016 FILTLONG接入候选：真实podman filtlong0.2.1接口控制COMPLETED、SHA一致。补丁TA-016-filtlong-provenance.diff已存。已接入8生产者：consensus/structure/QUAST/FLYE/FASTP/FASTQC/NANOPLOT/FILTLONG。
+
+
+2026-10-28：TA-016 MEGAHIT接入候选：真实podman megahit_pigz在锁定ENA PE读段上COMPLETED，SHA一致。补丁TA-016-megahit-provenance.diff已存。已接入9生产者。
+
+
+2026-10-28：磁盘清理（20261028-cleanup-10，用户授权）：删除v4已通过轮内层work、5份plasmaag intermidiate_files、mamba repodata缓存，以及5个逐成员核对解包的下载归档和1,945份Conda包归档；逻辑35,118,985,374字节，可用空间4,597,522,432→29,386,518,528（约+23.09GiB）。逐文件SHA/大小/模式/mtime清单、归档SHA与provenance在results/tool-audit/20261028-cleanup-10/；解包主库、全部安装环境、最终产物、receipt与锁保留，归档重建须按锁/URL重下；genomad（TF 2.21.0）与plasmaag（torch 2.13.0+cpu）冒烟通过。
+
+
+2026-10-28：新发现TA-097（S1）：SPAdes图来源守卫的完成标记过严——只认"finished."精确文本，真实metagenome（DRR083096）与minigut运行均以"finished WITH WARNINGS!"结束（常规估值警告），守卫拒绝全部真实非完美组装，Recycler路径在真实数据上无法运行。候选修复：接受两种完成形态并在provenance JSON记录警告存在/数量，不改算法。注意守卫为2026-10-26 9d36a98用户侧提交所加，尚无真实运行通过过该严格标记；接受前需复核。TA-016 SPADES provenance验证被此守卫阻挡而非模式本身问题；findings.tsv已登记（111项）。
+
+
+2026-10-28：TA-097候选修复+TA-016 SPADES接入验证通过：守卫接受"finished."/"finished WITH WARNINGS!"两形态并记录completed_with_warnings/warnings_count（4）；真实podman SPAdes4.1.0 minigut COMPLETED，provenance SHA一致，图来源JSON含max_k=55/K55 copy_source/完整哈希链。两补丁已存；候选均未接受，警告内容审查政策未定义（候选仅记录）。已接入9生产者+SPADES待TA-097复核。
+
+
+2026-10-28：TA-016 HIFIASM_META接入候选：新建micromamba环境（envs/assembly_hifi.yml；ha 0.13-r308/hamt 0.3-r079），原生真实运行在ONT接口控制读段COMPLETED（明确：hifiasm_meta是HiFi组装器，ONT输入不是其合法科学输入，仅验证接口/provenance路径，不评价组装质量），SHA一致。补丁TA-016-hifiasm-meta-provenance.diff已存。已接入10生产者。
+
+
+2026-10-28：TA-016 MULTIQC接入候选：真实podman multiqc1.35消费fastp真实json产出COMPLETED，报告html生成，任务命令文件在位（sha a08ee7e0…）；v1失败为stage了work目录而非json产物（No analysis results）。补丁TA-016-multiqc-provenance.diff已存。已接入11生产者。
+
+
+2026-10-28：TA-016 GENOMAD接入候选：真实podman genomad1.12.0+子集库/pUTI89 COMPLETED，SHA一致；v1失败为进程名实为GENOMAD_ENDTOEND（调用端别名GENOMAD）。补丁TA-016-genomad-provenance.diff已存。已接入12生产者。
+
+
+2026-10-28：TA-016 PLATON接入候选：原生platon-1.7环境+保留DB在pUTI89上COMPLETED，探针改为platon --version（platon_checked.py无--version），SHA一致。补丁TA-016-platon-provenance.diff已存。已接入13生产者。
+
+
+2026-10-28：TA-016 PLASME接入候选：原生plasme-1.1环境+保留模型库+PLASMe源码在pUTI89上COMPLETED，探针为plasme_runtime.py -h（无--version），SHA一致；v1失败为DB需指向DB/子目录。补丁TA-016-plasme-provenance.diff已存。已接入14生产者。
+
+
+2026-10-28：TA-016 PLASX两进程接入候选：复用保留的S.1注释产物与profiles/模型/源码，真实原生运行COMPLETED，SHA一致，产出真实de_novo+预测分数。探针为checked wrapper -h。补丁TA-016-plasx-provenance.diff已存。已接入15生产者（含PLASX_ANNOTATE）。磁盘由外部释放回到27G。
+
+
+2026-10-28：TA-016 ABRICATE+PLASMIDFINDER接入候选：ABRICATE经原生probe+consumer在2.5MB原fixture/私有alias库COMPLETED（真实BlaI命中），PLASMIDFINDER经py310环境probe+consumer在540bp阳性fixture COMPLETED，两者provenance SHA均与任务命令文件一致。v1失败为alias私有库路径；两模块def prefix作用域修正。合并补丁TA-016-abricate-plasmidfinder-provenance.diff已存。已接入16生产者。
+
+
+2026-10-28：TA-016 MOB_TYPER+MOB_RECON接入候选：受控库下两模块均COMPLETED，命令文件SHA固定（f0752fa6/722453d3）。v1编译失败（def prefix作用域）已修正保留。补丁TA-016-mobsuite-provenance.diff已存。已接入18生产者。
+
+
+2026-10-28：TA-016队列级生产者设计契约：cross_sample各模块无逐样本meta，需cohort扩展（任务内从暂存元数据实际读取样本域、cohort:true记录、R端校验cohort_samples⊆期望域）。记录在contracts/ta016-cohort-provenance-design.md，未实施。
+
+
+2026-10-28：TA-016队列级provenance实现候选：reportEvidence新增cohort_provenance分支（cohort:true+样本列表），generate_report.R新增cohort域校验（非空且全部∈期望域），DIVERSITY接入（eval从暂存cohort元数据实际读样本域，cut -f1）。单元20/20（含3新cohort用例）；真实podman运行COMPLETED，cohort=s1,s2,s3正确。v1缺契约R文件、v2 awk分隔符转义问题均保留。补丁TA-016-cohort-provenance.diff已存。
+
+
+2026-10-29：TA-016队列provenance批量接入：reportEvidence/R校验/DIVERSITY沿用前轮，新接入DESEQ2/DIFFERENTIAL_ABUNDANCE/NETWORK_PREPARE/STATISTICS_INPUTS/FASTSPAR/MERGE_ABUNDANCE/SHARED_ABUNDANCE_TABLES/SHARED_CATALOGUE；探针按工具实际（Rscript/fastspar/python helper -h带analysis_code/暂存路径）。9模块联合编译通过，单元20/20，DIVERSITY/NETWORK_PREPARE/SHARED_CATALOGUE真实运行COMPLETED且cohort域正确。v1-v3失败（缺R source、awk转义、目录vs文件列表、探针路径）保留。补丁TA-016-cohort-provenance.diff已存。REPORT与剩余单样本生产者未接线；报告端到端未重跑。
+
+
+2026-10-29：TA-016覆盖/比对组接入候选：BOWTIE2_ALIGN/COVERM_CONTIG/SAMTOOLS_FASTQ/MERGE/SORT/VIEW/MINIMAP2_ALIGN七模块；7模块联合编译通过；BOWTIE2_ALIGN+COVERM_CONTIG真实链（锁定ENA PE vs pUTI89，本地镜像建索引）COMPLETED、SHA一致；其余5个仅编译级。首批批量打补丁误在闭合引号后插入被回滚重打，记录保留。补丁TA-016-coverage-provenance.diff已存。已接入24生产者。
+
+
+2026-10-29：TA-016 INTEGRONFINDER接入候选：原生integronfinder-2.0.5环境+官方仓库fixture（acba.007.p01.13.fst）probe+consumer均COMPLETED；探针身份JSON固定2.0.5及模型/可执行/包SHA；provenance命令文件SHA c617b3ce…（运行后重算一致）。stub内def prefix改共享prefix作用域修正。补丁TA-016-integronfinder-provenance.diff已存。已接入25生产者。typing/host批其余8模块仍仅编译级。
+
+
+2026-10-29：TA-016 ISESCAN+RGI_MAIN接入候选：ISESCAN原生isescan-1.7.3-modern+锁定fixture NC_012624.fna probe+consumer COMPLETED，真实IS5命中，provenance SHA 50e835f2…；RGI_MAIN原生rgi-6.0.8+保留CARD 3.2.8夹具真实rgi load --local COMPLETED，DB_VERSION=3.2.8捕获正确，pUTI89零AMR命中（科学空结果），provenance SHA 8d57cabd…。发现并修复批量插入错误：RGI_MAIN的cp曾被插进load_wildcard赋值字符串（wildcard存在时会把cp参数并入rgi load命令行），已移至script块顶部；全库扫描确认无其它同类错位。合并补丁TA-016-isescan-rgi-provenance.diff已存。已接入27生产者。
+
+
+2026-10-29：TA-016 MACSYFINDER_SEARCH接入候选：原生macsyfinder-2.1.6+保留CONJScan-2.1.0模型+gembase蛋白fixture真实CONJSCAN(boundary) COMPLETED，真实all_systems输出，provenance SHA 0c2b5782…。补丁TA-016-macsyfinder-search-provenance.diff已存。已接入28生产者。MACSYFINDER_DOWNLOAD（需联网macsydata）仍仅编译级。
+
+
+2026-10-29：TA-016 REPORT自身来源接入候选：REPORT无meta且为终端消费者，不套用task_provenance事件流；改为新增输出REPORT.task_command.sh（cp BASH_SOURCE[0]）随publishDir发布到report/。原生R 4.6.1+既有fixtures真实report_runtime链6任务全COMPLETED，发布文件与.command.sh逐字节一致（SHA c8af4f9f…）。v1失败（bin/不在PATH，plasmid_consensus.R未找到）保留。补丁TA-016-report-self-provenance.diff已存。
+
+
+2026-10-29：TA-016 OPERA_MS接入候选：opera-native-env.sh固定环境（perl5.32.1+Switch.pm+ncurses5）真实OPERA-MS v0.8.3 minigut_hybrid COMPLETED，57条contig共1.78MB，provenance SHA 4724c37e…；探针为perl -S OPERA-MS.pl --help（无独立--version，--help首行含版本）。无stub块故仅script插cp。补丁TA-016-opera-ms-provenance.diff已存。已接入29生产者（REPORT自身另计）。
+
+
+2026-10-29：TA-016比对组接入候选：BLAST_BLASTN/MUMMER/CLINKER/MMSEQS_EASYCLUSTER四模块task_provenance+cp；PLASMID_CATALOG_PREPARE无meta且无样本域输入，按REPORT式自来源发布PLASMID_CATALOG_PREPARE.task_command.sh。五模块经新harness tests/nextflow/comparative_compile_check.nf真实Nextflow 26.10编译通过，补丁反向apply校验通过；首版补丁误混入git status行已重打（保留记录）。真实运行待做（BLAST需DB、CLINKER需Bakta gbff）。已接入/自来源34模块。
+
+
+2026-10-29：TA-016 MAG/host/linking/basecalling批量接入候选：带守卫补丁器（results/tool-audit/20261029-mag-linking-patch/apply_provenance.py）接线23模块（首轮22后追加EGGNOGMAPPER）——22个meta级task_provenance（SAMTOOLS_INDEX、METABAT2×2、CONCOCT×4、DASTOOL_DASTOOL、SEMIBIN、GTDBTK、KRAKEN2、METAPHLAN、PRODIGAL、HIFIADAPTERFILT、RECYCLER、PLASMAAG、PROTEIN_INPUTS、DORADO、LINK_SEQUENCE/HOTSPOT/LONGREAD）+1个cohort级LINK_COABUNDANCE（样本域取host_sample_ids输入）。探针复用各模块既有version惯用法或暂存helper -h。22模块联合编译通过，补丁反向apply校验通过。事故保留：补丁器v1漏拼接插入点后尾部导致22文件截断，git checkout全量恢复后修正重打；v1编译DAS_TOOL命名错误（实名DASTOOL_DASTOOL）已修。LINK_CRISPR为永久exit-2占位不接线。全部仅编译级，真实运行待做。补丁TA-016-mag-linking-provenance.diff已存。
+（接上条）补丁再生含EGGNOGMAPPER共29模块（再追加CONCOCT_EXTRACTFASTABINS）（含BOWTIE2_BUILD、DASTOOL_FASTATOCONTIG2BIN、CHECKM2_PREDICT、GPLAS2三进程），SHA abdeaf41…，编译复检通过。
+
+
+2026-10-29：TA-016 typing/host遗留批补丁固化：BAKTA/AMRFINDERPLUS/PLASMIDHOSTFINDER/MACSYFINDER_DOWNLOAD四模块（早前已接线并过typing_compile_check），补丁TA-016-typing-host-provenance.diff反向apply校验通过。前三者无原生环境/本地镜像、DOWNLOAD需联网macsydata，保持编译级并如实记录。COPLA真实运行仍在进行。
+
+
+2026-10-29：TA-016 SEMIBIN_SINGLEEASYBIN真实验证：原生semibin-2.4.1+官方single_sample_data fixture，probe+consumer COMPLETED，真实分箱产物（model.pt/output_bins/binning_status.json），provenance SHA 99937f1d…。探针身份JSON固定SemiBin 2.4.1。补丁含于TA-016-mag-linking-provenance.diff。
+
+
+2026-10-29：TA-016 CONCOCT MAG链真实验证：原生concoct-1.1.0（含samtools）环境+既有official composition/controlled.bam fixtures跑MAG_HOST(mag_tools=[concoct])，SAMTOOLS_INDEX/CONCOCT_CUTUPFASTA/CONCOCTCOVERAGETABLE/CONCOCT/MERGECUTUPCLUSTERING ×2样本共12任务全COMPLETED，10个provenance命令文件SHA逐一记录（evidence 20261029-ta016-concoct-chain.json）。发现CONCOCT_EXTRACTFASTABINS（reportEvidence标签CONCOCT）此前漏接，已补接线并编译通过，补丁更新SHA abdeaf41…。
+
+
+2026-10-29：TA-016 RECYCLER真实验证：recycler_real.nf（minigut reads+SPADES 4.1.0 beforeScript固定）4任务全COMPLETED，recycler_out含真实input_contract.json，RECYCLER provenance SHA c38cd252…（SPADES dc4f1f1a…顺带）。v1因real-data夹具目录已退役启动前停掉，v2指向20261023-opera-native/real-data。报告R单元20/20通过（REPORT自来源改动无回归）。
+
+
+2026-10-29：TA-016 COPLA真实验证：原生copla-1.0+保留RS84库+copla-macsyfinder-1.0.5，two_plasmids对照真实运行约80分钟COMPLETED，真实PTU分类（PTU-X4/PTU-Lab26 score 1.0），provenance SHA c18c4521…。会话退出致后台包装失联，但trace与.exitcode=0直接核实任务完成。补丁TA-016-copla-provenance.diff已存。
+
+
+2026-10-29：TA-016 METABAT2路由真实验证：原生metabat2-2.17+concoct-1.1.0(samtools)环境，MAG_HOST(mag_tools=[metabat2])三任务COMPLETED。v1失败（metabat2环境无samtools，SAMTOOLS_INDEX失败）保留于20261029-metabat2-chain-v1。SCAFFOLDS2BIN_METABAT2未触发（链尾条件）。
+
+
+2026-10-29：TA-016 BLAST_BLASTN真实验证：blastn_real.nf改原生（podman关闭+abricate-1.0.1环境BLAST 2.16.0+），makeblastdb建pUTI89迷你库后BLAST_BLASTN(pUTI89) COMPLETED，真实命中输出，provenance SHA 98598c84…。BLAST BLASTN/CLINKER容器镜像本地缺失且当前无外网，原生路径代替。
+
+
+2026-10-29：TA-016 MUMMER真实验证：platon-1.7环境nucmer/show-coords，pUTI89 vs two_plasmids.fna真实比对COMPLETED，provenance SHA 071daefe…。v1失败（query与reference同名文件staging冲突）保留；新harness tests/nextflow/mummer_native.nf。
+
+2026-10-29：接续来源候选进行实际集成复核，确认并修复cohort命名空间校验路径、cohort校验/输出成员丢失、FastSpar stderr版本、共享参考伪样本身份、全局空参考cohort丢失五类问题。保留真实失败后，嵌套别名、20样本生产统计链、4样本真实共享参考链及3样本空参考链均到报告终点；28来源记录逐字节/SHA/探针/样本域与原任务核对。23报告单元+15共享单元通过；三份共享量化/状态表与既有控制逐字节一致。缓存/原生执行分列，首次harness编译失败单列。静态发现比较基因组plasmid_catalog身份仍需动态检验；TA-016保持in_progress，正式接受边界不变。刷新后确认111项/5未决：旧摘要遗漏已在20261028登记的TA-097，已纠正当前计数。详见contracts/ta016-integration-review-20261029.md及evidence/20261029-ta016-integration-review.json。
+
+2026-10-30：TA-097独立复核完成并有界接受：固定4.1.0上游正常/带警告/异常终态区分，当前真实minigut原生模块完成；旧冻结helper拒绝同产物，保留真实干净K33通过，10CLI控制、14来源单元、10Recycler单元通过。修复旧成功掩盖新异常及警告重复计数，原文保留；原生2warning事件（旧候选4含横幅/摘要）不等于质量通过。首次沙箱socket失败与经批准的重跑分列。详见contracts/spades-completion-review-20261030.md及receipt。当前111项=105局部verified+2退役+4未决；正式718清单不变。
+
+2026-10-30：TA-016比较分支实际复现：目录/MMseqs2完成而REPORT因plasmid_catalog伪样本失败。现从目录解析产物生成实际样本清单、两个生产者队列来源进入报告，empty样本1保留；脚本显式path/deep缓存，所有当前调用及nf-test已更新。三任务native成功、10R方法、nf-test1/1及冷/缓存/同大小mtime改字节重跑/恢复缓存四阶段通过；目录DNA及1簇2成员与前态一致，实际报告2来源记录原件/SHA/域核对。只用通用MMseqs18.8cc5c，无geNomad/病毒模型执行。TA-016仍in_progress。详见contracts/comparative-provenance-review-20261030.md及机器证据。

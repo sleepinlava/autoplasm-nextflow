@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-27",
+  "scope": "full P0 main rejection registry replay against the current worktree carrying the uncommitted TA-091/096 Medaka wiring",
+  "driver": "tests/run_mag_selection_validation.py --replay-main-registry",
+  "result": "83/83 pass: 75 registered main rejections (incl. 8 MAG dependency-matrix cases) + 8 direct MAG_HOST rejections; every case rejected with its precise registered diagnostic, zero analysis tasks, zero .command.sh files",
+  "main_sha256": "39f4d06280bf6923e3c154bd08bb28782606442cb3ae8672f5dacabd2539fa89 (matches the hash bound in p0-main-cases.tsv; main.nf itself unchanged by the Medaka wiring)",
+  "interpretation": "the uncommitted Medaka probe/consumer wiring (subworkflows/ont.nf, modules/nf-core/medaka/main.nf, conf, helpers) does not alter any registered rejection path; replays do not add case denominators and are not end-to-end or framework certification",
+  "evidence_sha256": {
+    "results/tool-audit/20261027-main-p0-replay/run.json": "c51270c0c9d37275aa9567f9a6bbc74e6b2a73d3d7e28c2d38294e4bd85a279c"
+  },
+  "limits": [
+    "rejection-path regression only; no analysis task executed",
+    "disk constraints (8.2G free) noted; no new large downloads attempted"
+  ]
+}

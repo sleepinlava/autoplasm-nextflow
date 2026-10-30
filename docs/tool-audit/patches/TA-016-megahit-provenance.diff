@@ -1,0 +1,50 @@
+diff --git c/modules/nf-core/megahit/main.nf w/modules/nf-core/megahit/main.nf
+index 02f9d41..b166a20 100644
+--- c/modules/nf-core/megahit/main.nf
++++ w/modules/nf-core/megahit/main.nf
+@@ -17,6 +17,9 @@ process MEGAHIT {
+     tuple val(meta), path("intermediate_contigs/k*.final.contigs.fa.gz"), emit: kfinal_contigs
+     tuple val(meta), path('*.log')                                      , emit: log
+     tuple val("${task.process}"), val('megahit'), eval("megahit -v | sed 's/MEGAHIT v//'"), topic: versions, emit: versions_megahit
++    tuple val("${task.process}"), val(meta), path("${prefix}.MEGAHIT.task_command.sh"),
++          val('megahit -v'), eval('megahit -v'),
++          eval("sha256sum '${prefix}.MEGAHIT.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -24,9 +27,10 @@ process MEGAHIT {
+     script:
+     def args = task.ext.args ?: ''
+     def args2 = task.ext.args2 ?: ''
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     def reads_command = meta.single_end || !reads2 ? "-r ${reads1.join(',')}" : "-1 ${reads1.join(',')} -2 ${reads2.join(',')}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MEGAHIT.task_command.sh'
+     megahit \\
+         ${args} \\
+         -t ${task.cpus} \\
+@@ -44,8 +48,9 @@ process MEGAHIT {
+     """
+ 
+     stub:
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MEGAHIT.task_command.sh'
+     mkdir -p intermediate_contigs
+     echo "" | gzip > ${prefix}.contigs.fa.gz
+     echo "" | gzip > intermediate_contigs/k21.contigs.fa.gz
+diff --git 1/tests/nextflow/megahit_provenance.nf 2/tests/nextflow/megahit_provenance.nf
+new file mode 100644
+index 0000000..6857b16
+--- /dev/null
++++ 2/tests/nextflow/megahit_provenance.nf
+@@ -0,0 +1,7 @@
++include { MEGAHIT } from '../../modules/nf-core/megahit/main'
++workflow {
++    MEGAHIT(Channel.of(tuple([id: 'megahit-iface', single_end: false],
++        [file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261027-ena-multi/ena/SRR19638267_1.fastq.gz')],
++        [file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261027-ena-multi/ena/SRR19638267_2.fastq.gz')])))
++    MEGAHIT.out.task_provenance.view { it -> "PROV ${it[0]} ${it[3]} sha=${it[5]}" }
++}

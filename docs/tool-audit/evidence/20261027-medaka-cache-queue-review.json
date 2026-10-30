@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-27",
+  "formal_acceptance": false,
+  "findings": [
+    "TA-091",
+    "TA-096"
+  ],
+  "queue_state": "terminal, returncode 0, 14 phases; no live background session at review time",
+  "review_scope": "independent re-check of cache-v2 queue terminal states after medaka-production-progress-20261027.md was written; harness self-assertions plus post-hoc source/original-resource/trace verification",
+  "phase_results": {
+    "baseline": "probe COMPLETED + consumer COMPLETED (consumer hash 9a/2d5a60); complete FASTA headers/DNA match native software reference",
+    "unchanged": "probe re-COMPLETED (cache:false), consumer CACHED from baseline hash 9a/2d5a60; FASTA match",
+    "valid-model-content-change": "same-size/same-mtime gzip header mtime-byte mutation; consumer hash f4/c0d632 differs, COMPLETED recompute; FASTA match",
+    "valid-model-content-change-restored": "consumer CACHED back to 9a/2d5a60; FASTA match",
+    "bad-model-trailer": "returncode 1, probe FAILED exit 1 with gzip.BadGzipFile 'Incorrect length of data produced' during full model stream read; no consumer task, rejection before cache lookup",
+    "bad-model-trailer-restored": "consumer CACHED 9a/2d5a60; FASTA match",
+    "bad-mmi-magic": "returncode 1, probe FAILED: 'Adjacent Medaka index differs from native reference rebuild: .map-ont.mmi'; no consumer task",
+    "bad-mmi-magic-restored": "consumer CACHED; FASTA match",
+    "bad-fai": "returncode 1, probe FAILED: 'Adjacent Medaka index differs from native reference rebuild: .fai'; no consumer task",
+    "bad-fai-restored": "consumer CACHED; FASTA match",
+    "runtime-mismatch": "returncode 1, probe COMPLETED, consumer never submitted: ProcessUnrecoverableException 'Medaka resource probe/consumer runtime mismatch before cache lookup' raised in consumer script closure (lib/medaka_runtime.nf line 14)",
+    "runtime-restored": "consumer CACHED; FASTA match",
+    "ordinary-gzip": "probe+consumer COMPLETED; FASTA match",
+    "bgzf": "probe+consumer COMPLETED; FASTA match"
+  },
+  "post_hoc_checks": {
+    "source_guard_11_files": "all SHA256 match values recorded at queue start; no drift during or after queued validation",
+    "original_resources_4_files": "model archive, draft FASTA, FAI, MMI SHA256 unchanged at review time",
+    "all_success_phases_fasta_identity": "9 of 9 successful phases report complete_fasta_matches_native true (full headers + full DNA vs native-v1 reference)"
+  },
+  "evidence_sha256": {
+    "results/tool-audit/20261027-medaka-production/cache-v2/run.json": "091fff2e2718f41540fe3ae12ba606f68aa9e1b92bddb75ac988a9547292643d",
+    "results/tool-audit/20261027-medaka-production/cache-v2/state.json": "f438c7272de6ce7e7b99043a99ebf1c8a390ae33cbab0d6f2e49a0ce158bc0fa",
+    "results/tool-audit/20261027-medaka-production/cache-v2/baseline/run.json": "429e2141b5822de68758a05112be386b6186b3d233f06b1fa854138086978f08",
+    "results/tool-audit/20261027-medaka-production/cache-v2/unchanged/run.json": "a36013ae970787a61a786d15d986003daa7630a50ae283b4db8a6a8290187190",
+    "results/tool-audit/20261027-medaka-production/cache-v2/valid-model-content-change/run.json": "2e6e1243f3ac3dfa436f40cf8264c3424ef21372bcabd45ae6c783e01e293ff5",
+    "results/tool-audit/20261027-medaka-production/cache-v2/valid-model-content-change-restored/run.json": "9502a35798b7a6fccfab907c31987bd175084c6d09a2bd441d9673c29243e3a7",
+    "results/tool-audit/20261027-medaka-production/cache-v2/bad-model-trailer/run.json": "3fcd0c770bda15e5693e39d77cccc0fd2edaea1c32e7faa0ee977e4db0e4a978",
+    "results/tool-audit/20261027-medaka-production/cache-v2/bad-model-trailer-restored/run.json": "e95f730d4a861488e4121b0eefadbbc35d6adc33b6ae51af41f413d4b6c96ba2",
+    "results/tool-audit/20261027-medaka-production/cache-v2/bad-mmi-magic/run.json": "468632e97a4c49049962c139405c45fd66d04781fc5ff60e65ec6614c9ea1520",
+    "results/tool-audit/20261027-medaka-production/cache-v2/bad-mmi-magic-restored/run.json": "aa4b1c6c3ec3166b8ddc0141e1c26112b64f506073ab19f4e65a1a4fb8acb4c5",
+    "results/tool-audit/20261027-medaka-production/cache-v2/bad-fai/run.json": "7f52fccccd5fcf98460c5dde9ee4d03dbc6c144977b2f9b50176c35120b926f0",
+    "results/tool-audit/20261027-medaka-production/cache-v2/bad-fai-restored/run.json": "4a85e2cb9557d9098b25cb9deff210583a3a5be1494a2a6f046b36c935c3acd2",
+    "results/tool-audit/20261027-medaka-production/cache-v2/runtime-mismatch/run.json": "49ce10adedfe517f483c232a64d920ca223c98705a33a68d85e853845acfeb9a",
+    "results/tool-audit/20261027-medaka-production/cache-v2/runtime-restored/run.json": "78d121872030ec92fee128311a8123c3a53c637d793d86fc3b20452850de55f2",
+    "results/tool-audit/20261027-medaka-production/cache-v2/ordinary-gzip/run.json": "69c1d0ec48c35daf9e711eadc18feaea83757ee132a2387f46d1cc5b5355ed8f",
+    "results/tool-audit/20261027-medaka-production/cache-v2/bgzf/run.json": "16b244c61e0af9be56a79fa65f7f31372fe00572ab380b7e1d20d8c8cb1b31e8"
+  },
+  "limits": [
+    "bounded candidate only; TA-091/TA-096 remain in_progress, not closed by this review",
+    "harness scope: no biological genome accuracy, no optional RLE/force/regions branches, no retry behaviour, no OCI/platform/provider acceptance",
+    "ordinary-gzip input carries no adjacent index; ambiguous sidecar-index rejection verified earlier only standalone",
+    "no other implicit resources or full main-flow acceptance implied"
+  ]
+}

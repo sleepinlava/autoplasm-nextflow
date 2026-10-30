@@ -28,7 +28,7 @@ def latest_receipt(runs):
         for candidate in candidates:
             if candidate.is_file():
                 data = json.loads(candidate.read_text())
-                if data.get('pass') and 'source' in data:
+                if data.get('pass') and ('source' in data or 'source_state' in data):
                     return candidate, data
     return None, None
 

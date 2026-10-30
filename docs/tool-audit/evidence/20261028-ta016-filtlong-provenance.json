@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to FILTLONG; not accepted",
+  "change": "modules/nf-core/filtlong/main.nf: provenance tuple; 'def prefix' -> shared 'prefix =' in script and stub; cp of BASH_SOURCE[0] in both blocks",
+  "verification": "real Nextflow 26.10 + podman filtlong:0.2.1 on the 20k-read interface control (single-end long reads, no short-read reference): COMPLETED, sha256 802f8cf7… matches the actual task command file",
+  "patch": "docs/tool-audit/patches/TA-016-filtlong-provenance.diff sha256 1047a13d625107ce60dae4ad04c2d887e86f52be1b7a12940c24c1dc7527a139",
+  "harness": "tests/nextflow/filtlong_provenance.nf",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "no short-read reference filtering exercised", "report end-to-end rerun pending"]
+}

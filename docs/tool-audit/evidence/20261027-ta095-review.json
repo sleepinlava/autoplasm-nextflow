@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-27",
+  "finding": "TA-095",
+  "scope": "independent re-confirmation of the ready candidate, not a consolidated formal acceptance",
+  "fresh_checks": {
+    "legacy_rejection": "fixed 2.1.6 native parser under the pinned plasmidfinder-2.1.6-py310 env: exit 2, 'unrecognized arguments: --legacy' (complete original 569-byte/540bp upstream test.fsa as -i; first attempt with system python3 failed on missing tabulate, rerun with the env interpreter — shebang is '#!/usr/bin/env python3')",
+    "startup_ok": "same env --help exit 0, usage printed (co-confirms the TA-094 Python3.10 startup fix at parser level)",
+    "current_source": "conf/nfcore_downstream.config PLASMIDFINDER|PLASMIDFINDER_RESOURCE_PROBE ext.args='' with explanatory comment; tests/mock_e2e/mock_tool.py:401 asserts '--legacy' not in args; modules/nf-core/plasmidfinder/environment.yml pins conda-forge::python=3.10"
+  },
+  "historical_evidence_intact": {
+    "results/tool-audit/20261026-plasmidfinder-runtime/py310-legacy/run.json": "a1f34a318686b6d7672e8f81741adb209de29c1f1bc91ceafb6a9ceaedc581f1"
+  },
+  "fresh_evidence_sha256": {
+    "results/tool-audit/20261027-ta095-review/legacy.stderr": "7d749c938432de228f6275447360f13cf0ad19d01841493c6177f979ca8dea18",
+    "results/tool-audit/20261027-ta095-review/help.stdout": "66319703bec10daca6896bcba418f9c431fc327d730e9b33aacedecd4c3874d9"
+  },
+  "outcome": "core claim re-confirmed; recommend acceptance in the next consolidated batch",
+  "limits": [
+    "parser-level re-confirmation only; the full native/cache/nf-test evidence chain from 2026-10-26 is relied upon, not re-executed",
+    "findings ledger and the 718-item accepted-source list unchanged by this review",
+    "no OCI/platform/provider acceptance"
+  ]
+}

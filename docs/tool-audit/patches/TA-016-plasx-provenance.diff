@@ -1,0 +1,55 @@
+diff --git c/modules/detection/plasx.nf w/modules/detection/plasx.nf
+index 8288158..a6147da 100644
+--- c/modules/detection/plasx.nf
++++ w/modules/detection/plasx.nf
+@@ -18,11 +18,15 @@ process PLASX_ANNOTATE {
+     tuple val(meta), path("${meta.id}.contigs.fasta"), path("${meta.id}.id_map.tsv"), path("${meta.id}.gene_calls.tsv"), path("${meta.id}.cogs_pfams.tsv"), emit: annotations
+     tuple val(meta), path("${meta.id}.contigs.db"), emit: contigs_db
+     tuple val(meta), path("${meta.id}.anvio_*.json"), emit: runtime
++    tuple val("${task.process}"), val(meta), path("${meta.id}.PLASX_ANNOTATE.task_command.sh"),
++          val('python3 anvio_checked.py -h'), eval('python3 anvio_checked.py -h'),
++          eval("sha256sum '${meta.id}.PLASX_ANNOTATE.task_command.sh'"), emit: task_provenance
+ 
+     script:
+     def q = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+     def p = meta.id.toString()
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLASX_ANNOTATE.task_command.sh'
+     export PYTHONDONTWRITEBYTECODE=1
+     export MPLCONFIGDIR="\$PWD/matplotlib"
+     python3 plasx_inputs.py resources --cog-db cog_database --pfam-db pfam_database --record ${q.call(p + '.anvio_resources.json')}
+@@ -62,6 +66,9 @@ process PLASX {
+     tuple val(meta), path("${meta.id}.de_novo.tsv"), emit: de_novo
+     tuple val(meta), path("${meta.id}.plasx_state.tsv"), emit: state
+     tuple val(meta), path("${meta.id}.plasx_*.json"), emit: runtime
++    tuple val("${task.process}"), val(meta), path("${meta.id}.PLASX.task_command.sh"),
++          val('python3 plasx_checked.py -h'), eval('python3 plasx_checked.py -h'),
++          eval("sha256sum '${meta.id}.PLASX.task_command.sh'"), emit: task_provenance
+ 
+     script:
+     def q = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+@@ -69,6 +76,7 @@ process PLASX {
+     def splits = params.plasx_splits == null ? 32 : params.plasx_splits
+     if (!(splits.toString() ==~ /[0-9]+/)) error '--plasx_splits must be a nonnegative integer'
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLASX.task_command.sh'
+     export PYTHONDONTWRITEBYTECODE=1
+     export PYTHONPATH="\$PWD/plasx_source"
+     python3 plasx_inputs.py resources --profiles plasx_profiles --model plasx_coefficients.tsv --record ${q.call(p + '.plasx_resources.json')}
+diff --git 1/tests/nextflow/plasx_provenance.nf 2/tests/nextflow/plasx_provenance.nf
+new file mode 100644
+index 0000000..e6b8702
+--- /dev/null
++++ 2/tests/nextflow/plasx_provenance.nf
+@@ -0,0 +1,11 @@
++include { PLASX } from '../../modules/detection/plasx'
++workflow {
++    PLASX(Channel.of(tuple([id: 'S.1'],
++        file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261026-resource-consumers/plasx-native-v3/work/9b/73474e2db8b2649e1be567979eb391/S.1.contigs.fasta'), file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261026-resource-consumers/plasx-native-v3/work/9b/73474e2db8b2649e1be567979eb391/S.1.id_map.tsv'),
++        file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261026-resource-consumers/plasx-native-v3/work/9b/73474e2db8b2649e1be567979eb391/S.1.gene_calls.tsv'), file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261026-resource-consumers/plasx-native-v3/work/9b/73474e2db8b2649e1be567979eb391/S.1.cogs_pfams.tsv'))),
++        Channel.of(tuple(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261024-plasx-native/primary'), 'retained-source')),
++        Channel.of(tuple(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261024-plasx-native/profiles'), 'retained-profiles')),
++        Channel.value(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261024-plasx-native/PlasX_coefficients_and_gene_enrichments.txt')),
++        Channel.of(tuple(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/bin/plasx_inputs.py', checkIfExists: true), file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/bin/plasx_checked.py', checkIfExists: true))))
++    PLASX.out.task_provenance.view { it -> "PROV ${it[0]} ${it[3]} sha=${it[5]}" }
++}

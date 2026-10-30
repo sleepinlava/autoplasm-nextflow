@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-27",
+  "formal_scope": "bounded early native CLI failure retry; included as supporting TA-096 interface acceptance evidence",
+  "result": {
+    "pass_bounded_retry": true,
+    "distinct_attempt_workdirs": true,
+    "complete_fasta_matches_native": true,
+    "originals_unchanged": true,
+    "sources_unchanged": true
+  },
+  "sha256": {
+    "tests/run_medaka_retry.py": "9618ee30a9cd0d2b67668f1e05e957ee766a57dec9002a554364c095e5f5e884",
+    "results/tool-audit/20261027-medaka-retry-v2/run.json": "a0ea3640186966a8e872a604caaa995b36050c241bd9461b5bf0cbf38aeab230",
+    "results/tool-audit/20261027-medaka-original-gzip-v1/run.json": "0973e067a13d829a61bcc54cb17269ca7a1ccff12e02499efb3b1a6f9d972007",
+    "results/tool-audit/20261027-ta096-acceptance/receipt.json": "e3e2026c627151afe25d4e9ee3153dd4ab88b72476176763f0e6d1e1b84607e7",
+    "results/tool-audit/20261027-ta096-acceptance/review.md": "89cf84717b4b485b62655d7682a4f0809df6c700429ce3c4118a70b1cd53eb02"
+  },
+  "limits": "Actual fixed Nextflow26.10 local retry, complete bacterial reads/draft/original model. First native version-report failure is an explicit shim; retry real native computation. Not late-inference failure, resume-after-external-kill, all retry policies, OCI retry or biological accuracy."
+}

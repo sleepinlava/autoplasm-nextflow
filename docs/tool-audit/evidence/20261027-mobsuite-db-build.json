@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-27",
+  "scope": "controlled MOB-suite 3.1.8 DB build replicating native mob_init steps 2-5 exactly, without mob_init (no TLS-disabled download, no lock protocol, no ETE3 auto-initialization)",
+  "build": {
+    "env": "fixed 3.1.9 wheel prefix env-e9c50785d67dd95b80c12bb7fc63b02c (makeblastdb/mash from that env)",
+    "source_archive": "results/tool-audit/20261027-mobsuite-db/data.tar.gz sha256 531f2124269b13e6fe59d0b01936276b5a47c0c0eebbc787f710cd376f77d3cd, MD5 matches official Zenodo record",
+    "steps": [
+      "extract excluding AppleDouble sidecars (native mob_init extracts then copies files up; equivalent final set)",
+      "makeblastdb -in repetitive.dna.fas -dbtype nucl (native BlastRunner call)",
+      "makeblastdb -in ncbi_plasmid_full_seqs.fas -parse_seqids -dbtype nucl (native call with parse_seqids=True)",
+      "mash sketch -p 4 -i -o ncbi_plasmid_full_seqs.fas.msh -k 21 -s 1000 (native wrapper defaults)"
+    ],
+    "db_dir": "results/tool-audit/20261027-mobsuite-db/db (29 files, 2.2G)",
+    "per_file_identities": "results/tool-audit/20261027-mobsuite-db/db-sha256.txt sha256 545332a7814643137c07089523dd5508d9c3ccdbfb3252bf09fd04a1b3ef7ae0",
+    "status_txt": "written with honest controlled-build provenance; preflight checks existence/non-empty only (bin/mobsuite_preflight.py:61-63)"
+  },
+  "preflight_result": {
+    "mob_recon": "only ETE3DBTAXAFILE missing; all sequence DB paths present and non-empty",
+    "mob_typer": "only ETE3DBTAXAFILE missing"
+  },
+  "limits": [
+    "ETE3 taxonomy (taxa.sqlite) not yet prepared — DB not yet fully prepared; no scientific run",
+    "no claim of complete DB validity beyond presence/non-empty + build-tool exit 0; positive/negative science controls pending",
+    "optional filter_db validation remains deferred per the execution-guard contract"
+  ],
+  "next_step": "controlled ETE3 taxa.sqlite preparation (NCBI taxdump, TLS-verified, schema2 check via the preflight's readonly path), then scientific positive/negative controls"
+}

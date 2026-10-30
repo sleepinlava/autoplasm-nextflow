@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to PLASX_ANNOTATE and PLASX (both processes in modules/detection/plasx.nf); not accepted",
+  "change": "provenance tuples keyed on meta.id; cp of BASH_SOURCE[0] in both script blocks; probes are the checked wrappers' -h (neither has --version)",
+  "verification": "real Nextflow 26.10, native plasx-5c9acfd env, retained annotate products of S.1 (contigs/id_map/gene_calls/cogs_pfams) + retained profiles/source/coefficients: COMPLETED, provenance sha256 22b7ebb7… matches the actual task command file; real de novo search + predict produced S.1.plasx.tsv with real scores",
+  "patch": "docs/tool-audit/patches/TA-016-plasx-provenance.diff sha256 829cebf8d538ecbb48d3b2a04336ed8ae01012e9d3d0d484d94942d2c17b783b",
+  "harness": "tests/nextflow/plasx_provenance.nf",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "PLASX_ANNOTATE not re-run in this slice (its full anvio COG/Pfam run was verified in earlier batches)", "report end-to-end rerun pending"]
+}

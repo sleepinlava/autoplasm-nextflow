@@ -1,0 +1,42 @@
+diff --git c/modules/nf-core/genomad/endtoend/main.nf w/modules/nf-core/genomad/endtoend/main.nf
+index 0517fa6..d2ed190 100644
+--- c/modules/nf-core/genomad/endtoend/main.nf
++++ w/modules/nf-core/genomad/endtoend/main.nf
+@@ -31,6 +31,9 @@ process GENOMAD_ENDTOEND {
+     tuple val(meta), path("${prefix}/*_summary/*_virus_summary.tsv")                                 , emit: virus_summary
+     tuple val("${task.process}"), val('genomad'), eval("genomad --version 2>&1 | sed 's/^.*geNomad, version //; s/ .*//'"), topic: versions, emit: versions_genomad
+     tuple val("${task.process}"), val('genomad_db'), eval("if [ -s ${genomad_db}/version.txt ]; then cat ${genomad_db}/version.txt; else echo 'unknown'; fi"), topic: versions, emit: versions_genomad_db
++    tuple val("${task.process}"), val(meta), path("${prefix}.GENOMAD.task_command.sh"),
++          val('genomad --version'), eval('genomad --version'),
++          eval("sha256sum '${prefix}.GENOMAD.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -39,6 +42,7 @@ process GENOMAD_ENDTOEND {
+     def args = task.ext.args ?: ''
+     prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.GENOMAD.task_command.sh'
+     genomad \\
+         end-to-end \\
+         ${fasta} \\
+@@ -56,6 +60,7 @@ process GENOMAD_ENDTOEND {
+     def filename = "${fasta}"[0..<"${fasta}".lastIndexOf('.')]
+     prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.GENOMAD.task_command.sh'
+     echo ${args}
+ 
+     mkdir ${prefix}
+diff --git 1/tests/nextflow/genomad_provenance.nf 2/tests/nextflow/genomad_provenance.nf
+new file mode 100644
+index 0000000..5b05759
+--- /dev/null
++++ 2/tests/nextflow/genomad_provenance.nf
+@@ -0,0 +1,6 @@
++include { GENOMAD_ENDTOEND as GENOMAD } from '../../modules/nf-core/genomad/endtoend/main'
++workflow {
++    GENOMAD(Channel.of(tuple([id: 'genomad-iface'], file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261020-quast-real/pUTI89.fasta'))),
++            Channel.of(tuple([:], file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261027-ena-multi/databases/genomad_db'), 'subset-locked')))
++    GENOMAD.out.task_provenance.view { it -> "PROV ${it[0]} ${it[3]} sha=${it[5]}" }
++}

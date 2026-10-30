@@ -1,0 +1,83 @@
+{
+  "date": "2026-10-30",
+  "finding": "TA-016",
+  "scope": "Comparative catalogue and MMseqs2 cohort provenance, bounded integration evidence; TA-016 remains in_progress",
+  "root": "results/tool-audit/20261029-comparative-report-review",
+  "source_sha256": {
+    "bin/plasmid_catalog_prepare.R": "22cb639da1a0437e947deb684a635176808aa9562b3f9dc65011714176942aca",
+    "modules/comparative/catalog_prepare.nf": "4c0ed192abb2bc2b4ac8e2b4632ad93ebd2e9fd9e4029e4c2213e3f358d258fc",
+    "subworkflows/comparative.nf": "3cb35523ce69b4f9a6cf1cd16587b1e33cf5d813e29900a18e4601f2de09ad2c",
+    "modules/nf-core/mmseqs/easycluster/main.nf": "9e990ab9fc6e604c204cb9517cd5ff75bb0d1a1c974b3f1f88bfe7cd5adea821",
+    "conf/nfcore_host_comparative.config": "a898202fd0851a80c5cb2be1741ec452898d254875f7f72317451f2fcb5b3012",
+    "tests/test_catalog_prepare.py": "82ec8070fc598860f842230e14eadeae69187a077ca8cfe17a248c9803285c2b",
+    "tests/nf-test/nodes-comparative-catalog.nf.test": "f28793f4ec93ef8255ae2390cad96fcc00a7e7be1861a4c0faddf8a2521ece46",
+    "tests/nextflow/comparative_native.nf": "e51c7fe5c55bec5fb8f3ae16010679600760d4a595640621ee9c6cbe46a287ed",
+    "tests/nextflow/comparative_report_provenance.nf": "588c8cf90ed522ee18a26a9361a5c1b0e2c2b1e3a3a548642253f577e4ca1a73",
+    "tests/nextflow/catalog_prepare_cache.nf": "d67242effff901ec8dafd299ed01d29f00a638a4297a6cf7d60b4d2b00fc9d2f",
+    "tests/run_catalogue_helper_cache.py": "6e5417e7312a611fc4954c688a586bffef91f519f1bbbe898fa4876a6740b825",
+    "tests/check_report_runtime_provenance.py": "16f29cced4031c6f5f7dac0bedc09fb012e2df8b4606c02e5e55ebdedad76a8c"
+  },
+  "mmseqs": {
+    "version": "18.8cc5c",
+    "binary": "results/tool-audit/runtime/genomad-1.12.0/bin/mmseqs",
+    "binary_sha256": "d6d1bf1b50c095eb0cb66f685a7fb1d9b8b69497e1e88416fd48f28e313cc773",
+    "note": "Only generic MMseqs executable used; no geNomad or viral model invoked"
+  },
+  "before": {
+    "trace": "results/tool-audit/20261029-comparative-report-review/before.trace.tsv",
+    "status": "2 native producers completed; REPORT failed on synthetic plasmid_catalog sample identity"
+  },
+  "after": {
+    "trace": "results/tool-audit/20261029-comparative-report-review/after.trace.tsv",
+    "status": "3 native tasks completed",
+    "report_check": {
+      "samples": 3,
+      "runtime_records": 2,
+      "cohort_records": 2,
+      "producers": [
+        "MMSEQS2",
+        "PLASMID_CATALOG_PREPARE"
+      ],
+      "pass": true,
+      "catalogue_records": 2,
+      "cluster_count": 1,
+      "empty_member": "1",
+      "helper_bytes_verified": true,
+      "report_workdir": "/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261029-comparative-report-review/work/de/9eda33d897dc4282cdc8167a9dda87",
+      "sequence_and_clusters_unchanged": true
+    }
+  },
+  "tests": {
+    "catalogue_unit_methods": 10,
+    "nf_test_native_cases": 1,
+    "nf_test_junit": "results/tool-audit/20261029-comparative-report-review/framework/junit.xml",
+    "cache_cases": [
+      "cold",
+      "unchanged",
+      "same-size-mtime-change",
+      "restored"
+    ],
+    "cache_receipt": "results/tool-audit/20261029-comparative-report-review/helper-cache/run.json"
+  },
+  "data": {
+    "source": "results/tool-audit/20261029-comparative-native-v2/fixtures/pUTI89.fasta.gz",
+    "source_sha256": "ac288fdaffc09448c9c27a5fa3313ac3ffae837664a91c90d1e64bd3a36fc6fe",
+    "uncompressed_sha256": "f48980b3e15eb733333493755a432de7e2380b71abf8ac682d92e94353ad8431",
+    "scope": "same retained pUTI89 in 001 and NA, empty sample 1; technical identity control, not independent biological samples"
+  },
+  "limitations": [
+    "Same retained full pUTI89 plasmid duplicated into two technical samples, one empty sample; not three biological replicates.",
+    "Exact current catalogue DNA and cluster membership agree with pre-fix outputs; no broad cluster-accuracy benchmark.",
+    "Only MMseqs2 comparative route; BLAST/MUMmer/clinker and whole-platform reports not accepted here.",
+    "Explicit helper path plus deep cache and emitted sample provenance validated; does not close full TA-091 or TA-016 resource/environment identity.",
+    "nf-test scanned historical repository modules before selecting one target; scan warnings are not extra executed tests."
+  ],
+  "evidence_sha256": {
+    "results/tool-audit/20261029-comparative-report-review/report-check.json": "9cede525b53c7f2ede06ff5694ac0ee4fdac168366a1b5551f260ef1125e537d",
+    "results/tool-audit/20261029-comparative-report-review/before.trace.tsv": "348757e87af6a95b06ebb46c28350c7ac6c013676512d6188fbbe39441d2defe",
+    "results/tool-audit/20261029-comparative-report-review/after.trace.tsv": "b101efa73d294a683249616495781cc79a4b01dcbbda5f748fe86ad8baec2b0e",
+    "results/tool-audit/20261029-comparative-report-review/catalog-units.log": "73e05028169d66b39668290042be285cb2cd85bd5554a910d2cf834e01f5fcfa",
+    "results/tool-audit/20261029-comparative-report-review/framework/junit.xml": "3285b0279ed1cf64fc74cd89102bd6da8f104b53e9ddc1d8a45d6176bc66efc0",
+    "results/tool-audit/20261029-comparative-report-review/helper-cache/run.json": "effc8d816dc914c6aba04ddbf61512fdaab72d50a34f796fa617dfa633dbd798"
+  }
+}

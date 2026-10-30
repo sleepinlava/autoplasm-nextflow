@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidate: cohort-level runtime provenance across all cross_sample cohort producers; not accepted",
+  "changes": {
+    "lib/report_events.nf": "cohort_provenance branch (cohort:true + task-time member list); single-sample path untouched",
+    "bin/generate_report.R": "cohort records: members non-empty and within expected domain; other checks unchanged",
+    "modules": "DESEQ2, DIFFERENTIAL_ABUNDANCE, NETWORK_PREPARE, STATISTICS_INPUTS, FASTSPAR, MERGE_ABUNDANCE, SHARED_ABUNDANCE_TABLES, SHARED_CATALOGUE + DIVERSITY (previous slice); probes match each tool (Rscript --version for R scripts, fastspar --version, python helper -h with the analysis_code/ staging path)",
+    "tests/test_generate_report.py": "+3 cohort unit cases"
+  },
+  "verification": {
+    "compile": "all 9 cohort modules parse together (cohort_compile_check.nf)",
+    "unit": "tests/test_generate_report.py 20/20",
+    "real_runs": "DIVERSITY (podman r-analysis, technical-control table, cohort=s1,s2,s3 correct); NETWORK_PREPARE (COMPLETED, cohort correct); SHARED_CATALOGUE (native python, catalogue with features/manifest/reference produced; command file sha256 d4afe1f4…)"
+  },
+  "failed_attempts": "diversity v1 (missing contract R source) / v2 (awk -F'\\t' double-escape produced unsplit members — caught by inspection, fixed to cut); shared_catalogue v1 (dir-vs-file-list input), v3 (probe path: helper lives under analysis_code/, eval could not find build_shared_catalogue.py at cwd root)",
+  "patch": "docs/tool-audit/patches/TA-016-cohort-provenance.diff sha256 910d1ce5d04caa2fc9f039ec28fa3d69403403466c3745809b183a93aa279f64",
+  "limits": ["candidates not accepted; TA-016 remains in_progress", "REPORT module (records-based) and DESEQ2/FASTSPAR/MERGE_ABUNDANCE/STATISTICS_INPUTS/SHARED_ABUNDANCE not individually executed yet — compile-checked only", "report end-to-end rerun pending"]
+}

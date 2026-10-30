@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-28",
+  "finding": "TT-003",
+  "scope": "updated Groovy assertions of the legacy ENA 16S suite executed under real nf-test 0.9.5 + podman; this is the execution-contract portion only, NOT the required shotgun P4",
+  "result": "SUCCESS 1/1 (1825s); workflow 100 tasks succeededCount=100 failedCount=0; assertions include the independent alpha-diversity formula recomputed from the actual coverage table and the no-differential/no-network gating below 3 replicates",
+  "junit_sha256": "1bbba3de8548a789688fe3d526b744a3cccf4ccf0bbf608367073183db3513ad",
+  "data": {
+    "ena_multi": "12/12 locked fastq files re-downloaded and SHA256-verified against ena-multisample.lock.json (238 MB); samplesheet rebuilt from lock groups (3 infected / 3 control)",
+    "genomad_subset": "databases/genomad/genomad_db_subset_v1.9.tar.gz at pinned revision f450b2e3, git blob sha1 2a6a30fca0adbde43d2e8b6a6c81c589bbc2042c verified; viral sarscov2 files of the real-nodes lock deliberately NOT downloaded per user constraint"
+  },
+  "environment_fixes": {
+    "pull_policy": "overlay config adds podman.pullPolicy='missing' — community.wave.seqera.io registry re-pull of the already-local genomad image failed on a transient auth/ping error (v1 exit 125)",
+    "r_analysis_image": "PLASMID_CONSENSUS container autoplasm-r-analysis:latest was absent locally and docker.io denied the unqualified pull (v2 exit 125); built from containers/Dockerfile.r-analysis (5.05 GB, build log retained)",
+    "python_slim_ps": "SHARED_CATALOGUE's pinned python:3.12-slim lacks procps; Nextflow task metrics require ps (v4 exit 1). Local override image localhost/python:3.12-slim = upstream + procps; upstream digest sha256:6d2b0577e6d1632f077331de8e4780535f54839d163ded7abb4b7dd37b5d37ac recorded; modules unchanged",
+    "flaky_hang": "v3: BOWTIE2_ALIGN_COVERAGE (SRR19638269) hit the 1h time limit after hanging; same task passed in v2/v4/v5 — recorded as a flaky hang, not a deterministic defect; the hang's failedDuration dominated the 10.5h v3 wall time"
+  },
+  "failed_attempts_retained": "results/tool-audit/20261027-ena-legacy-v{1,2,3,4}/ (configs, logs, junit where present)",
+  "limits": [
+    "legacy 16S amplicon data is NOT a shotgun cohort; TT-003 remains open pending an appropriate nonempty shotgun multi-sample P4",
+    "16S assemblies are short-contig; QUAST ran with the test-only --min-contig 200 overlay, not the production threshold",
+    "the local python:3.12-slim override and r-analysis build are environment provisioning, not evidence the pinned upstream images suffice"
+  ],
+  "next_step": "select a small real shotgun multi-sample cohort (public ENA, non-viral, size-checked), prepare a locked dataset, and run the P4 statistics path against it"
+}

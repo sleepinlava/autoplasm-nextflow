@@ -1,0 +1,60 @@
+diff --git i/modules/annotation/isescan.nf w/modules/annotation/isescan.nf
+index a1927f3..c467c18 100644
+--- i/modules/annotation/isescan.nf
++++ w/modules/annotation/isescan.nf
+@@ -15,6 +15,9 @@ process ISESCAN {
+ 
+     output:
+     tuple val(meta), path("${meta.id}.isescan_out", type: 'dir'), emit: results
++    tuple val("${task.process}"), val(meta), path("${meta.id}.ISESCAN.task_command.sh"),
++          val('python3 isescan_runtime_resources.py -h'), eval('python3 isescan_runtime_resources.py -h'),
++          eval("sha256sum '${meta.id}.ISESCAN.task_command.sh'"), emit: task_provenance
+ 
+     script:
+     def runtime = isescanRuntime(task, workflow.containerEngine, meta)
+@@ -23,6 +26,7 @@ process ISESCAN {
+     def seqfile = isescanQuote(plasmid_contigs)
+     def prefix = isescanQuote("${meta.id}.isescan_out")
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.ISESCAN.task_command.sh'
+     python3 isescan_runtime_resources.py --runtime-base64 '${runtime64}' --seqfile ${seqfile} --result-prefix ${prefix} --threads ${task.cpus} --verify ${runtime_receipt} --execute
+     """
+ 
+@@ -30,6 +34,7 @@ process ISESCAN {
+     isescanRequireRuntime(runtime_identity, isescanRuntime(task, workflow.containerEngine, meta))
+     def prefix = isescanQuote("${meta.id}.isescan_out")
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.ISESCAN.task_command.sh'
+     mkdir -p ${prefix}
+     printf '%s\n' '{"state":"stub_not_validated","inference":false}' > ${prefix}/isescan_stub.json
+     """
+diff --git i/modules/nf-core/rgi/main/main.nf w/modules/nf-core/rgi/main/main.nf
+index c333580..37b884a 100644
+--- i/modules/nf-core/rgi/main/main.nf
++++ w/modules/nf-core/rgi/main/main.nf
+@@ -24,6 +24,9 @@ process RGI_MAIN {
+     tuple val("${task.process}"), val('rgi'), eval("rgi main --version"),  emit: versions_rgi, topic: versions
+     tuple val("${task.process}"), val('rgi-database'), eval("echo \$DB_VERSION"),  emit: versions_db , topic: versions
+     tuple val("${task.process}"), val('kma'), eval("kma -v | sed 's/KMA-//'"),  emit: versions_kma, topic: versions
++    tuple val("${task.process}"), val(meta), path("${prefix}.RGI_MAIN.task_command.sh"),
++          val('rgi main --version'), eval('rgi main --version'),
++          eval("sha256sum '${prefix}.RGI_MAIN.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -49,6 +52,7 @@ process RGI_MAIN {
+     }
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.RGI_MAIN.task_command.sh'
+     export MPLCONFIGDIR=\$PWD
+     DB_VERSION=\$(python3 validate_rgi_card.py --card ${card}
+     )
+@@ -81,6 +85,7 @@ process RGI_MAIN {
+     stub:
+     prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.RGI_MAIN.task_command.sh'
+     mkdir -p temp
+     touch ${prefix}.json
+     touch ${prefix}.txt

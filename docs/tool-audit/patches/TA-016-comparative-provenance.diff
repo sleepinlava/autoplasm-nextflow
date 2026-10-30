@@ -1,0 +1,116 @@
+diff --git i/modules/comparative/catalog_prepare.nf w/modules/comparative/catalog_prepare.nf
+index 079ab42..6a76a8b 100644
+--- i/modules/comparative/catalog_prepare.nf
++++ w/modules/comparative/catalog_prepare.nf
+@@ -19,6 +19,7 @@ process PLASMID_CATALOG_PREPARE {
+ 
+     output:
+     path "plasmid_catalog_input.fasta", emit: combined
++    path "PLASMID_CATALOG_PREPARE.task_command.sh", emit: task_command
+ 
+     script:
+     def files = (contigs in List ? contigs : [contigs])
+@@ -28,6 +29,7 @@ process PLASMID_CATALOG_PREPARE {
+     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+     def contigArgs = files.collect { shellQuote.call(it) }.join(' ')
+     """
++    cp -- "\${BASH_SOURCE[0]}" 'PLASMID_CATALOG_PREPARE.task_command.sh'
+     plasmid_catalog_prepare.R \\
+         --contigs ${contigArgs} \\
+         --out plasmid_catalog_input.fasta
+diff --git i/modules/comparative/clinker.nf w/modules/comparative/clinker.nf
+index 367996b..a0c449e 100644
+--- i/modules/comparative/clinker.nf
++++ w/modules/comparative/clinker.nf
+@@ -15,9 +15,13 @@ process CLINKER {
+ 
+     output:
+     tuple val(meta), path("${meta.id}.clinker.html"), emit: html
++    tuple val("${task.process}"), val(meta), path("${meta.id}.CLINKER.task_command.sh"),
++          val('clinker --version'), eval('clinker --version'),
++          eval("sha256sum '${meta.id}.CLINKER.task_command.sh'"), emit: task_provenance
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CLINKER.task_command.sh'
+     clinker ${bakta_dir}/*.gbff -p ${meta.id}.clinker.html
+     """
+ }
+diff --git i/modules/comparative/mummer.nf w/modules/comparative/mummer.nf
+index bffd712..a078e03 100644
+--- i/modules/comparative/mummer.nf
++++ w/modules/comparative/mummer.nf
+@@ -17,9 +17,13 @@ process MUMMER {
+ 
+     output:
+     tuple val(meta), path("${meta.id}.coords"), emit: coords
++    tuple val("${task.process}"), val(meta), path("${meta.id}.MUMMER.task_command.sh"),
++          val('nucmer --version'), eval('nucmer --version 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.MUMMER.task_command.sh'"), emit: task_provenance
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.MUMMER.task_command.sh'
+     nucmer --prefix ${meta.id} ${reference_plasmids} ${plasmid_contigs}
+     show-coords -r ${meta.id}.delta > ${meta.id}.coords
+     """
+diff --git i/modules/nf-core/blast/blastn/main.nf w/modules/nf-core/blast/blastn/main.nf
+index fb8f354..0411b80 100644
+--- i/modules/nf-core/blast/blastn/main.nf
++++ w/modules/nf-core/blast/blastn/main.nf
+@@ -18,6 +18,9 @@ process BLAST_BLASTN {
+     output:
+     tuple val(meta), path('*.txt'), emit: txt
+     tuple val("${task.process}"), val("blastn"), eval("blastn -version 2>&1 | sed 's/^.*blastn: //; s/ .*\$//'"), topic: versions, emit: versions_blastn
++    tuple val("${task.process}"), val(meta), path("${meta.id}.BLAST_BLASTN.task_command.sh"),
++          val('blastn -version'), eval('blastn -version'),
++          eval("sha256sum '${meta.id}.BLAST_BLASTN.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -35,6 +38,7 @@ process BLAST_BLASTN {
+     }
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.BLAST_BLASTN.task_command.sh'
+     if [ "${is_compressed}" == "true" ]; then
+         gzip -c -d ${fasta} > ${fasta_name}
+     fi
+@@ -61,6 +65,7 @@ process BLAST_BLASTN {
+     stub:
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.BLAST_BLASTN.task_command.sh'
+     touch ${prefix}.txt
+ 
+     """
+diff --git i/modules/nf-core/mmseqs/easycluster/main.nf w/modules/nf-core/mmseqs/easycluster/main.nf
+index ded1cb8..7df6f96 100644
+--- i/modules/nf-core/mmseqs/easycluster/main.nf
++++ w/modules/nf-core/mmseqs/easycluster/main.nf
+@@ -15,6 +15,9 @@ process MMSEQS_EASYCLUSTER {
+     tuple val(meta), path("*all_seqs.fasta"), emit: fasta
+     tuple val(meta), path("*.tsv"), emit: tsv
+     tuple val("${task.process}"), val('mmseqs'), eval('mmseqs version'), topic: versions, emit: versions_mmseqs
++    tuple val("${task.process}"), val(meta), path("${meta.id}.MMSEQS_EASYCLUSTER.task_command.sh"),
++          val('mmseqs version'), eval('mmseqs version'),
++          eval("sha256sum '${meta.id}.MMSEQS_EASYCLUSTER.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -23,6 +26,7 @@ process MMSEQS_EASYCLUSTER {
+     def args = task.ext.args ?: ''
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.MMSEQS_EASYCLUSTER.task_command.sh'
+     mmseqs \\
+         easy-cluster \\
+         ${sequence} \\
+@@ -37,6 +41,7 @@ process MMSEQS_EASYCLUSTER {
+     def args = task.ext.args ?: ''
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.MMSEQS_EASYCLUSTER.task_command.sh'
+     echo ${args}
+ 
+     touch ${prefix}.tsv

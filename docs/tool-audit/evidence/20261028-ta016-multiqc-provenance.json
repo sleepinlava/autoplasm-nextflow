@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to MULTIQC; not accepted",
+  "change": "modules/nf-core/multiqc/main.nf: provenance tuple keyed on meta.id; cp of BASH_SOURCE[0] in script and stub",
+  "verification": "real Nextflow 26.10 + podman multiqc:1.35 consuming the real fastp json from the FASTP provenance run: COMPLETED, multiqc_report.html produced, task command file in place (sha256 a08ee7e0…)",
+  "failed_attempt": "v1 staged the fastp work directory (symlinks) instead of its json product; MultiQC found no analysis results and exited without a report — harness input error, retained",
+  "patch": "docs/tool-audit/patches/TA-016-multiqc-provenance.diff sha256 24c6acc8bb23acad6826b9fd934f820f93bc07bde4c01cc966bc6741d2b9c585",
+  "harness": "tests/nextflow/multiqc_provenance.nf (note: its view line has a cosmetic escape issue, PROV prints the literal template; verification reads the task dir directly)",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "report end-to-end rerun pending"]
+}

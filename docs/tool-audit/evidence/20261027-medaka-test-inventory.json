@@ -1,0 +1,21 @@
+{
+  "scope": "Source inventory reconciliation, not new executed tests or a case denominator",
+  "added_sources": [
+    "tests/run_medaka_retry.py",
+    "tests/nextflow/medaka_runtime_resources.nf",
+    "tests/run_medaka_production_cache.py",
+    "tests/run_medaka_framework.py",
+    "modules/nf-core/medaka/tests/main.nf.test",
+    "modules/nf-core/medaka/tests/main.nf.test.snap",
+    "tests/run_medaka_index_resources.py",
+    "tests/run_medaka_model_resources.py",
+    "tests/run_medaka_optional_exec.py",
+    "tests/run_medaka_optional_branches.py",
+    "tests/run_medaka_podman_exec.py",
+    "tests/run_medaka_real_ont.py",
+    "tests/check_medaka_probability_coverage.py"
+  ],
+  "source_count_added": 13,
+  "test_case_count_added_by_inventory": 0,
+  "evidence": "results/tool-audit/20261027-ta096-acceptance/receipt.json; previous bounded Medaka evidence receipts"
+}

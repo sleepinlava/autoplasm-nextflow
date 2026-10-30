@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-27",
+  "scope": "first MOB scientific positive/negative controls through the production preflight guard with the controlled 3.1.8 DB and fixed 3.1.9 wheel env",
+  "inputs": {
+    "positive": "pUTI89 complete plasmid (NC_007941.1, 115,933 bytes file) sha256 f48980b3e15eb733333493755a432de7e2380b71abf8ac682d92e94353ad8431",
+    "negative": "official no-plasmids chromosome (4.7Mbp, 68 contigs) sha256 01339fc73677ec20c63e30534455ca03b55ac814405da1171c17c07bce6b0043"
+  },
+  "execution": "bin/mobsuite_preflight.py --tool mob_typer --execute (guard verifies fixed 3.1.9 source, resource paths, ETE3 readonly schema, then calls unchanged native main); env bin on PATH for blastn/makeblastdb/tblastn/mash",
+  "results": {
+    "positive": "exit 0; rep_type IncFIA+IncFIB+rep_cluster_2131, relaxase MOBF+MOBP, MPF_F, orit hits — the expected IncF mobility profile for pUTI89",
+    "negative": "exit 0; all typing fields '-', predicted_mobility=non-mobilizable — clean negative"
+  },
+  "failed_attempt": "first run exit 255: blastn/makeblastdb/tblastn missing from PATH (env bin not exported) — a harness PATH error, not a tool defect; its stdout/stderr files were overwritten by the rerun, so the failure is recorded here and in the session task log, not preserved as files",
+  "limits": [
+    "single positive/single negative software controls, not classifier accuracy benchmarking",
+    "mob_typer only; mob_recon chromosome/plasmid reconstruction not run this round",
+    "no cache-identity wiring, optional filter_db, or OCI/platform acceptance",
+    "taxonomy snapshot 2026-10-27"
+  ],
+  "next_step": "mob_recon positive/negative + production module integration run (nf-test native case), then cache identity review for the MOB resource pair"
+}

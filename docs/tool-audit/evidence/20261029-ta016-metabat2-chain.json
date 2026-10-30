@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidates: METABAT2 route real verification (SAMTOOLS_INDEX, METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS, METABAT2_METABAT2); not accepted",
+  "verification": "real Nextflow 26.10, native metabat2-2.17 + concoct-1.1.0 (samtools) envs, retained fixtures via tests/nextflow/concoct_mag.nf MAG_HOST(mag_tools=[metabat2]): 3 tasks COMPLETED, real depth tsv.gz output; provenance sha256 SAMTOOLS_INDEX d81a89690e2437e4e7a90231de4b8dac02a9765bc8f0f2fef22d624983da9df8 (identical to the concoct-chain run, same command), JGISUMMARIZE 8202fba088cf9550f75e7e272cd0f06c81649d45230ad3567571bf58ef59c10f, METABAT2 fad8622ec8678f1085558addca4e0e9f8799c623449ee78270909b4798b5111e",
+  "failed_attempt": "v1 failed: metabat2 env lacks samtools (SAMTOOLS_INDEX command not found), retained at results/tool-audit/20261029-metabat2-chain-v1",
+  "patch": "docs/tool-audit/patches/TA-016-mag-linking-provenance.diff sha256 abdeaf418784d21f8e0675d386678c93901771d8cf23892cdc3dff3de8e6a890",
+  "limits": ["candidates not accepted; TA-016 remains in_progress", "SCAFFOLDS2BIN_METABAT2 (DASTOOL_FASTATOCONTIG2BIN) not triggered by this chain", "DAS_TOOL route still compile-only"]
+}

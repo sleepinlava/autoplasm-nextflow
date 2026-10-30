@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to MACSYFINDER_SEARCH; not accepted",
+  "changes": "provenance tuple after versions lines, cp of BASH_SOURCE[0] in script and stub",
+  "verification": "real Nextflow 26.10 via nextflow-no-log, native macsyfinder-2.1.6 env, retained CONJScan-2.1.0 models + locked gembase proteins fixture: CONJSCAN (boundary) COMPLETED, real all_systems.tsv/best_solutions output, provenance file sha256 0c2b57821b7a9d5e175d0c8217b3098feb40a614bbf50a7444adad2cffdbfdeb",
+  "patch": "docs/tool-audit/patches/TA-016-macsyfinder-search-provenance.diff sha256 8844fa207e7e3c0485063885685ed2621685f85aed45d6b6f6a3b8d186d8ae42",
+  "harness": "tests/nextflow/macsy_inputs.nf (pre-existing)",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "MACSYFINDER_DOWNLOAD (network macsydata) compile-checked only", "COPLA running; BAKTA, AMRFINDERPLUS, PLASMIDHOSTFINDER compile-checked only (no native env or local image)"]
+}

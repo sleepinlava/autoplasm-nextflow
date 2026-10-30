@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidate: BLAST_BLASTN task_provenance real verification; not accepted",
+  "verification": "real Nextflow 26.10, tests/nf-test/workflows/blastn_real.nf run natively (container engines disabled; retained abricate-1.0.1 env BLAST 2.16.0+): MAKEBLASTDB_SCAFFOLD built a real mini DB from pUTI89.fasta, BLAST_BLASTN COMPLETED with real self-hit report; provenance file sha256 98598c84fa7198d0497e2691ebd057e86846d402210a7a1a0d813fbbaf967774",
+  "patch": "docs/tool-audit/patches/TA-016-comparative-provenance.diff sha256 0b1e5c3b97827b3f4d25d9ad124f9735deb96d42eb4565c4ebbcbfc6d5915c1f",
+  "notes": "no local blast container image and no outbound network at run time; native path substituted and recorded",
+  "limits": ["candidate not accepted; TA-016 remains in_progress"]
+}

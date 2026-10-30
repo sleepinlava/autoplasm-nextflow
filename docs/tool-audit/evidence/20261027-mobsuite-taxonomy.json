@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-27",
+  "scope": "controlled ETE3 taxonomy preparation completing the MOB-suite default DB; full preflight now passes for both tools",
+  "taxdump": {
+    "url": "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz",
+    "bytes": 79933488,
+    "sha256": "6056adf8bb33eea27ed485e4a7748838db829e104a913af00c97acdea979572e",
+    "note": "TLS-verified download; NCBI publishes no reference checksum for taxdump, recorded SHA256 is the observed value",
+    "retained_at": "results/tool-audit/20261027-mobsuite-db/taxdump.tar.gz"
+  },
+  "build": "ete3 NCBITaxa(dbfile=db/taxa.sqlite, taxdump_file=<verified local file>) — the explicit-file path loads without any implicit download; taxonomy is metadata, no viral sequence elements introduced",
+  "taxa_sqlite": "777,244,672 bytes, in db/",
+  "preflight": {
+    "mob_recon": "pass exit 0, taxonomy schema DB_VERSION=2, all 11 selected resource paths present/non-empty",
+    "mob_typer": "pass exit 0, taxonomy schema DB_VERSION=2, all 10 selected resource paths present/non-empty",
+    "evidence_files": [
+      "results/tool-audit/20261027-mobsuite-db/preflight-recon.json",
+      "results/tool-audit/20261027-mobsuite-db/preflight-typer.json"
+    ]
+  },
+  "db_manifest": "results/tool-audit/20261027-mobsuite-db/db-sha256.txt (31 files) sha256 5977aa7772b028cdb59f20461fcf8664ab7de92a5d51c3f32596b023b0294aca",
+  "limits": [
+    "preparation presence + readonly schema check only; no scientific positive/negative run yet",
+    "taxonomy snapshot is today's NCBI state; host-range results are date-stamped by it",
+    "optional filter_db validation remains deferred"
+  ],
+  "next_step": "MOB scientific positive/negative controls with the fixed 3.1.9 env and this prepared DB, then cache-identity wiring review"
+}

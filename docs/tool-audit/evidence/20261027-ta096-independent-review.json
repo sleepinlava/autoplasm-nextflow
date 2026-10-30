@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-27",
+  "finding": "TA-096",
+  "scope": "independent review of the concurrently produced TA-096 bounded acceptance (20261027-ta096-acceptance), complementing the TA-092..095 review series",
+  "checks": {
+    "pinned_hashes": "all 5 SHA256 pins in evidence/20261027-medaka-retry-and-acceptance.json re-verified: run_medaka_retry.py, retry-v2/run.json, original-gzip-v1/run.json, acceptance receipt.json and review.md",
+    "retry_v2": "trace confirms probe COMPLETED, MEDAKA attempt1 FAILED exit 1 in workdir ef/698cb3 (medaka_private created but no test.fa.gz / consensus_probs.hdf on disk — verified directly), attempt2 COMPLETED in distinct workdir 7e/01dcff; complete_fasta_matches_native=true; originals unchanged",
+    "original_gzip_cold_failure": "original pre-fix module (sha256 d0cf7937...) returncode 1; actual task log contains the real samtools error '[E::fai_build3_core] Cannot index files compressed with gzip, please use bgzip'"
+  },
+  "acceptance_scope_readback": "acceptance.md limits TA-096 to the verified ordinary-gzip private full-decompression interface with default plain/BGZF controls; TA-091 remains the only open S0; RLE, other implicit resources, full environment and platform boundaries stay open",
+  "outcome": "independent review agrees with the bounded acceptance; no scope overreach found",
+  "limits": [
+    "hash and artifact-level re-verification; the 14-phase cache queue and framework runs were not re-executed",
+    "no opinion on biological accuracy; the same-sample polished draft is a software comparator, not ground truth"
+  ]
+}

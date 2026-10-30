@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to OPERA_MS; not accepted",
+  "changes": "provenance tuple (no versions line existed), cp of BASH_SOURCE[0] in script; module has no stub block so no stub cp; probe is `perl -S OPERA-MS.pl --help` (first line carries OPERA-MS v0.8.3; tool has no --version flag)",
+  "verification": "real Nextflow 26.10 via nextflow-no-log under retained opera-native-env.sh environment (perl 5.32.1 + Switch.pm + ncurses5 libs), locked minigut test reads: OPERA_MS (minigut_hybrid) COMPLETED, real 57-contig 1.78MB assembly, validate_opera_ms_output.py passed, provenance file sha256 4724c37e9137eef1972818c84b64e9c1c52198219e6b80ccb9c6f5e69d37a3a6",
+  "patch": "docs/tool-audit/patches/TA-016-opera-ms-provenance.diff sha256 0538165efce8502ef85fa0c853e18b8929cb3d0413bce13ffae182afefc5386e",
+  "harness": "tests/nextflow/opera_ms_native.nf (pre-existing)",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "report end-to-end rerun pending"]
+}

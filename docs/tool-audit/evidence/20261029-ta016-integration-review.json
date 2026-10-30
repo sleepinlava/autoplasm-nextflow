@@ -1,0 +1,212 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "Integration review of unaccepted provenance candidates; bounded fixes, not full acceptance",
+  "run_root": "results/tool-audit/20261029-cohort-integration-review",
+  "source_sha256": {
+    "bin/generate_report.R": "bc75a5bd5b4c8690260e529ced58d6bc9b45101b879afbee07557a216ad0f790",
+    "lib/report_events.nf": "94893cc3c28b77b932164dfeac616624d069a264f64d610f68f289171c229358",
+    "subworkflows/shared_quantification.nf": "4f49f27383de63951e2d61861eac4bc72e3f8567d2a9bc51dfd5dce1165d0cee",
+    "subworkflows/cross_sample.nf": "eff679f111a372453876310f8dccff0d20212efa60f77940e8beb5adec262797",
+    "modules/cross_sample/report.nf": "f2846d7e0da1e4fa1da1674270993f4aef2d87ec68dbfab28e5bf4529d57ed4b",
+    "tests/test_generate_report.py": "68dbd8a33e0b7709dcd454b396286a795097ace8a583e358620b80200e81329b",
+    "tests/check_report_runtime_provenance.py": "16f29cced4031c6f5f7dac0bedc09fb012e2df8b4606c02e5e55ebdedad76a8c",
+    "tests/nextflow/cohort_report_provenance.nf": "cba7c24fe71f77aa0a734c839b3b06ecdd289238607f6934027ba264fa4a468a",
+    "tests/nextflow/shared_empty_report_provenance.nf": "50c75cdb7e7116d0c280c4a13c8ccbd13e3d8b43fb978899c3acf656f6ba9b06",
+    "tests/nextflow/shared_quantification.nf": "01cd6c26585adf58729cd87b331f7b22d2073fb5fec56767ef8236d535c3bc98",
+    "tests/nextflow/statistics_eligibility.nf": "256f9f296207b3568b413eb0171595dfa02da28e554b11cd6fbc3cdf1af8ca1f",
+    "tests/run_statistics_eligibility.py": "c08efe2f3fa27abce27be097afc73f9394f14063fc2d60acc5d09197df9cba64",
+    "modules/cross_sample/statistics_inputs.nf": "a69b8b73cbc4d2ba13c7b98d2179aeb4c608273fa3416777b4d41bb9b37deab5",
+    "modules/cross_sample/shared_abundance.nf": "7ce2ef05c04fc6768aaec201623eabdf85861db92ba08c7e403ac92f1e9424aa",
+    "modules/cross_sample/shared_catalogue.nf": "a6614b56b7e0419891fe05ec1e6ef9cfd20b02e8dec5a6c6dd1a18dde4505749",
+    "modules/cross_sample/network_prepare.nf": "74ee91d47c03785a19ccefabe62f9817261593cb88fc14ece9bd58a000521ce3",
+    "modules/cross_sample/merge_abundance.nf": "a699088ec33a7b594741a207faeb728843a4d13c6001e361049c00e192e4abc3",
+    "modules/cross_sample/differential.nf": "d28e1d170e683fcb4b48bc96fa614c64917f1c1608315d40a44e236047b33dab",
+    "modules/cross_sample/fastspar.nf": "8ffc49e007f8edcd4f7a1d3ccffc0395f39d45d9eb97f3a13d90cc0c013232f2",
+    "modules/cross_sample/deseq2.nf": "09d08f7f9c5fe4dc6fce5fb0df6000598099ca1238d075ec02fdbc65e1d6abd9",
+    "modules/cross_sample/diversity.nf": "d2e899666b2be8081da9366d86d40223b1b672fe1488467685978e59c94ad912"
+  },
+  "traces": [
+    {
+      "trace": "results/tool-audit/20261029-cohort-integration-review/before-v2.trace.tsv",
+      "sha256": "ddc4c1688df293e3c85f8355baba1f6852b120ede7e721e96451eaa0700740f0",
+      "tasks": 1,
+      "statuses": {
+        "FAILED": 1
+      }
+    },
+    {
+      "trace": "results/tool-audit/20261029-cohort-integration-review/after.trace.tsv",
+      "sha256": "3426bdb3fd6cce3387e1e16c0edbe893e9b5463a3bc30351932d25dd57a1619f",
+      "tasks": 2,
+      "statuses": {
+        "COMPLETED": 2
+      }
+    },
+    {
+      "trace": "results/tool-audit/20261029-cohort-integration-review/cross-sample/trace.tsv",
+      "sha256": "935c0dbd685605e62c3635d6683d9db77891d0fc0bf127b79d2ba6ebd9877a34",
+      "tasks": 7,
+      "statuses": {
+        "COMPLETED": 6,
+        "FAILED": 1
+      }
+    },
+    {
+      "trace": "results/tool-audit/20261029-cohort-integration-review/cross-sample/retry.trace.tsv",
+      "sha256": "dda12cddde45148d5a637dfbd782cca241f92b6323dce39d20bd10e579844514",
+      "tasks": 7,
+      "statuses": {
+        "CACHED": 5,
+        "COMPLETED": 2
+      }
+    },
+    {
+      "trace": "results/tool-audit/20261029-cohort-integration-review/shared/trace.tsv",
+      "sha256": "e95890d5773907584736c66d6ff08426644bde4dc74da9c95bda2533170efe24",
+      "tasks": 20,
+      "statuses": {
+        "COMPLETED": 19,
+        "FAILED": 1
+      }
+    },
+    {
+      "trace": "results/tool-audit/20261029-cohort-integration-review/shared/retry.trace.tsv",
+      "sha256": "7de2f9a8e895323d2bfdb61991d08e3d694c0cdc524db116e2a0ed9459feae76",
+      "tasks": 20,
+      "statuses": {
+        "CACHED": 1,
+        "COMPLETED": 19
+      }
+    },
+    {
+      "trace": "results/tool-audit/20261029-cohort-integration-review/shared/final.trace.tsv",
+      "sha256": "51380d36e954837de84f5f7d68beb9d529c66ef822b60c9793e17b9795edaee5",
+      "tasks": 20,
+      "statuses": {
+        "CACHED": 14,
+        "COMPLETED": 6
+      }
+    },
+    {
+      "trace": "results/tool-audit/20261029-cohort-integration-review/empty/trace.tsv",
+      "sha256": "f023cb79352d4a2ccbac3f84ed18582d0c628de551155aedbc476c053ff66c49",
+      "tasks": 3,
+      "statuses": {
+        "COMPLETED": 2,
+        "FAILED": 1
+      }
+    },
+    {
+      "trace": "results/tool-audit/20261029-cohort-integration-review/empty/retry.trace.tsv",
+      "sha256": "4e9c9fed9514efebe37061ebb74851a34346ef71d0bc41ef0ff3ac42b0ed5a34",
+      "tasks": 3,
+      "statuses": {
+        "CACHED": 1,
+        "COMPLETED": 2
+      }
+    }
+  ],
+  "report_checks": {
+    "nested": {
+      "samples": 3,
+      "runtime_records": 1,
+      "cohort_records": 1,
+      "producers": [
+        "NETWORK_ALIAS"
+      ],
+      "pass": true,
+      "trace": "results/tool-audit/20261029-cohort-integration-review/after.trace.tsv",
+      "workdir": "/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261029-cohort-integration-review/after/work/a8/4fa6a0703486a78b9548bc819477b9"
+    },
+    "cross-sample": {
+      "samples": 20,
+      "runtime_records": 6,
+      "cohort_records": 6,
+      "producers": [
+        "DESEQ2",
+        "DIFFERENTIAL_ABUNDANCE",
+        "DIVERSITY",
+        "FASTSPAR",
+        "NETWORK_PREPARE",
+        "STATISTICS_INPUTS"
+      ],
+      "pass": true,
+      "trace": "results/tool-audit/20261029-cohort-integration-review/cross-sample/retry.trace.tsv",
+      "workdir": "/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261029-cohort-integration-review/cross-sample/work/b2/cd79de0ff50a1dab12dfef8996ebd4"
+    },
+    "empty": {
+      "samples": 3,
+      "runtime_records": 2,
+      "cohort_records": 2,
+      "producers": [
+        "SHARED_ABUNDANCE_TABLES",
+        "SHARED_CATALOGUE"
+      ],
+      "pass": true,
+      "trace": "results/tool-audit/20261029-cohort-integration-review/empty/retry.trace.tsv",
+      "workdir": "/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261029-cohort-integration-review/empty/work/bf/6239204218882723739e9444d9fb3e"
+    },
+    "shared": {
+      "samples": 4,
+      "runtime_records": 19,
+      "cohort_records": 7,
+      "producers": [
+        "BOWTIE2_ALIGN_SHARED",
+        "BOWTIE2_BUILD_SHARED",
+        "COVERM_SHARED",
+        "DIFFERENTIAL_ABUNDANCE",
+        "DIVERSITY",
+        "LINK_COABUNDANCE",
+        "SAMTOOLS_VIEW_SHARED",
+        "SHARED_ABUNDANCE_TABLES",
+        "SHARED_CATALOGUE",
+        "STATISTICS_INPUTS"
+      ],
+      "pass": true,
+      "trace": "results/tool-audit/20261029-cohort-integration-review/shared/final.trace.tsv",
+      "workdir": "/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261029-cohort-integration-review/shared/work/c8/38345824230d8d6ad2a00983bee005"
+    }
+  },
+  "regressions": {
+    "report_before": "Original 20 methods passed; extended 23 methods failed with 13 failing subtests and 2 errors before fixes",
+    "report_after": "23 methods passed",
+    "nested_before": "Real NETWORK_ALIAS task failed output eval: sha256sum COHORT_REVIEW:NETWORK_ALIAS.task_command.sh absent",
+    "cross_sample_before": "Six native analysis tasks completed, REPORT failed on empty FastSpar version stdout",
+    "shared_before": "19 native tasks completed, REPORT failed on sample_id shared_reference",
+    "empty_before": "Two native producers completed, REPORT rejected empty cohort domain",
+    "harness_initial": "First harness compile failed missing def inside closure; retained before.log, not a production counterexample",
+    "shared_units": "15 methods passed"
+  },
+  "scientific_controls": {
+    "cross_sample": "20 synthetic count samples, 8 features, 2 groups of 10; actual native R, DESeq2 fitted and FastSpar. Technical provenance and nonempty-path control, not TT-003 real-shotgun acceptance",
+    "shared": "4 retained bacterial/plasmid DNA controls with simulated reads; current three abundance/state TSVs byte-identical to prior accepted bounded measurements",
+    "empty": "3 empty FASTA controls, no mapping tasks; 3 zero-result samples retained in final report"
+  },
+  "limitations": [
+    "TA-016 remains in_progress; no complete runtime DB/model/environment closure",
+    "MERGE_ABUNDANCE filename correction is static in this slice; other eight cross_sample producers have real nested execution here",
+    "COMPARATIVE MMSEQS2 still tags plasmid_catalog as a sample; inspection indicates analogous integration risk, not dynamically tested here",
+    "PLASMID_CATALOG_PREPARE self command is generic evidence, not fully embedded runtime_command",
+    "TA-091, TA-097, TA-031, TT-003 and full M0-M4/platform/scientific benchmarks remain open",
+    "Existing candidate work reviewed from current tree and receipts; individual edit authorship was not inferred",
+    "No virus elements downloaded or executed; no new remote or paid workflow was launched"
+  ],
+  "test_log_sha256": {
+    "results/tool-audit/20261029-cohort-integration-review/shared-units.log": "5bd649801a05f2ec76511ed547c43de1daffabd3710d260bff5db71ea84f327d",
+    "results/tool-audit/20261029-cohort-integration-review/unit-before.log": "f77d606cf835d7168aa53de8f9ae394db15a0aa7f9f01d677162558f2b85325d",
+    "results/tool-audit/20261029-cohort-integration-review/unit-after.log": "ee20251c38fdbe3fbab4aef378c5c334f7c743bf2d2351cc4527d33c6ca2234f"
+  },
+  "ledger_reconciliation": {
+    "findings": 111,
+    "unresolved": 5,
+    "ids": [
+      "TA-091",
+      "TA-097",
+      "TA-016",
+      "TA-031",
+      "TT-003"
+    ],
+    "note": "Prior status/acceptance summary omitted TA-097 already entered on 2026-10-28; refreshed without accepting it."
+  }
+}

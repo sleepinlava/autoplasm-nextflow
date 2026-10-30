@@ -1,0 +1,805 @@
+diff --git i/modules/annotation/protein_inputs.nf w/modules/annotation/protein_inputs.nf
+index 56e63a4..5a7ca5a 100644
+--- i/modules/annotation/protein_inputs.nf
++++ w/modules/annotation/protein_inputs.nf
+@@ -15,15 +15,21 @@ process PROTEIN_INPUTS {
+     tuple val(meta), path('protein_inputs/gene_map.tsv'), emit: gene_map
+     tuple val(meta), path('protein_inputs/manifest.json'), emit: manifest
+     tuple val(meta), eval("python3 -c 'import json; print(json.load(open(\"protein_inputs/manifest.json\"))[\"state\"])'"), emit: state
++    tuple val("${task.process}"), val(meta), path("${meta.id}.PROTEIN_INPUTS.task_command.sh"),
++          val('python3 prepare_prodigal_inputs.py -h'), eval('python3 prepare_prodigal_inputs.py -h 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.PROTEIN_INPUTS.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PROTEIN_INPUTS.task_command.sh'
+     python3 prepare_prodigal_inputs.py --genome "${genome}" --gff "${gff}" --proteins "${proteins}" --cds "${cds}" \\
+         --output protein_inputs
+     """
+ 
+     stub:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PROTEIN_INPUTS.task_command.sh'
+     mkdir protein_inputs
+     touch protein_inputs/proteins.faa protein_inputs/replicon_topology.txt protein_inputs/gene_map.tsv
+     echo '{"state":"stub_not_gene_prediction"}' > protein_inputs/manifest.json
+diff --git i/modules/basecalling/dorado.nf w/modules/basecalling/dorado.nf
+index 32f2758..41c7688 100644
+--- i/modules/basecalling/dorado.nf
++++ w/modules/basecalling/dorado.nf
+@@ -17,10 +17,15 @@ process DORADO_BASECALL {
+ 
+     output:
+     tuple val(meta), path("${meta.id}.dorado.fastq"), emit: long_reads
++    tuple val("${task.process}"), val(meta), path("${meta.id}.DORADO_BASECALL.task_command.sh"),
++          val('dorado --version'), eval('dorado --version'),
++          eval("sha256sum '${meta.id}.DORADO_BASECALL.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     def model = params.dorado_model ?: 'hac'
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.DORADO_BASECALL.task_command.sh'
+     dorado basecaller ${model} ${pod5} --emit-fastq > ${meta.id}.dorado.fastq
+     """
+ }
+diff --git i/modules/binning/gplas2.nf w/modules/binning/gplas2.nf
+index c18e3e6..89db787 100644
+--- i/modules/binning/gplas2.nf
++++ w/modules/binning/gplas2.nf
+@@ -20,10 +20,15 @@ process GPLAS2 {
+     output:
+     tuple val(meta), path("${meta.gplas_original_meta.id}.gplas2"), emit: bins
+     tuple val(meta), path("${meta.gplas_original_meta.id}.gplas_runtime.json"), emit: runtime
++    tuple val("${task.process}"), val(meta), path("${meta.id}.GPLAS2.task_command.sh"),
++          val('python3 .gplas_checked.py --help'), eval('python3 .gplas_checked.py --help 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.GPLAS2.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     def originalId = meta.gplas_original_meta.id
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.GPLAS2.task_command.sh'
+     python3 .gplas_checked.py --source '${source}' --graph '${assembly_graph}' \\
+         --predictions '${node_predictions}' --name '${originalId}' \\
+         --record '${originalId}.gplas_runtime.json'
+diff --git i/modules/binning/gplas_inputs.nf w/modules/binning/gplas_inputs.nf
+index 94afaef..131ec9d 100644
+--- i/modules/binning/gplas_inputs.nf
++++ w/modules/binning/gplas_inputs.nf
+@@ -15,9 +15,14 @@ process GPLAS2_NODES {
+     output:
+     tuple val(meta), path("${meta.id}.gplas.gfa"), path("${meta.id}.gplas_nodes.fasta"), emit: nodes
+     tuple val(meta), path("${meta.id}.gplas_nodes.json"), emit: state
++    tuple val("${task.process}"), val(meta), path("${meta.id}.GPLAS2_NODES.task_command.sh"),
++          val('python3 .gplas_inputs.py --help'), eval('python3 .gplas_inputs.py --help 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.GPLAS2_NODES.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.GPLAS2_NODES.task_command.sh'
+     python3 .gplas_inputs.py prepare --graph '${graph}' --prefix '${meta.id}' \\
+         --sample-id '${meta.gplas_original_meta.id}'
+     """
+@@ -40,9 +45,14 @@ process GPLAS2_PREDICTIONS {
+     tuple val(meta), path(graph), path("${meta.id}.gplas_prediction.tab"), path("${meta.id}.gplas_prediction.tab.ready"), optional: true, emit: ready
+     tuple val(meta), path("${meta.id}.gplas_prediction.tab"), emit: predictions
+     tuple val(meta), path("${meta.id}.gplas_prediction.state.json"), emit: state
++    tuple val("${task.process}"), val(meta), path("${meta.id}.GPLAS2_PREDICTIONS.task_command.sh"),
++          val('python3 .gplas_inputs.py --help'), eval('python3 .gplas_inputs.py --help 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.GPLAS2_PREDICTIONS.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.GPLAS2_PREDICTIONS.task_command.sh'
+     python3 .gplas_inputs.py predictions --graph '${graph}' --consensus '${consensus}' \\
+         --genomad-assessment '${assessment}' \\
+         --output '${meta.id}.gplas_prediction.tab' --sample-id '${meta.gplas_original_meta.id}' \\
+diff --git i/modules/binning/plasmaag.nf w/modules/binning/plasmaag.nf
+index 77668a6..d2f3bed 100644
+--- i/modules/binning/plasmaag.nf
++++ w/modules/binning/plasmaag.nf
+@@ -17,6 +17,10 @@ process PLASMAAG {
+     output:
+     tuple val(meta), path("${meta.id}.plasmaag", type: 'dir'), emit: bins
+     tuple val(meta), path("${meta.id}.plasmaag_runtime.json"), emit: runtime
++    tuple val("${task.process}"), val(meta), path("${meta.id}.PLASMAAG.task_command.sh"),
++          val('python3 plasmaag_inputs.py -h'), eval('python3 plasmaag_inputs.py -h 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.PLASMAAG.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     if (task.cpus < 8) error('Fixed PlasMAAG Node2Vec uses 8 workers; allocate at least 8 CPUs')
+@@ -33,6 +37,7 @@ process PLASMAAG {
+     def vamb = runtime_options.vamb_arguments ? "--vamb_arguments ${q.call(runtime_options.vamb_arguments)}" : ''
+     def snake = runtime_options.conda_prefix ? "--snakemake_arguments ${q.call('--conda-prefix ' + runtime_options.conda_prefix)}" : ''
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLASMAAG.task_command.sh'
+     cat > cohort-spec.json <<'PLASMAAG_COHORT_JSON'
+ ${spec}
+ PLASMAAG_COHORT_JSON
+diff --git i/modules/binning/recycler.nf w/modules/binning/recycler.nf
+index 4657103..b6c4eb2 100644
+--- i/modules/binning/recycler.nf
++++ w/modules/binning/recycler.nf
+@@ -18,9 +18,14 @@ process RECYCLER {
+ 
+     output:
+     tuple val(meta), path("${meta.id}.recycler_out", type: 'dir'), emit: output_dir
++    tuple val("${task.process}"), val(meta), path("${meta.id}.RECYCLER.task_command.sh"),
++          val('python3 run_recycler_checked.py -h'), eval('python3 run_recycler_checked.py -h 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.RECYCLER.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.RECYCLER.task_command.sh'
+     python validate_recycler_inputs.py --graph "${assembly_graph}" --bam "${bam}" \\
+         --provenance "${provenance}" --out ${meta.id}.recycler.inputs.json
+     python run_recycler_checked.py --graph "${assembly_graph}" --bam "${bam}" \\
+diff --git i/modules/linking/coabundance.nf w/modules/linking/coabundance.nf
+index d38b05f..3b3c659 100644
+--- i/modules/linking/coabundance.nf
++++ w/modules/linking/coabundance.nf
+@@ -20,6 +20,11 @@ process LINK_COABUNDANCE {
+ 
+     output:
+     path "coabundance_links.tsv", emit: links
++    tuple val("${task.process}"), path("LINK_COABUNDANCE.task_command.sh"),
++          val('Rscript --version'), eval('Rscript --version'),
++          eval("sha256sum 'LINK_COABUNDANCE.task_command.sh'"),
++          val((host_sample_ids instanceof List ? host_sample_ids : [host_sample_ids]).join(',')), emit: cohort_provenance
++
+ 
+     script:
+     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+@@ -28,6 +33,7 @@ process LINK_COABUNDANCE {
+     def sampleIds = (host_sample_ids in List ? host_sample_ids : (host_sample_ids ? [host_sample_ids] : []))
+         .collect { shellQuote.call(it) }.join(' ')
+     """
++    cp -- "\${BASH_SOURCE[0]}" 'LINK_COABUNDANCE.task_command.sh'
+     coabundance_link.R \\
+         --plasmid-abundance ${shellQuote.call(plasmid_abundance_merged)} \\
+         --host-profiles ${profileFiles} \\
+diff --git i/modules/linking/hotspot.nf w/modules/linking/hotspot.nf
+index 50adee5..bd52b9c 100644
+--- i/modules/linking/hotspot.nf
++++ w/modules/linking/hotspot.nf
+@@ -29,9 +29,14 @@ process LINK_HOTSPOT {
+     tuple val(meta), path("${meta.id}.host_lineage.tsv"), emit: lineage
+     tuple val(meta), path("${meta.id}.hotspot_conversion.json"), emit: conversion
+     tuple val(meta), path("${meta.id}.hotspot_runtime.json"), emit: runtime
++    tuple val("${task.process}"), val(meta), path("${meta.id}.LINK_HOTSPOT.task_command.sh"),
++          val('python3 hotspot_runtime.py -h'), eval('python3 hotspot_runtime.py -h 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.LINK_HOTSPOT.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.LINK_HOTSPOT.task_command.sh'
+     python3 hotspot_runtime.py --source-dir hotspot_program --database hotspot_database --models hotspot_models \\
+         --fasta "${plasmid_contigs}" --threads ${task.cpus} \\
+         --runtime-record "${meta.id}.hotspot_runtime.json"
+diff --git i/modules/linking/longread.nf w/modules/linking/longread.nf
+index 6ce5de3..13897da 100644
+--- i/modules/linking/longread.nf
++++ w/modules/linking/longread.nf
+@@ -19,9 +19,14 @@ process LINK_LONGREAD {
+ 
+     output:
+     tuple val(meta), path("${meta.id}.longread_bridge_links.tsv"), emit: links
++    tuple val("${task.process}"), val(meta), path("${meta.id}.LINK_LONGREAD.task_command.sh"),
++          val('Rscript --version'), eval('Rscript --version'),
++          eval("sha256sum '${meta.id}.LINK_LONGREAD.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.LINK_LONGREAD.task_command.sh'
+     longread_bridge_link.R \\
+         --sam ${bam} \\
+         --plasmid-contigs ${plasmid_contigs} \\
+diff --git i/modules/linking/sequence.nf w/modules/linking/sequence.nf
+index 80f112e..82b4c5b 100644
+--- i/modules/linking/sequence.nf
++++ w/modules/linking/sequence.nf
+@@ -21,6 +21,10 @@ process LINK_SEQUENCE {
+     tuple val(meta), path("${meta.id}.sequence_links.tsv"), emit: links
+     tuple val(meta), path("${meta.id}.sequence_scores.tsv"), emit: scores
+     tuple val(meta), path("${meta.id}.sequence_method.json"), emit: method
++    tuple val("${task.process}"), val(meta), path("${meta.id}.LINK_SEQUENCE.task_command.sh"),
++          val('Rscript --version'), eval('Rscript --version'),
++          eval("sha256sum '${meta.id}.LINK_SEQUENCE.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     def binPaths = (mag_bins in List ? mag_bins : (mag_bins ? [mag_bins] : []))
+@@ -34,6 +38,7 @@ process LINK_SEQUENCE {
+     def taxList = taxPaths.collect { shellQuote.call(it) }.join(' ')
+     def mergeTax = taxPaths ? "head -n 1 ${shellQuote.call(taxPaths[0])} > taxonomy.tsv && tail -q -n +2 ${taxList} >> taxonomy.tsv" : ''
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.LINK_SEQUENCE.task_command.sh'
+     ${mergeTax}
+     sequence_similarity_link.R \\
+         --plasmid-contigs ${shellQuote.call(plasmid_contigs)} \\
+diff --git i/modules/mag/samtools_index.nf w/modules/mag/samtools_index.nf
+index a79e4ee..352076f 100644
+--- i/modules/mag/samtools_index.nf
++++ w/modules/mag/samtools_index.nf
+@@ -17,9 +17,14 @@ process SAMTOOLS_INDEX {
+ 
+     output:
+     tuple val(meta), path("${bam}.bai"), emit: bai
++    tuple val("${task.process}"), val(meta), path("${meta.id}.SAMTOOLS_INDEX.task_command.sh"),
++          val('samtools --version'), eval('samtools --version | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.SAMTOOLS_INDEX.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.SAMTOOLS_INDEX.task_command.sh'
+     samtools index -@ ${task.cpus} ${bam}
+     """
+ }
+diff --git i/modules/nf-core/bowtie2/build/main.nf w/modules/nf-core/bowtie2/build/main.nf
+index ee4b14f..b585c71 100644
+--- i/modules/nf-core/bowtie2/build/main.nf
++++ w/modules/nf-core/bowtie2/build/main.nf
+@@ -13,6 +13,10 @@ process BOWTIE2_BUILD {
+     output:
+     tuple val(meta), path('bowtie2')    , emit: index
+     tuple val("${task.process}"), val('bowtie2'), eval("bowtie2 --version 2>&1 | sed -n 's/.*bowtie2-align-s version //p'"), emit: versions_bowtie2, topic: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.BOWTIE2_BUILD.task_command.sh"),
++          val('bowtie2 --version'), eval('bowtie2 --version 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.BOWTIE2_BUILD.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -20,13 +24,14 @@ process BOWTIE2_BUILD {
+     script:
+     def args = task.ext.args ?: ''
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.BOWTIE2_BUILD.task_command.sh'
+     mkdir bowtie2
+     bowtie2-build $args --threads $task.cpus $fasta bowtie2/${fasta.baseName}
+     """
+ 
+     stub:
+     """
+-    mkdir bowtie2
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.BOWTIE2_BUILD.task_command.sh'
+     touch bowtie2/${fasta.baseName}.{1..4}.bt2
+     touch bowtie2/${fasta.baseName}.rev.{1,2}.bt2
+     """
+diff --git i/modules/nf-core/checkm2/predict/main.nf w/modules/nf-core/checkm2/predict/main.nf
+index c487c2a..7253a84 100644
+--- i/modules/nf-core/checkm2/predict/main.nf
++++ w/modules/nf-core/checkm2/predict/main.nf
+@@ -16,6 +16,10 @@ process CHECKM2_PREDICT {
+     tuple val(meta), path("${prefix}")                   , emit: checkm2_output
+     tuple val(meta), path("${prefix}_checkm2_report.tsv"), emit: checkm2_tsv
+     tuple val("${task.process}"), val('checkm2'), eval('checkm2 --version'), topic: versions, emit: versions_checkm2_predict
++    tuple val("${task.process}"), val(meta), path("${meta.id}.CHECKM2_PREDICT.task_command.sh"),
++          val('checkm2 --version'), eval('checkm2 --version'),
++          eval("sha256sum '${meta.id}.CHECKM2_PREDICT.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -24,6 +28,7 @@ process CHECKM2_PREDICT {
+     def args = task.ext.args ?: ''
+     prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CHECKM2_PREDICT.task_command.sh'
+     # Passing the database via CHECKM2DB instead of --database_path skips CheckM2's
+     # hardcoded checksum check, allowing custom/reduced databases (e.g. for testing)
+     export CHECKM2DB=${db}
+@@ -41,7 +46,7 @@ process CHECKM2_PREDICT {
+     stub:
+     prefix = task.ext.prefix ?: "${meta.id}"
+     """
+-    mkdir ${prefix}/
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CHECKM2_PREDICT.task_command.sh'
+     touch ${prefix}_checkm2_report.tsv
+     """
+ }
+diff --git i/modules/nf-core/concoct/concoct/main.nf w/modules/nf-core/concoct/concoct/main.nf
+index 79bfd54..657e9d6 100644
+--- i/modules/nf-core/concoct/concoct/main.nf
++++ w/modules/nf-core/concoct/concoct/main.nf
+@@ -18,6 +18,10 @@ process CONCOCT_CONCOCT {
+     tuple val(meta), path("*_PCA_components_data_gt1000.csv"), emit: pca_components_csv
+     tuple val(meta), path("*_PCA_transformed_data_gt1000.csv"), emit: pca_transformed_csv
+     tuple val("${task.process}"), val('concoct'), eval('concoct --version | cut -d " " -f2'), emit: versions_concoct, topic: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.CONCOCT_CONCOCT.task_command.sh"),
++          val('concoct --version'), eval('concoct --version'),
++          eval("sha256sum '${meta.id}.CONCOCT_CONCOCT.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -26,6 +30,7 @@ process CONCOCT_CONCOCT {
+     def args = task.ext.args ?: ''
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_CONCOCT.task_command.sh'
+     concoct \\
+         ${args} \\
+         --threads ${task.cpus} \\
+@@ -38,6 +43,7 @@ process CONCOCT_CONCOCT {
+     stub:
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_CONCOCT.task_command.sh'
+     touch ${prefix}_args.txt
+     touch ${prefix}_clustering_gt1000.csv
+     touch ${prefix}_log.txt
+diff --git i/modules/nf-core/concoct/concoctcoveragetable/main.nf w/modules/nf-core/concoct/concoctcoveragetable/main.nf
+index 911eeca..8c076ca 100644
+--- i/modules/nf-core/concoct/concoctcoveragetable/main.nf
++++ w/modules/nf-core/concoct/concoctcoveragetable/main.nf
+@@ -13,6 +13,10 @@ process CONCOCT_CONCOCTCOVERAGETABLE {
+     output:
+     tuple val(meta), path("*.tsv"), emit: tsv
+     tuple val("${task.process}"), val('concoct'), eval('concoct --version | cut -d " " -f2'), emit: versions_concoct, topic: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.CONCOCT_CONCOCTCOVERAGETABLE.task_command.sh"),
++          val('concoct --version'), eval('concoct --version'),
++          eval("sha256sum '${meta.id}.CONCOCT_CONCOCTCOVERAGETABLE.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -21,6 +25,7 @@ process CONCOCT_CONCOCTCOVERAGETABLE {
+     def args = task.ext.args ?: ''
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_CONCOCTCOVERAGETABLE.task_command.sh'
+     concoct_coverage_table.py \\
+         ${args} \\
+         ${bed} \\
+@@ -32,6 +37,7 @@ process CONCOCT_CONCOCTCOVERAGETABLE {
+     stub:
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_CONCOCTCOVERAGETABLE.task_command.sh'
+     touch ${prefix}.tsv
+ 
+     """
+diff --git i/modules/nf-core/concoct/cutupfasta/main.nf w/modules/nf-core/concoct/cutupfasta/main.nf
+index c2baf7e..e036bc8 100644
+--- i/modules/nf-core/concoct/cutupfasta/main.nf
++++ w/modules/nf-core/concoct/cutupfasta/main.nf
+@@ -18,6 +18,10 @@ process CONCOCT_CUTUPFASTA {
+     tuple val(meta), path("*.fasta"), emit: fasta
+     tuple val(meta), path("*.bed"), optional: true, emit: bed
+     tuple val("${task.process}"), val('concoct'), eval('concoct --version | cut -d " " -f2'), emit: versions_concoct, topic: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.CONCOCT_CUTUPFASTA.task_command.sh"),
++          val('concoct --version'), eval('concoct --version'),
++          eval("sha256sum '${meta.id}.CONCOCT_CUTUPFASTA.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -32,6 +36,7 @@ process CONCOCT_CUTUPFASTA {
+         error("Input and output names are the same, set prefix in module configuration to disambiguate!")
+     }
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_CUTUPFASTA.task_command.sh'
+     if ${compressed}; then
+         mkdir -p .concoct_input
+         gzip -cd -- ${fasta} > .concoct_input/assembly.fna
+@@ -51,6 +56,7 @@ process CONCOCT_CUTUPFASTA {
+         error("Input and output names are the same, set prefix in module configuration to disambiguate!")
+     }
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_CUTUPFASTA.task_command.sh'
+     touch ${prefix}.fasta
+ 
+     """
+diff --git i/modules/nf-core/concoct/extractfastabins/main.nf w/modules/nf-core/concoct/extractfastabins/main.nf
+index 787cdbe..bffeb74 100644
+--- i/modules/nf-core/concoct/extractfastabins/main.nf
++++ w/modules/nf-core/concoct/extractfastabins/main.nf
+@@ -13,6 +13,10 @@ process CONCOCT_EXTRACTFASTABINS {
+     output:
+     tuple val(meta), path("${prefix}/*.fa.gz"), emit: fasta, optional: true
+     tuple val("${task.process}"), val('concoct'), eval("concoct --version 2>&1 | sed -n 's/concoct //p'"), topic: versions, emit: versions_concoct
++    tuple val("${task.process}"), val(meta), path("${meta.id}.CONCOCT_EXTRACTFASTABINS.task_command.sh"),
++          val('concoct --version'), eval('concoct --version'),
++          eval("sha256sum '${meta.id}.CONCOCT_EXTRACTFASTABINS.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -23,6 +27,7 @@ process CONCOCT_EXTRACTFASTABINS {
+     def compressed = original_fasta.name.toLowerCase().endsWith('.gz')
+     def input_fasta = compressed ? '.concoct_input/assembly.fna' : original_fasta
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_EXTRACTFASTABINS.task_command.sh'
+     mkdir ${prefix}
+ 
+     if ${compressed}; then
+@@ -47,6 +52,7 @@ process CONCOCT_EXTRACTFASTABINS {
+     stub:
+     prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_EXTRACTFASTABINS.task_command.sh'
+     mkdir -p ${prefix}
+     echo "" | gzip > ${prefix}/${prefix}.fa.gz
+     """
+diff --git i/modules/nf-core/concoct/mergecutupclustering/main.nf w/modules/nf-core/concoct/mergecutupclustering/main.nf
+index 813df45..8bd5e24 100644
+--- i/modules/nf-core/concoct/mergecutupclustering/main.nf
++++ w/modules/nf-core/concoct/mergecutupclustering/main.nf
+@@ -13,6 +13,10 @@ process CONCOCT_MERGECUTUPCLUSTERING {
+     output:
+     tuple val(meta), path("*.csv"), emit: csv
+     tuple val("${task.process}"), val('concoct'), eval('concoct --version | cut -d " " -f2'), emit: versions_concoct, topic: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.CONCOCT_MERGECUTUPCLUSTERING.task_command.sh"),
++          val('concoct --version'), eval('concoct --version'),
++          eval("sha256sum '${meta.id}.CONCOCT_MERGECUTUPCLUSTERING.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -24,6 +28,7 @@ process CONCOCT_MERGECUTUPCLUSTERING {
+         error("Input and output names are the same, set prefix in module configuration to disambiguate!")
+     }
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_MERGECUTUPCLUSTERING.task_command.sh'
+     merge_cutup_clustering.py \\
+         ${args} \\
+         ${clustering_csv} \\
+@@ -37,6 +42,7 @@ process CONCOCT_MERGECUTUPCLUSTERING {
+         error("Input and output names are the same, set prefix in module configuration to disambiguate!")
+     }
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.CONCOCT_MERGECUTUPCLUSTERING.task_command.sh'
+     touch ${prefix}.csv
+ 
+     """
+diff --git i/modules/nf-core/dastool/dastool/main.nf w/modules/nf-core/dastool/dastool/main.nf
+index 7bf8358..649449f 100644
+--- i/modules/nf-core/dastool/dastool/main.nf
++++ w/modules/nf-core/dastool/dastool/main.nf
+@@ -26,6 +26,10 @@ process DASTOOL_DASTOOL {
+     tuple val(meta), path("*.b6")                       , optional: true, emit: b6
+     tuple val(meta), path("*.seqlength")                , optional: true, emit: seqlength
+     tuple val("${task.process}"), val('dastool'), eval('DAS_Tool --version 2>&1 | grep "DAS Tool" | sed "s/DAS Tool //"'), topic: versions, emit: versions_dastool
++    tuple val("${task.process}"), val(meta), path("${meta.id}.DASTOOL_DASTOOL.task_command.sh"),
++          val('DAS_Tool --version'), eval('DAS_Tool --version 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.DASTOOL_DASTOOL.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -55,6 +59,7 @@ process DASTOOL_DASTOOL {
+     def decompress_proteins = proteins && (proteins.toString() != clean_proteins) ? "gunzip -f ${proteins}" : ""
+     def proteins_pred = proteins ? "-p ${clean_proteins}" : ""
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.DASTOOL_DASTOOL.task_command.sh'
+     ${check_db}
+     ${decompress_proteins}
+     ${decompress_contigs}
+@@ -72,6 +77,7 @@ process DASTOOL_DASTOOL {
+     stub:
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.DASTOOL_DASTOOL.task_command.sh'
+     touch ${prefix}_DASTool.log
+     touch ${prefix}_DASTool_summary.tsv
+     touch ${prefix}_DASTool_contig2bin.tsv
+diff --git i/modules/nf-core/dastool/fastatocontig2bin/main.nf w/modules/nf-core/dastool/fastatocontig2bin/main.nf
+index 4844867..8866636 100644
+--- i/modules/nf-core/dastool/fastatocontig2bin/main.nf
++++ w/modules/nf-core/dastool/fastatocontig2bin/main.nf
+@@ -14,6 +14,10 @@ process DASTOOL_FASTATOCONTIG2BIN {
+     output:
+     tuple val(meta), path("*.tsv"), emit: fastatocontig2bin
+     tuple val("${task.process}"), val('dastool'), eval('DAS_Tool --version 2>&1 | grep "DAS Tool" | sed "s/DAS Tool //"'), topic: versions, emit: versions_dastool
++    tuple val("${task.process}"), val(meta), path("${meta.id}.DASTOOL_FASTATOCONTIG2BIN.task_command.sh"),
++          val('DAS_Tool --version'), eval('DAS_Tool --version 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.DASTOOL_FASTATOCONTIG2BIN.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -25,6 +29,7 @@ process DASTOOL_FASTATOCONTIG2BIN {
+     // Local patch (refactor/nf-core-modules): upstream only decompresses a
+     // single input; our callers stage a list of gzipped bin fastas here.
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.DASTOOL_FASTATOCONTIG2BIN.task_command.sh'
+     find . -maxdepth 1 -name '*.gz' -exec gunzip -q -f {} +
+ 
+     Fasta_to_Contig2Bin.sh \\
+@@ -37,6 +42,6 @@ process DASTOOL_FASTATOCONTIG2BIN {
+     stub:
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
+-    touch ${prefix}.tsv
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.DASTOOL_FASTATOCONTIG2BIN.task_command.sh'
+     """
+ }
+diff --git i/modules/nf-core/eggnogmapper/main.nf w/modules/nf-core/eggnogmapper/main.nf
+index 3f34ed8..a676fa0 100644
+--- i/modules/nf-core/eggnogmapper/main.nf
++++ w/modules/nf-core/eggnogmapper/main.nf
+@@ -19,6 +19,10 @@ process EGGNOGMAPPER {
+     tuple val(meta), path("*.emapper.hits")          , emit: hits     , optional: true
+     // emapper.py --version reports the enclosing repository's git tag when the package sits inside one, as it does under conda.
+     tuple val("${task.process}"), val('eggnog-mapper'), eval('python -c "from importlib.metadata import version; import sys; print(version(sys.argv[1]))" eggnog-mapper'), topic: versions, emit: versions_eggnogmapper
++    tuple val("${task.process}"), val(meta), path("${meta.id}.EGGNOGMAPPER.task_command.sh"),
++          val('emapper.py --version'), eval('emapper.py --version 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.EGGNOGMAPPER.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -33,6 +37,7 @@ process EGGNOGMAPPER {
+     def db_arg   = db && db_flags[search_mode]              ? "${db_flags[search_mode]} ${db_path}" : ''
+     def dbmem    = task.memory.toMega() > 40000             ? '--dbmem'                             : ''
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.EGGNOGMAPPER.task_command.sh'
+     if [ "$is_compressed" == "true" ]; then
+         gzip -c -d $fasta > $fasta_name
+     fi
+@@ -51,6 +56,7 @@ process EGGNOGMAPPER {
+     stub:
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.EGGNOGMAPPER.task_command.sh'
+     echo $args
+ 
+     touch ${prefix}.emapper.annotations
+diff --git i/modules/nf-core/gtdbtk/classifywf/main.nf w/modules/nf-core/gtdbtk/classifywf/main.nf
+index 314bc0e..8d7bea4 100644
+--- i/modules/nf-core/gtdbtk/classifywf/main.nf
++++ w/modules/nf-core/gtdbtk/classifywf/main.nf
+@@ -29,6 +29,10 @@ process GTDBTK_CLASSIFYWF {
+     tuple val(meta), path("${prefix}.genome_inputs.json")            , emit: genome_inputs
+     tuple val("${task.process}"), val('gtdbtk'), eval("gtdbtk --version 2>&1 | grep -Eo '[0-9]+(\\.[0-9]+)+' | head -1") , topic: versions, emit: versions_gtdbtk
+     tuple val("${task.process}"), val('gtdb_db'), eval('grep VERSION_DATA \$GTDBTK_DATA_PATH/metadata/metadata.txt | sed "s/VERSION_DATA=//"'), topic: versions, emit: versions_gtdbtk_db
++    tuple val("${task.process}"), val(meta), path("${meta.id}.GTDBTK_CLASSIFYWF.task_command.sh"),
++          val('gtdbtk --version'), eval('gtdbtk --version'),
++          eval("sha256sum '${meta.id}.GTDBTK_CLASSIFYWF.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -38,6 +42,7 @@ process GTDBTK_CLASSIFYWF {
+     prefix              = task.ext.prefix ?: "${meta.id}"
+     def pplacer_scratch = use_pplacer_scratch_dir ? "--scratch_dir pplacer_tmp" : ""
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.GTDBTK_CLASSIFYWF.task_command.sh'
+     export GTDBTK_DATA_PATH="\$(find -L ${db} -name 'metadata' -type d -exec dirname {} \\;)"
+ 
+     python3 normalize_gtdb_bins.py \\
+@@ -65,6 +70,7 @@ process GTDBTK_CLASSIFYWF {
+     stub:
+     prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.GTDBTK_CLASSIFYWF.task_command.sh'
+     export GTDBTK_DATA_PATH="\$(find -L ${db} -name 'metadata' -type d -exec dirname {} \\;)"
+ 
+     mkdir ${prefix}
+diff --git i/modules/nf-core/hifiadapterfilt/hifiadapterfilt/main.nf w/modules/nf-core/hifiadapterfilt/hifiadapterfilt/main.nf
+index 545a4a9..ea1d50e 100644
+--- i/modules/nf-core/hifiadapterfilt/hifiadapterfilt/main.nf
++++ w/modules/nf-core/hifiadapterfilt/hifiadapterfilt/main.nf
+@@ -16,6 +16,10 @@ process HIFIADAPTERFILT_HIFIADAPTERFILT {
+     tuple val(meta), path("${prefix}.contaminant.blastout"), emit: blastout
+     tuple val(meta), path("${prefix}.blocklist")           , emit: blocklist
+     tuple val("${task.process}"), val('hifiadapterfilt'), eval("hifiadapterfilt.sh --version 2>&1 | head -1"), topic: versions, emit: versions_hifiadapterfilt
++    tuple val("${task.process}"), val(meta), path("${meta.id}.HIFIADAPTERFILT_HIFIADAPTERFILT.task_command.sh"),
++          val('hifiadapterfilt.sh --version'), eval('hifiadapterfilt.sh --version 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.HIFIADAPTERFILT_HIFIADAPTERFILT.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -33,6 +37,7 @@ process HIFIADAPTERFILT_HIFIADAPTERFILT {
+         ? "ln -s \$(realpath ${db}) HiFiAdapterFilt/DB"
+         : "ln -s \$(dirname \$(command -v hifiadapterfilt.sh))/DB HiFiAdapterFilt/DB"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.HIFIADAPTERFILT_HIFIADAPTERFILT.task_command.sh'
+     # Workaround: BusyBox sed in this container lacks GNU step-address syntax (1~4,2~4).
+     # hifiadapterfilt.sh uses `sed -n '1~4s/^@/>/p;2~4p'` to convert FASTQ→FASTA for
+     # BLAST, but BusyBox sed silently produces empty output, preventing adapter detection.
+@@ -71,6 +76,7 @@ SEDWRAP
+     stub:
+     prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.HIFIADAPTERFILT_HIFIADAPTERFILT.task_command.sh'
+     echo "" | gzip > ${prefix}.filt.fastq.gz
+     touch ${prefix}.stats
+     touch ${prefix}.contaminant.blastout
+diff --git i/modules/nf-core/kraken2/kraken2/main.nf w/modules/nf-core/kraken2/kraken2/main.nf
+index b815944..9591970 100644
+--- i/modules/nf-core/kraken2/kraken2/main.nf
++++ w/modules/nf-core/kraken2/kraken2/main.nf
+@@ -21,6 +21,10 @@ process KRAKEN2_KRAKEN2 {
+     tuple val(meta), path('*report.txt')                           , emit: report
+     tuple val("${task.process}"), val('kraken2'), eval('kraken2 --version 2>&1 | head -1 | sed "s/^.*Kraken version //; s/ .*//"'), topic: versions, emit: versions_kraken2
+     tuple val("${task.process}"), val('pigz'), eval('pigz --version 2>&1 | sed "s/pigz //g"'), topic: versions, emit: versions_pigz
++    tuple val("${task.process}"), val(meta), path("${meta.id}.KRAKEN2_KRAKEN2.task_command.sh"),
++          val('kraken2 --version'), eval('kraken2 --version 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.KRAKEN2_KRAKEN2.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -37,6 +41,7 @@ process KRAKEN2_KRAKEN2 {
+     def compress_reads_command = save_output_fastqs ? "pigz -p $task.cpus *.fastq" : ""
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.KRAKEN2_KRAKEN2.task_command.sh'
+     kraken2 \\
+         --db $db \\
+         --threads $task.cpus \\
+@@ -58,6 +63,7 @@ process KRAKEN2_KRAKEN2 {
+     def unclassified = meta.single_end ? "${prefix}.unclassified.fastq.gz" : "${prefix}.unclassified_1.fastq.gz ${prefix}.unclassified_2.fastq.gz"
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.KRAKEN2_KRAKEN2.task_command.sh'
+     touch ${prefix}.kraken2.report.txt
+     if [ "$save_output_fastqs" == "true" ]; then
+         touch $classified
+diff --git i/modules/nf-core/metabat2/jgisummarizebamcontigdepths/main.nf w/modules/nf-core/metabat2/jgisummarizebamcontigdepths/main.nf
+index 9ab8555..1440981 100644
+--- i/modules/nf-core/metabat2/jgisummarizebamcontigdepths/main.nf
++++ w/modules/nf-core/metabat2/jgisummarizebamcontigdepths/main.nf
+@@ -13,6 +13,10 @@ process METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS {
+     output:
+     tuple val(meta), path("*.txt.gz"), emit: depth
+     tuple val("${task.process}"), val('metabat2'), eval('metabat2 --help 2>&1 | sed -n "2s/.*:\\([0-9]*\\.[0-9]*\\).*/\\1/p"'), emit: versions_metabat2, topic: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.task_command.sh"),
++          val('metabat2 --help'), eval('metabat2 --help 2>&1 | sed -n "2p"'),
++          eval("sha256sum '${meta.id}.METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -21,6 +25,7 @@ process METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS {
+     def args = task.ext.args ?: ''
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.task_command.sh'
+     export OMP_NUM_THREADS=${task.cpus}
+ 
+     jgi_summarize_bam_contig_depths \\
+@@ -34,6 +39,7 @@ process METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS {
+     stub:
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.METABAT2_JGISUMMARIZEBAMCONTIGDEPTHS.task_command.sh'
+     echo "" | gzip > ${prefix}.txt.gz
+     """
+ }
+diff --git i/modules/nf-core/metabat2/metabat2/main.nf w/modules/nf-core/metabat2/metabat2/main.nf
+index 3cbfc8f..921fefb 100644
+--- i/modules/nf-core/metabat2/metabat2/main.nf
++++ w/modules/nf-core/metabat2/metabat2/main.nf
+@@ -17,6 +17,10 @@ process METABAT2_METABAT2 {
+     tuple val(meta), path("*.tsv.gz"), optional: true, emit: membership
+     tuple val(meta), path("*[!lowDepth|tooShort|unbinned].fa.gz"), optional: true, emit: fasta
+     tuple val("${task.process}"), val('metabat2'), eval('metabat2 --help 2>&1 | sed -n "2s/.*:\\([0-9]*\\.[0-9]*\\).*/\\1/p"'), emit: versions_metabat2, topic: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.METABAT2.task_command.sh"),
++          val('metabat2 --help'), eval('metabat2 --help 2>&1 | sed -n "2p"'),
++          eval("sha256sum '${meta.id}.METABAT2.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -28,6 +32,7 @@ process METABAT2_METABAT2 {
+     def decompress_depth = depth && depth.toString() != clean_depth ? "gzip -d -f ${depth}" : ""
+     def depth_input = depth ? "-a ${clean_depth}" : ""
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.METABAT2.task_command.sh'
+     ${decompress_depth}
+ 
+     metabat2 \\
+@@ -48,6 +53,7 @@ process METABAT2_METABAT2 {
+     def decompress_depth = depth ? "gzip -d -f ${depth}" : ""
+     def depth_file = depth ? "-a ${depth.baseName}" : ""
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.METABAT2.task_command.sh'
+     echo "" | gzip > ${prefix}.1.fa.gz
+     echo "" | gzip > ${prefix}.1.tooShort.fa.gz
+     echo "" | gzip > ${prefix}.1.lowDepth.fa.gz
+diff --git i/modules/nf-core/metaphlan/metaphlan/main.nf w/modules/nf-core/metaphlan/metaphlan/main.nf
+index 54c8e1e..a52388e 100644
+--- i/modules/nf-core/metaphlan/metaphlan/main.nf
++++ w/modules/nf-core/metaphlan/metaphlan/main.nf
+@@ -19,6 +19,10 @@ process METAPHLAN_METAPHLAN {
+     tuple val(meta), path('*.bowtie2out.txt'), optional: true, emit: bt2out
+     tuple val(meta), path("*.sam"), optional: true, emit: sam
+     tuple val("${task.process}"), val('metaphlan'), eval("metaphlan --version 2>&1 | cut -d ' ' -f 3"), emit: versions_metaphlan, topic: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.METAPHLAN_METAPHLAN.task_command.sh"),
++          val('metaphlan --version'), eval('metaphlan --version'),
++          eval("sha256sum '${meta.id}.METAPHLAN_METAPHLAN.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -31,6 +35,7 @@ process METAPHLAN_METAPHLAN {
+     def bowtie2_out = "${input_type}" == "--input_type bowtie2out" || "${input_type}" == "--input_type sam" ? '' : "--bowtie2out ${prefix}.bowtie2out.txt"
+     def samfile_out = save_samfile ? "-s ${prefix}.sam" : ''
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.METAPHLAN_METAPHLAN.task_command.sh'
+     BT2_DB=`find -L "${db_metaphlan_latest}" -name "*rev.1.bt2*" -exec dirname {} \\;`
+     BT2_DB_INDEX=`find -L ${db_metaphlan_latest} -name "*.rev.1.bt2*" | sed 's/\\.rev.1.bt2.*\$//' | sed 's/.*\\///'`
+ 
+@@ -58,6 +63,7 @@ process METAPHLAN_METAPHLAN {
+     def bowtie2_cmd = "${input_type}" == "bowtie2out" || "${input_type}" == "sam" ? '' : "touch ${prefix}.bowtie2out.txt"
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.METAPHLAN_METAPHLAN.task_command.sh'
+     touch ${prefix}.biom
+     touch ${prefix}_profile.txt
+     ${samfile_cmd}
+diff --git i/modules/nf-core/prodigal/main.nf w/modules/nf-core/prodigal/main.nf
+index 08d7dd4..420fc9a 100644
+--- i/modules/nf-core/prodigal/main.nf
++++ w/modules/nf-core/prodigal/main.nf
+@@ -17,6 +17,10 @@ process PRODIGAL {
+     tuple val(meta), path("${prefix}.faa.gz"),                 emit: amino_acid_fasta
+     tuple val(meta), path("${prefix}_all.txt.gz"),             emit: all_gene_annotations
+     tuple val("${task.process}"), val('prodigal'), eval('prodigal -v 2>&1 | sed -n "s/Prodigal V\\(.*\\):.*/\\1/p"'), emit: versions_prodigal, topic: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.PRODIGAL.task_command.sh"),
++          val('prodigal -v'), eval('prodigal -v 2>&1 | sed -n "1p"'),
++          eval("sha256sum '${meta.id}.PRODIGAL.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -25,6 +29,7 @@ process PRODIGAL {
+     def args = task.ext.args   ?: ''
+     prefix   = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PRODIGAL.task_command.sh'
+     pigz -cdf ${genome} | prodigal \\
+         $args \\
+         -f $output_format \\
+@@ -48,6 +53,7 @@ process PRODIGAL {
+     stub:
+     prefix   = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PRODIGAL.task_command.sh'
+     echo "" | gzip > ${prefix}.fna.gz
+     echo "" | gzip > ${prefix}.${output_format}.gz
+     echo "" | gzip > ${prefix}.faa.gz
+diff --git i/modules/nf-core/semibin/singleeasybin/main.nf w/modules/nf-core/semibin/singleeasybin/main.nf
+index e1f2e09..f04d777 100644
+--- i/modules/nf-core/semibin/singleeasybin/main.nf
++++ w/modules/nf-core/semibin/singleeasybin/main.nf
+@@ -29,6 +29,10 @@ process SEMIBIN_SINGLEEASYBIN {
+     tuple val(meta), path("${prefix}/binning_status.json"), emit: state
+     tuple val("${task.process}"), val('SemiBin'), eval("SemiBin2 --version"), emit: versions_semibin, topic: versions
+     tuple val("${task.process}"), val('cuda'), eval('python -c "import torch; print(torch.version.cuda or \'no CUDA available\')"'), emit: versions_cuda, topic: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.SEMIBIN_SINGLEEASYBIN.task_command.sh"),
++          val('SemiBin2 --version'), eval('SemiBin2 --version'),
++          eval("sha256sum '${meta.id}.SEMIBIN_SINGLEEASYBIN.task_command.sh'"), emit: task_provenance
++
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -42,6 +46,7 @@ process SEMIBIN_SINGLEEASYBIN {
+     semibinRequireRuntime(runtime_identity, runtime)
+     def runtime64 = semibinRuntimeBase64(runtime)
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.SEMIBIN_SINGLEEASYBIN.task_command.sh'
+ 
+     python semibin_runtime_resources.py --runtime-base64 '${runtime64}' --verify ${runtime_receipt} --execute -- ${args} single_easy_bin --input-fasta ${fasta} --input-bam ${bam} --output ${prefix} -t ${task.cpus} --engine ${engine} ${args2}
+ 
+@@ -52,6 +57,7 @@ process SEMIBIN_SINGLEEASYBIN {
+     semibinRequireRuntime(runtime_identity, semibinRuntime(task, workflow.containerEngine, meta))
+     prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.SEMIBIN_SINGLEEASYBIN.task_command.sh'
+     mkdir ${prefix}
+     touch ${prefix}/{contig_bins,recluster_bins_info}.tsv
+     touch ${prefix}/{data,data_split}.csv

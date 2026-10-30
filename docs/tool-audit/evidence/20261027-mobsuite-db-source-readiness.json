@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-27",
+  "fixed_software_config": "results/tool-audit/20261026-mobsuite-readset/primary/mob_suite/config.json",
+  "config_sha256": "bb92211b7839fec435bdf3d16ba21e359741351dd74afa4be665b0e1b4e742d3",
+  "archive_url": "https://zenodo.org/records/10304948/files/data.tar.gz?download=1",
+  "official_metadata_source": "https://zenodo.org/records/10304948",
+  "retrieval": "Direct page returned429 and API unavailable via web tool; official-record web search result provided title/description/archive size/MD5. Archive not retrieved, metadata does not certify contents or current HTTP headers.",
+  "official_index_metadata": {
+    "title": "MOB-suite database v. 3.1.8",
+    "description": "biomarker and plasmid databases used with MOB-suite",
+    "file": "data.tar.gz",
+    "display_size": "472.9 MB",
+    "listed_md5": "670e293e4ff1918db5b654278a60bea8"
+  },
+  "downloaded": false,
+  "prepared_reference": false,
+  "nonviral_contents_certified": false,
+  "next_step": "Verify exact official archive metadata/download integrity and inspect full reference contents under user constraints; do not run native auto-initializer or use incomplete data as science."
+}

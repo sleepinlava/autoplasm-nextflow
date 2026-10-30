@@ -1,0 +1,149 @@
+diff --git c/modules/nf-core/mobsuite/recon/main.nf w/modules/nf-core/mobsuite/recon/main.nf
+index 794d8d3..4a356be 100644
+--- c/modules/nf-core/mobsuite/recon/main.nf
++++ w/modules/nf-core/mobsuite/recon/main.nf
+@@ -12,6 +12,7 @@ process MOBSUITE_RECON {
+ 
+     input:
+     tuple val(meta), path(fasta)
++    tuple path(db), val(db_identity)
+     path(preflight_helper, stageAs: 'mobsuite_preflight.py')
+ 
+     output:
+@@ -20,16 +21,21 @@ process MOBSUITE_RECON {
+     tuple val(meta), path("results/plasmid_*.fasta")     , emit: plasmids        , optional: true
+     tuple val(meta), path("results/mobtyper_results.txt"), emit: mobtyper_results, optional: true
+     tuple val("${task.process}"), val('mobsuite'), eval("mob_recon --version 2>&1 | sed 's/.*mob_recon //; s/ .*//'"), emit: versions_mobsuite, topic: versions
++    tuple val("${task.process}"), val(meta), path("${prefix}.MOBSUITE_RECON.task_command.sh"),
++          val('mob_recon --version'), eval('mob_recon --version'),
++          eval("sha256sum '${prefix}.MOBSUITE_RECON.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+ 
+     script:
+     def args = task.ext.args ?: ''
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     def is_compressed = fasta.getName().endsWith(".gz") ? true : false
+     def fasta_name = fasta.getName().replace(".gz", "")
++    def db_cmd = db ? "--database_directory ${mobsuiteQuote(db)}" : ''
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MOBSUITE_RECON.task_command.sh'
+     if [ "${is_compressed}" == "true" ]; then
+         gzip -c -d ${mobsuiteQuote(fasta)} > ${mobsuiteQuote(fasta_name)}
+     fi
+@@ -37,6 +43,7 @@ process MOBSUITE_RECON {
+     python3 mobsuite_preflight.py --tool mob_recon --output mobsuite_preflight.json --execute -- \\
+         --infile ${mobsuiteQuote(fasta_name)} \\
+         ${args} \\
++        ${db_cmd} \\
+         --num_threads ${task.cpus} \\
+         --outdir results \\
+         --sample_id ${mobsuiteQuote(prefix)}
+@@ -44,6 +51,7 @@ process MOBSUITE_RECON {
+ 
+     stub:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MOBSUITE_RECON.task_command.sh'
+     mkdir -p results
+ 
+     touch results/chromosome.fasta
+diff --git c/modules/nf-core/mobsuite/recon/tests/main.nf.test w/modules/nf-core/mobsuite/recon/tests/main.nf.test
+index f8e3c32..4700fce 100644
+--- c/modules/nf-core/mobsuite/recon/tests/main.nf.test
++++ w/modules/nf-core/mobsuite/recon/tests/main.nf.test
+@@ -13,13 +13,16 @@ nextflow_process {
+             process {
+                 """
+                 input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
+-                input[1]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
++                input[1]=[file(params.mobsuite_db.toString(),checkIfExists:true),[schema_version:2,resource_state:'provided']]
++                input[2]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
+                 """
+             }
+         }
+         then {
+             assert process.success
+-            def input=new File(params.mobsuite_bacterial_fasta.toString()).readLines()
++            def fastaPath=System.getenv('MOBSUITE_BACTERIAL_FASTA')
++            assert fastaPath!=null
++            def input=new File(fastaPath).readLines()
+             assert input.count { it.startsWith('>') }==1
+             def dna=input.findAll { !it.startsWith('>') }.join('')
+             assert dna.size()>450000
+@@ -37,7 +40,8 @@ nextflow_process {
+             process {
+                 """
+                 input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
+-                input[1]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
++                input[1]=[[],[schema_version:2,resource_state:'absent']]
++                input[2]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
+                 """
+             }
+         }
+diff --git c/modules/nf-core/mobsuite/typer/main.nf w/modules/nf-core/mobsuite/typer/main.nf
+index 4ad4072..6840ed6 100644
+--- c/modules/nf-core/mobsuite/typer/main.nf
++++ w/modules/nf-core/mobsuite/typer/main.nf
+@@ -29,13 +29,16 @@ process MOBSUITE_TYPER {
+     tuple val(meta), path("*_biomarker_report.txt"), optional: true, emit: biomarker_report
+     tuple val(meta), path("*_mge_report.txt"), optional: true, emit: mge_report
+     tuple val("${task.process}"), val('mobsuite'), eval("mob_typer --version | sed 's/mob_typer //g'"), topic: versions, emit: versions_mobsuite
++    tuple val("${task.process}"), val(meta), path("${prefix}.MOBSUITE_TYPER.task_command.sh"),
++          val('mob_typer --version'), eval('mob_typer --version'),
++          eval("sha256sum '${prefix}.MOBSUITE_TYPER.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+ 
+     script:
+     def args = task.ext.args ?: ''
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     def biomarker_report_cmd = generate_biomarker_report ? "--biomarker_report_file ${prefix}_biomarker_report.txt" : ''
+     def mge_report_cmd = generate_mge_report ? "--mge_report_file ${prefix}_mge_report.txt" : ''
+     def plasmid_mash_db_cmd = plasmid_mash_db ? "--plasmid_mash_db ${mobsuiteQuote(plasmid_mash_db)}" : ''
+@@ -47,6 +50,7 @@ process MOBSUITE_TYPER {
+     def plasmid_orit_fas_cmd = plasmid_orit_fas ? "--plasmid_orit ${mobsuiteQuote(plasmid_orit_fas)}" : ''
+     def db_cmd = db ? "--database_directory ${mobsuiteQuote(db)}" : ''
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MOBSUITE_TYPER.task_command.sh'
+     python3 mobsuite_preflight.py --tool mob_typer --output mobsuite_preflight.json --execute -- \\
+         --num_threads ${task.cpus} \\
+         --sample_id ${mobsuiteQuote(prefix)} \\
+@@ -68,8 +72,9 @@ process MOBSUITE_TYPER {
+ 
+     stub:
+     def args = task.ext.args ?: ''
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MOBSUITE_TYPER.task_command.sh'
+     echo ${args}
+ 
+     touch ${prefix}.txt
+diff --git c/modules/nf-core/mobsuite/typer/tests/main.nf.test w/modules/nf-core/mobsuite/typer/tests/main.nf.test
+index 6448407..f39f400 100644
+--- c/modules/nf-core/mobsuite/typer/tests/main.nf.test
++++ w/modules/nf-core/mobsuite/typer/tests/main.nf.test
+@@ -13,7 +13,7 @@ nextflow_process {
+             process {
+                 """
+                 input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
+-                input[1]=[[],[schema_version:2,resource_state:'absent']]
++                input[1]=[file(params.mobsuite_db.toString(),checkIfExists:true),[schema_version:2,resource_state:'provided']]
+                 input[2]=[]; input[3]=[]; input[4]=[]; input[5]=[]
+                 input[6]=[]; input[7]=[]; input[8]=[]
+                 input[9]=true; input[10]=true
+@@ -23,7 +23,9 @@ nextflow_process {
+         }
+         then {
+             assert process.success
+-            def input=new File(params.mobsuite_bacterial_fasta.toString()).readLines()
++            def fastaPath=System.getenv('MOBSUITE_BACTERIAL_FASTA')
++            assert fastaPath!=null
++            def input=new File(fastaPath).readLines()
+             assert input.count { it.startsWith('>') }==1
+             def dna=input.findAll { !it.startsWith('>') }.join('')
+             assert dna.size()>450000

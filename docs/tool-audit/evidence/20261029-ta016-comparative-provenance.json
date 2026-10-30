@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidates: comparative group task_provenance; not accepted",
+  "changes": "BLAST_BLASTN / MUMMER / CLINKER / MMSEQS_EASYCLUSTER: provenance tuple + cp of BASH_SOURCE[0] in script (and stub where present). PLASMID_CATALOG_PREPARE is cohort-level without meta and without sample-domain input, so it gets REPORT-style self-provenance: published PLASMID_CATALOG_PREPARE.task_command.sh output instead of a task_provenance event",
+  "verification": "compile-only so far: tests/nextflow/comparative_compile_check.nf (new untracked harness) parses all five processes under real Nextflow 26.10, exit 0; patch reverse-applies cleanly (git apply --check -R)",
+  "patch": "docs/tool-audit/patches/TA-016-comparative-provenance.diff sha256 0b1e5c3b97827b3f4d25d9ad124f9735deb96d42eb4565c4ebbcbfc6d5915c1f",
+  "failed_attempt": "first patch write accidentally appended a git status line; regenerated and verified by reverse-apply check",
+  "limits": ["candidates not accepted; TA-016 remains in_progress", "BLAST_BLASTN and MUMMER real-verified 2026-10-29 (see 20261029-ta016-blastn-provenance.json and journal); CLINKER lacks gbff fixtures and local image, MMSEQS_EASYCLUSTER real run pending, PLASMID_CATALOG_PREPARE pending", "placement scan confirms no cp inside Groovy assignment strings"]
+}

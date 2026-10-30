@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to NANOPLOT; not accepted",
+  "change": "modules/nf-core/nanoplot/main.nf: provenance tuple keyed on meta.id (module has no prefix var); cp of BASH_SOURCE[0] in script and stub",
+  "verification": "real Nextflow 26.10 + podman nanoplot:1.47.0--pyhdfd78af_0 (pulled per the module's declared tag; an older local 1.46.2 image was NOT used) on the 20k-read interface control: COMPLETED, sha256 0f47a0a2… matches the actual task command file",
+  "patch": "docs/tool-audit/patches/TA-016-nanoplot-provenance.diff sha256 96e1fa9f9948259217e9d46a329eff8cff7499501f5bf2f7034fa63db2f7b26f",
+  "harness": "tests/nextflow/nanoplot_provenance.nf",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "interface control only", "report end-to-end rerun pending"]
+}

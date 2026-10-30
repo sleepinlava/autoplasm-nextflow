@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-27",
+  "scope": "mob_recon positive/negative controls through the production preflight guard, fixed 3.1.9 env + controlled 3.1.8 DB",
+  "inputs": {
+    "positive": "recon-positive.fasta = pUTI89 complete plasmid + the no-plasmid chromosome (69 contigs) sha256 80464c008171dde02ea731d3fe05806860783bb2511edfb84ad324a47f06817e",
+    "negative": "official no-plasmids chromosome alone sha256 01339fc73677ec20c63e30534455ca03b55ac814405da1171c17c07bce6b0043"
+  },
+  "results": {
+    "positive": "exit 0; pUTI89 (114,230 bp) reconstructed as its own plasmid cluster AA337 and typed IncFIA+IncFIB/MOBF+MOBP/MPF_F — correct IncF profile; chromosome contigs remained chromosome",
+    "negative": "exit 0; all large contigs chromosome, but 2 small contigs (NODE_51 4,965 bp + NODE_55 1,683 bp) assigned plasmid cluster AF232"
+  },
+  "boundary_observation": "the AF232 assignment rests solely on mash nearest neighbor CP034740 (E. coli plasmid) at distance 0.0593303 — just under the native default cutoff — with zero biomarkers (rep/relaxase/mpf/orit all '-', non-mobilizable). Native mob_recon assigns biomarker-free small contigs to plasmid by mash proximity alone; this is upstream default behavior, not a pipeline defect, but downstream consumers must not treat mob_recon 'plasmid' labels on small biomarker-free contigs as strong evidence",
+  "consistency": "AF232 content and mobtyper rows are byte-identical between the positive and negative runs (same 2 contigs, same mash evidence)",
+  "limits": [
+    "software controls on two fixtures; not a sensitivity/specificity benchmark",
+    "mge.report/biomarker detail files retained but not independently re-derived",
+    "no cache-identity wiring, optional filter, OCI/platform acceptance"
+  ],
+  "artifacts": "results/tool-audit/20261027-mobsuite-science/recon-{positive,negative}-out/ (contig_report.txt, mobtyper_results.txt, plasmid/chromosome FASTAs, mge.report.txt)"
+}

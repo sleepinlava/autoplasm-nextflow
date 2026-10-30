@@ -1,0 +1,42 @@
+diff --git c/modules/nf-core/multiqc/main.nf w/modules/nf-core/multiqc/main.nf
+index c4bc715..ecbfea0 100644
+--- c/modules/nf-core/multiqc/main.nf
++++ w/modules/nf-core/multiqc/main.nf
+@@ -16,6 +16,9 @@ process MULTIQC {
+     tuple val(meta), path("*_plots"), emit: plots, optional: true
+     // MultiQC should not push its versions to the `versions` topic. Its input depends on the versions topic to be resolved thus outputting to the topic will let the pipeline hang forever
+     tuple val("${task.process}"), val('multiqc'), eval('multiqc --version | sed "s/.* //g"'), emit: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.MULTIQC.task_command.sh"),
++          val('multiqc --version'), eval('multiqc --version'),
++          eval("sha256sum '${meta.id}.MULTIQC.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -28,6 +31,7 @@ process MULTIQC {
+     def replace = replace_names ? "--replace-names ${replace_names}" : ''
+     def samples = sample_names ? "--sample-names ${sample_names}" : ''
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.MULTIQC.task_command.sh'
+     multiqc \\
+         --force \\
+         ${args} \\
+@@ -41,6 +45,7 @@ process MULTIQC {
+ 
+     stub:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.MULTIQC.task_command.sh'
+     mkdir multiqc_data
+     touch multiqc_data/.stub
+     mkdir multiqc_plots
+diff --git 1/tests/nextflow/multiqc_provenance.nf 2/tests/nextflow/multiqc_provenance.nf
+new file mode 100644
+index 0000000..440d8ef
+--- /dev/null
++++ 2/tests/nextflow/multiqc_provenance.nf
+@@ -0,0 +1,6 @@
++include { MULTIQC } from '../../modules/nf-core/multiqc/main'
++workflow {
++    input = Channel.of(tuple([id: 'multiqc-iface'], [file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-fastp-provenance-v3/work/3d/6d59bc5265b09784d490e9fd5c7e80/fastp-iface.fastp.json')], [], [], [], []))
++    MULTIQC(input)
++    MULTIQC.out.task_provenance.view { it -> "PROV \${it[0]} \${it[3]} sha=\${it[5]}" }
++}

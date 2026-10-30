@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-27",
+  "scope": "reconciliation of the frozen 718-item accepted source manifest (docs/tool-audit/evidence/post-fix-source-state.json, sha256 d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d) against the current worktree",
+  "method": "re-hash every manifest-listed file; attribute each difference via git last-commit and the uncommitted worktree set",
+  "result": {
+    "manifest_entries": 718,
+    "missing_files": 0,
+    "differing_files": 123,
+    "unaccounted": 0,
+    "attribution": "122 files last touched by post-manifest commits dated 2026-10-25 or later (resource-consumer/report-provenance/abricate/mobsuite/plasmidfinder/integronfinder/medaka layers); 1 file (modules/nf-core/medaka/main.nf, last commit 2026-10-16 vendoring) differs due to the known uncommitted TA-091/096 Medaka wiring in the worktree"
+  },
+  "stale_count_correction": "acceptance.md's '18 acceptance-list files mismatch' was the count as of 2026-10-26 00:54; the current count is 123, all attributable. The 718 manifest itself is unchanged and remains the formal accepted list; new files added by the 19-patch series are additions, not mismatches",
+  "limits": [
+    "commit-level attribution; per-file content equivalence to each increment's recorded evidence was verified separately in the per-finding reviews",
+    "the manifest refresh (formal source acceptance) remains a separate deferred process"
+  ]
+}

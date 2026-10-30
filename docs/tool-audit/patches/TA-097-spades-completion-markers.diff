@@ -1,0 +1,32 @@
+diff --git c/bin/spades_graph_provenance.py w/bin/spades_graph_provenance.py
+index cbbb809..dc469c2 100755
+--- c/bin/spades_graph_provenance.py
++++ w/bin/spades_graph_provenance.py
+@@ -50,14 +50,24 @@ def collect(assembly_dir, graph, log, plan):
+     if graph.stat().st_size == 0 or not (digest(source) == digest(target) == digest(graph)):
+         raise ValueError('final graph/source/export bytes mismatch or empty graph')
+     log_text = log.read_text()
+-    for marker in ['===== K%d finished.' % k, '===== Copy files finished.',
+-                   '======= SPAdes pipeline finished.']:
++    for marker in ['===== K%d finished.' % k, '===== Copy files finished.']:
+         if marker not in log_text:
+             raise ValueError('missing assembler completion marker: ' + marker)
++    # Real assemblies routinely end WITH WARNINGS (coverage valley/threshold
++    # estimation notes); both completion forms prove the assembler ran to the
++    # end. Record warnings presence/count instead of rejecting the run.
++    if '======= SPAdes pipeline finished.' in log_text:
++        warnings_completed = False
++    elif '======= SPAdes pipeline finished WITH WARNINGS!' in log_text:
++        warnings_completed = True
++    else:
++        raise ValueError('missing assembler completion marker: ======= SPAdes pipeline finished')
++    warnings = [line for line in log_text.splitlines() if 'WARN' in line]
+     return {'schema': 1, 'producer': 'spades', 'version': '4.1.0', 'max_k': k,
+             'graph_sha256': digest(graph), 'graph_file': graph.name,
+             'copy_source': str(source.relative_to(assembly_dir)),
+-            'config_sha256': digest(config), 'log_sha256': digest(log)}
++            'config_sha256': digest(config), 'log_sha256': digest(log),
++            'completed_with_warnings': warnings_completed, 'warnings_count': len(warnings)}
+ 
+ 
+ def load_plan(path):

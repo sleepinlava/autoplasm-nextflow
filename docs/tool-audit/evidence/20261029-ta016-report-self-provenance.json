@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidate: REPORT self-provenance; not accepted",
+  "changes": "REPORT is the terminal consumer with no meta, so the task_provenance event flow does not apply; instead it gains output 'REPORT.task_command.sh' (cp of BASH_SOURCE[0]) published with the report under params.outdir/report",
+  "verification": "real Nextflow 26.10 native run of tests/nextflow/report_runtime.nf with retained fixtures, system R 4.6.1: all 6 tasks COMPLETED incl. REPORTING:REPORT; published report/REPORT.task_command.sh byte-identical to the task .command.sh (sha256 c8af4f9f3101a2fc17fd8118a3a46f60ea90a7efbdc085157b0bc280fdf9ca03), capturing the full manifest heredoc",
+  "patch": "docs/tool-audit/patches/TA-016-report-self-provenance.diff sha256 b7522700f98436a9c6d319e0d556678b65f65f1f17665d813d4830280f59e14a",
+  "failed_attempt": "v1 failed: repo bin/ not on PATH when running the harness directly (plasmid_consensus.R: command not found), retained under results/tool-audit/20261029-report-self-provenance-v1",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "report end-to-end rerun on real ONT sample still pending"]
+}

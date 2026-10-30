@@ -1,0 +1,358 @@
+diff --git c/bin/generate_report.R w/bin/generate_report.R
+index a8f75cc..e891eab 100755
+--- c/bin/generate_report.R
++++ w/bin/generate_report.R
+@@ -168,11 +168,19 @@ for (record in records) {
+     inputs[[key]] <- files
+   } else if (identical(record$kind, "runtime_command")) {
+     scalar_text <- function(value) is.character(value) && length(value) == 1L && !is.na(value) && nzchar(value)
+-    if (!scalar_text(record$sample_id) || !record$sample_id %in% expected ||
+-        !scalar_text(record$analysis_sample_id) || !scalar_text(record$task_process) ||
++    if (!scalar_text(record$task_process) ||
+         !scalar_text(record$script_sha256) || !grepl("^[0-9a-f]{64}$", record$script_sha256) ||
+         !is.list(record$runtime_probe) || !scalar_text(record$runtime_probe$command) ||
+         !scalar_text(record$runtime_probe$stdout)) die("Invalid runtime command identity/probe")
++    if (isTRUE(record$cohort)) {
++      members <- unlist(record$cohort_samples, use.names = FALSE)
++      if (length(members) == 0L || !all(members %in% expected)) die("Invalid cohort runtime command sample domain")
++      record$sample_id <- as.character(record$sample_id)
++      record$analysis_sample_id <- as.character(record$analysis_sample_id)
++    } else {
++      if (!scalar_text(record$sample_id) || !record$sample_id %in% expected ||
++          !scalar_text(record$analysis_sample_id)) die("Invalid runtime command identity/probe")
++    }
+     files <- unlist(record$files, use.names = FALSE)
+     if (length(files) != 1L || !file.exists(files) || dir.exists(files))
+       die("Missing declared task command file")
+diff --git c/lib/report_events.nf w/lib/report_events.nf
+index dbede3e..fbba7d7 100644
+--- c/lib/report_events.nf
++++ w/lib/report_events.nf
+@@ -12,16 +12,39 @@ def reportValue(value) {
+ def reportEvidence(recordedOutputs, section, producer) {
+     def outputs = recordedOutputs.channels
+     def streams = outputs.getNames().collect { outputName ->
+-        if (outputName == 'task_provenance') {
+-            return outputs.getProperty(outputName).map { process, meta, command, probe, stdout, checksum ->
+-                def original = meta.gplas_original_meta ?: meta
+-                tuple([section: section, producer: producer, kind: 'runtime_command',
+-                       task_process: process.toString(), sample_id: original.id.toString(),
+-                       analysis_sample_id: meta.id.toString(),
++        if (outputName == 'cohort_provenance') {
++            return outputs.getProperty(outputName).map { process, command, probe, stdout, checksum, cohort_csv ->
++                def members = cohort_csv.toString().trim() ? cohort_csv.toString().trim().split(',') as List : []
++                tuple([section: section, producer: producer, kind: 'runtime_command', cohort: true,
++                       task_process: process.toString(),
++                       sample_id: 'cohort:' + process.toString(),
++                       analysis_sample_id: 'cohort:' + process.toString(),
++                       cohort_samples: members,
+                        script_sha256: checksum.toString().tokenize()[0],
+                        runtime_probe: [command: probe.toString(), stdout: stdout.toString()]], [command])
+             }
+         }
++        if (outputName == 'task_provenance') {
++            return outputs.getProperty(outputName).map { process, meta, command, probe, stdout, checksum ->
++                def is_cohort = meta.cohort == true
++                def original = meta.gplas_original_meta ?: meta
++                def record = [section: section, producer: producer, kind: 'runtime_command',
++                              task_process: process.toString(),
++                              script_sha256: checksum.toString().tokenize()[0],
++                              runtime_probe: [command: probe.toString(), stdout: stdout.toString()]]
++                if (is_cohort) {
++                    def members = meta.cohort_samples
++                    record['sample_id'] = 'cohort:' + process.toString()
++                    record['analysis_sample_id'] = 'cohort:' + process.toString()
++                    record['cohort'] = true
++                    record['cohort_samples'] = members instanceof Collection ? members.collect { it.toString() } : []
++                } else {
++                    record['sample_id'] = original.id.toString()
++                    record['analysis_sample_id'] = meta.id.toString()
++                }
++                tuple(record, [command])
++            }
++        }
+         outputs.getProperty(outputName).map { value ->
+             tuple([section: section, producer: producer, kind: 'evidence', output: outputName,
+                    evidence: reportValue(value)], [])
+diff --git c/modules/cross_sample/deseq2.nf w/modules/cross_sample/deseq2.nf
+index 9ee8ec1..af64ba5 100644
+--- c/modules/cross_sample/deseq2.nf
++++ w/modules/cross_sample/deseq2.nf
+@@ -19,11 +19,16 @@ process DESEQ2 {
+     output:
+     path "differential_plasmids.tsv", emit: results
+     path "deseq2_status.tsv", emit: status
++    tuple val("${task.process}"), path("DESEQ2.task_command.sh"),
++          val('Rscript --version'), eval('Rscript --version'),
++          eval("sha256sum '${task.process}.task_command.sh'"),
++          eval("cut -f1 cohort/* | tail -n +2 | sort -u | paste -sd, -"), emit: cohort_provenance
+ 
+     script:
+     def minimum_replicates = params.min_group_replicates == null ? 3 : params.min_group_replicates
+     def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+     """
++    cp -- "\${BASH_SOURCE[0]}" 'DESEQ2.task_command.sh'
+     mkdir -p analysis_code
+     cp -L source_assets/* analysis_code/
+     Rscript analysis_code/deseq2_plasmid.R \\
+diff --git c/modules/cross_sample/differential.nf w/modules/cross_sample/differential.nf
+index 27258e4..680770d 100644
+--- c/modules/cross_sample/differential.nf
++++ w/modules/cross_sample/differential.nf
+@@ -20,11 +20,16 @@ process DIFFERENTIAL_ABUNDANCE {
+ 
+     output:
+     path "differential_abundance.tsv", emit: results
++    tuple val("${task.process}"), path("DIFFERENTIAL_ABUNDANCE.task_command.sh"),
++          val('Rscript --version'), eval('Rscript --version'),
++          eval("sha256sum '${task.process}.task_command.sh'"),
++          eval("cut -f1 cohort/* | tail -n +2 | sort -u | paste -sd, -"), emit: cohort_provenance
+ 
+     script:
+     def minimum_replicates = params.min_group_replicates == null ? 3 : params.min_group_replicates
+     def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+     """
++    cp -- "\${BASH_SOURCE[0]}" 'DIFFERENTIAL_ABUNDANCE.task_command.sh'
+     mkdir -p analysis_code
+     cp -L source_assets/* analysis_code/
+     Rscript analysis_code/differential_abundance.R --abundance ${abundance_table} \\
+diff --git c/modules/cross_sample/diversity.nf w/modules/cross_sample/diversity.nf
+index 073f739..4de5eef 100644
+--- c/modules/cross_sample/diversity.nf
++++ w/modules/cross_sample/diversity.nf
+@@ -22,9 +22,14 @@ process DIVERSITY {
+     path "diversity_metrics.tsv", emit: metrics
+     path "bray_curtis_matrix.tsv", emit: beta
+     path "diversity_status.json", emit: status
++    tuple val("${task.process}"), path("DIVERSITY.task_command.sh"),
++          val('Rscript --version'), eval('Rscript --version'),
++          eval("sha256sum 'DIVERSITY.task_command.sh'"),
++          eval("cut -f1 cohort/* | tail -n +2 | sort -u | paste -sd, -"), emit: cohort_provenance
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" 'DIVERSITY.task_command.sh'
+     mkdir -p analysis_code
+     cp -L source_assets/* analysis_code/
+     Rscript analysis_code/diversity.R --abundance ${abundance_table} --metadata ${sample_metadata} \\
+diff --git c/modules/cross_sample/fastspar.nf w/modules/cross_sample/fastspar.nf
+index 1f926df..def5158 100644
+--- c/modules/cross_sample/fastspar.nf
++++ w/modules/cross_sample/fastspar.nf
+@@ -17,9 +17,14 @@ process FASTSPAR {
+     output:
+     path "correlation.tsv", emit: correlation
+     path "covariance.tsv", emit: covariance
++    tuple val("${task.process}"), path("FASTSPAR.task_command.sh"),
++          val('fastspar --version'), eval('fastspar --version'),
++          eval("sha256sum '${task.process}.task_command.sh'"),
++          eval("head -1 ${network_input} | cut -f2- | tr '\\t' ','"), emit: cohort_provenance
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" 'FASTSPAR.task_command.sh'
+     fastspar --otu_table ${network_input} \\
+         --correlation correlation.tsv \\
+         --covariance covariance.tsv \\
+diff --git c/modules/cross_sample/merge_abundance.nf w/modules/cross_sample/merge_abundance.nf
+index 2a34548..771e900 100644
+--- c/modules/cross_sample/merge_abundance.nf
++++ w/modules/cross_sample/merge_abundance.nf
+@@ -19,6 +19,10 @@ process MERGE_ABUNDANCE {
+ 
+     output:
+     path "${label_name}.tsv", emit: table
++    tuple val("${task.process}"), path("MERGE_ABUNDANCE.task_command.sh"),
++          val('Rscript --version'), eval('Rscript --version'),
++          eval("sha256sum '${task.process}.task_command.sh'"),
++          val((sample_ids instanceof List ? sample_ids : [sample_ids]).join(',')), emit: cohort_provenance
+ 
+     script:
+     def files = (coverm_tables in List ? coverm_tables : [coverm_tables])
+@@ -26,6 +30,7 @@ process MERGE_ABUNDANCE {
+     def ids = (sample_ids in List ? sample_ids : [sample_ids])
+         .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ')
+     """
++    cp -- "\${BASH_SOURCE[0]}" 'MERGE_ABUNDANCE.task_command.sh'
+     merge_abundance.R --tables ${files} --sample-ids ${ids} \\
+         --id-column '${id_column}' --out '${label_name}.tsv'
+     """
+diff --git c/modules/cross_sample/network_prepare.nf w/modules/cross_sample/network_prepare.nf
+index 65d673d..c521efe 100644
+--- c/modules/cross_sample/network_prepare.nf
++++ w/modules/cross_sample/network_prepare.nf
+@@ -22,12 +22,17 @@ process NETWORK_PREPARE {
+     path "fastspar_input.tsv", emit: network_input
+     path "network_status.json", emit: status
+     path "fastspar_eligible.tsv", optional: true, emit: eligible_input
++    tuple val("${task.process}"), path("NETWORK_PREPARE.task_command.sh"),
++          val('Rscript --version'), eval('Rscript --version'),
++          eval("sha256sum '${task.process}.task_command.sh'"),
++          eval("cut -f1 cohort/* | tail -n +2 | sort -u | paste -sd, -"), emit: cohort_provenance
+ 
+     script:
+     def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+     def metadata_arg = sample_metadata ? "--metadata ${quote.call(sample_metadata)}" : ''
+     def minimum_samples = params.network_min_samples == null ? 20 : params.network_min_samples
+     """
++    cp -- "\${BASH_SOURCE[0]}" 'NETWORK_PREPARE.task_command.sh'
+     mkdir -p analysis_code
+     cp -L source_assets/* analysis_code/
+     Rscript analysis_code/network_prepare.R --abundance ${abundance_table} ${metadata_arg} \\
+diff --git c/modules/cross_sample/shared_abundance.nf w/modules/cross_sample/shared_abundance.nf
+index 07ce7f4..1ef24bb 100644
+--- c/modules/cross_sample/shared_abundance.nf
++++ w/modules/cross_sample/shared_abundance.nf
+@@ -18,11 +18,16 @@ process SHARED_ABUNDANCE_TABLES {
+     path 'quantification/plasmid_abundance.tsv', emit: plasmids
+     path 'quantification/sample_states.tsv', emit: states
+     path 'quantification/method.json', emit: method
++    tuple val("${task.process}"), path("SHARED_ABUNDANCE_TABLES.task_command.sh"),
++          val('python3 analysis_code/collect_shared_abundance.py -h'), eval('python3 analysis_code/collect_shared_abundance.py -h'),
++          eval("sha256sum '${task.process}.task_command.sh'"),
++          val((sample_ids instanceof List ? sample_ids : [sample_ids]).join(',')), emit: cohort_provenance
+ 
+     script:
+     def quoted = { values -> (values instanceof List ? values : [values])
+         .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ') }
+     """
++    cp -- "\${BASH_SOURCE[0]}" 'SHARED_ABUNDANCE_TABLES.task_command.sh'
+     mkdir -p analysis_code
+     cp -L source_assets/* analysis_code/
+     python3 analysis_code/collect_shared_abundance.py \\
+diff --git c/modules/cross_sample/shared_catalogue.nf w/modules/cross_sample/shared_catalogue.nf
+index a1bdd6c..36afe28 100644
+--- c/modules/cross_sample/shared_catalogue.nf
++++ w/modules/cross_sample/shared_catalogue.nf
+@@ -15,11 +15,16 @@ process SHARED_CATALOGUE {
+ 
+     output:
+     path 'catalogue', emit: catalogue
++    tuple val("${task.process}"), path("SHARED_CATALOGUE.task_command.sh"),
++          val('python3 analysis_code/build_shared_catalogue.py -h'), eval('python3 analysis_code/build_shared_catalogue.py -h'),
++          eval("sha256sum '${task.process}.task_command.sh'"),
++          val((sample_ids instanceof List ? sample_ids : [sample_ids]).join(',')), emit: cohort_provenance
+ 
+     script:
+     def quoted = { values -> (values instanceof List ? values : [values])
+         .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ') }
+     """
++    cp -- "\${BASH_SOURCE[0]}" 'SHARED_CATALOGUE.task_command.sh'
+     mkdir -p analysis_code
+     cp -L source_assets/* analysis_code/
+     python3 analysis_code/build_shared_catalogue.py \\
+diff --git c/modules/cross_sample/statistics_inputs.nf w/modules/cross_sample/statistics_inputs.nf
+index 381a9b6..385414d 100644
+--- c/modules/cross_sample/statistics_inputs.nf
++++ w/modules/cross_sample/statistics_inputs.nf
+@@ -19,8 +19,14 @@ process STATISTICS_INPUTS {
+     path 'validated/samples.tsv', emit: metadata
+     path 'validated/sample_states.tsv', emit: states
+     path 'validated/validation.json', emit: validation
++    tuple val("${task.process}"), path("STATISTICS_INPUTS.task_command.sh"),
++          val('python3 analysis_code/validate_statistics_inputs.py -h'), eval('python3 analysis_code/validate_statistics_inputs.py -h'),
++          eval("sha256sum '${task.process}.task_command.sh'"),
++          eval("cut -f1 cohort/* | tail -n +2 | sort -u | paste -sd, -"), emit: cohort_provenance
++
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" 'STATISTICS_INPUTS.task_command.sh'
+     mkdir -p analysis_code
+     cp -L source_assets/* analysis_code/
+     python3 analysis_code/validate_statistics_inputs.py \\
+diff --git c/tests/test_generate_report.py w/tests/test_generate_report.py
+index d7a676c..787d444 100644
+--- c/tests/test_generate_report.py
++++ w/tests/test_generate_report.py
+@@ -216,6 +216,34 @@ class GenerateReportTests(unittest.TestCase):
+         self.records.append(self.records[-1].copy())
+         self.assert_rejected('Duplicate runtime command identity')
+ 
++    def cohort_record(self, members):
++        self.sample('001', 0, 0, 'genomad')
++        command = self.root / 'cohort_command.sh'
++        command.write_text('#!/bin/bash -ue\nprintf "controlled cohort\\n"\n')
++        record = {'section': '11_diversity', 'producer': 'CONTROL', 'kind': 'runtime_command',
++                  'cohort': True, 'cohort_samples': members,
++                  'sample_id': 'cohort:DIVERSITY', 'analysis_sample_id': 'cohort:DIVERSITY',
++                  'task_process': 'DIVERSITY', 'files': [str(command)],
++                  'script_sha256': hashlib.sha256(command.read_bytes()).hexdigest(),
++                  'runtime_probe': {'command': 'Rscript --version', 'stdout': 'R version 4.4'}}
++        self.records.append(record)
++        return command, record
++
++    def test_cohort_runtime_command_with_full_domain_is_accepted(self):
++        command, record = self.cohort_record(['001'])
++        data = self.run_report()
++        result, = data['runtime_commands']
++        self.assertEqual(result['sample_id'], 'cohort:DIVERSITY')
++        self.assertEqual(result['script_sha256'], hashlib.sha256(command.read_bytes()).hexdigest())
++
++    def test_cohort_runtime_command_with_empty_domain_is_rejected(self):
++        self.cohort_record([])
++        self.assert_rejected('Invalid cohort runtime command sample domain')
++
++    def test_cohort_runtime_command_with_unknown_member_is_rejected(self):
++        self.cohort_record(['001', 'unknown_sample'])
++        self.assert_rejected('Invalid cohort runtime command sample domain')
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git 1/tests/nextflow/diversity_provenance.nf 2/tests/nextflow/diversity_provenance.nf
+new file mode 100644
+index 0000000..5512b1d
+--- /dev/null
++++ 2/tests/nextflow/diversity_provenance.nf
+@@ -0,0 +1,7 @@
++include { DIVERSITY } from '../../modules/cross_sample/diversity'
++workflow {
++    DIVERSITY(Channel.value(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-diversity-provenance/in/abundance.tsv')),
++              Channel.value(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-diversity-provenance/in/metadata.tsv')),
++              Channel.value(['diversity.R', 'statistics_input_contract.R'].collect { file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/bin/' + it, checkIfExists: true) }))
++    DIVERSITY.out.cohort_provenance.view { it -> "PROV ${it[0]} cohort=${it[5]}" }
++}
+diff --git 1/tests/nextflow/network_prepare_provenance.nf 2/tests/nextflow/network_prepare_provenance.nf
+new file mode 100644
+index 0000000..3189654
+--- /dev/null
++++ 2/tests/nextflow/network_prepare_provenance.nf
+@@ -0,0 +1,7 @@
++include { NETWORK_PREPARE } from '../../modules/cross_sample/network_prepare'
++workflow {
++    NETWORK_PREPARE(Channel.value(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-diversity-provenance/in/abundance.tsv')),
++                    Channel.value(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-diversity-provenance/in/metadata.tsv')),
++                    Channel.value(['network_prepare.R', 'statistics_input_contract.R'].collect { file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/bin/' + it, checkIfExists: true) }))
++    NETWORK_PREPARE.out.cohort_provenance.view { it -> "PROV ${it[0]} cohort=${it[5]}" }
++}
+diff --git 1/tests/nextflow/shared_catalogue_provenance.nf 2/tests/nextflow/shared_catalogue_provenance.nf
+new file mode 100644
+index 0000000..598f4f4
+--- /dev/null
++++ 2/tests/nextflow/shared_catalogue_provenance.nf
+@@ -0,0 +1,9 @@
++include { SHARED_CATALOGUE } from '../../modules/cross_sample/shared_catalogue'
++workflow {
++    SHARED_CATALOGUE(Channel.of(tuple(['s1', 's2'],
++        [file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-shared-catalogue-provenance/in/assemblies/s1.fa'), file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-shared-catalogue-provenance/in/assemblies/s2.fa')],
++        [file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-shared-catalogue-provenance/in/plasmids/s1.fa'), file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-shared-catalogue-provenance/in/plasmids/s2.fa')])),
++        Channel.value(2),
++        Channel.value(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/bin/build_shared_catalogue.py', checkIfExists: true)))
++    SHARED_CATALOGUE.out.cohort_provenance.view { it -> "PROV \${it[0]} cohort=\${it[5]}" }
++}
+diff --git 1/tests/nextflow/cohort_compile_check.nf 2/tests/nextflow/cohort_compile_check.nf
+new file mode 100644
+index 0000000..e249975
+--- /dev/null
++++ 2/tests/nextflow/cohort_compile_check.nf
+@@ -0,0 +1,10 @@
++include { DESEQ2 } from '../../modules/cross_sample/deseq2'
++include { DIFFERENTIAL_ABUNDANCE } from '../../modules/cross_sample/differential'
++include { NETWORK_PREPARE } from '../../modules/cross_sample/network_prepare'
++include { STATISTICS_INPUTS } from '../../modules/cross_sample/statistics_inputs'
++include { FASTSPAR } from '../../modules/cross_sample/fastspar'
++include { MERGE_ABUNDANCE } from '../../modules/cross_sample/merge_abundance'
++include { SHARED_ABUNDANCE_TABLES } from '../../modules/cross_sample/shared_abundance'
++include { SHARED_CATALOGUE } from '../../modules/cross_sample/shared_catalogue'
++include { DIVERSITY } from '../../modules/cross_sample/diversity'
++workflow { println 'compiled' }

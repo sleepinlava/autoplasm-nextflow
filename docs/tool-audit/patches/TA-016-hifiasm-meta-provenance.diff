@@ -1,0 +1,29 @@
+diff --git c/modules/assembly/hifiasm_meta.nf w/modules/assembly/hifiasm_meta.nf
+index ba8c360..f56c283 100644
+--- c/modules/assembly/hifiasm_meta.nf
++++ w/modules/assembly/hifiasm_meta.nf
+@@ -18,9 +18,13 @@ process HIFIASM_META {
+     output:
+     tuple val(meta), path("${meta.id}.hifiasm.fasta"), emit: assembly
+     tuple val(meta), path("${meta.id}.p_ctg.gfa"), emit: graph
++    tuple val("${task.process}"), val(meta), path("${meta.id}.HIFIASM_META.task_command.sh"),
++          val('hifiasm_meta --version'), eval('hifiasm_meta --version'),
++          eval("sha256sum '${meta.id}.HIFIASM_META.task_command.sh'"), emit: task_provenance
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.HIFIASM_META.task_command.sh'
+     hifiasm_meta -t ${task.cpus} -o ${meta.id} ${long_reads}
+     # Convert primary contig graph to FASTA
+     awk '/^S/{printf ">%s\\n%s\\n", \$2, \$3}' ${meta.id}.p_ctg.gfa > ${meta.id}.hifiasm.fasta
+diff --git 1/tests/nextflow/hifiasm_meta_provenance.nf 2/tests/nextflow/hifiasm_meta_provenance.nf
+new file mode 100644
+index 0000000..4001bc2
+--- /dev/null
++++ 2/tests/nextflow/hifiasm_meta_provenance.nf
+@@ -0,0 +1,5 @@
++include { HIFIASM_META } from '../../modules/assembly/hifiasm_meta'
++workflow {
++    HIFIASM_META(Channel.of(tuple([id: 'hifiasm-iface'], file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-flye-provenance/interface-control-20000reads.fastq.gz'))))
++    HIFIASM_META.out.task_provenance.view { it -> "PROV ${it[0]} ${it[3]} sha=${it[5]}" }
++}

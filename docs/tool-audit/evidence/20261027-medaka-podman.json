@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-27",
+  "formal_acceptance": false,
+  "findings": [
+    "TA-091",
+    "TA-096"
+  ],
+  "scope": "first OCI/backend boundary check: unmodified production MEDAKA_RESOURCE_PROBE + MEDAKA under rootless Podman with the pinned biocontainers image, full real bacterial fixture",
+  "image": "quay.io/biocontainers/medaka:2.2.2--py312h3050eb1_0 @ sha256:18d5d73aa7f0aa70d0f623c4d34ce83ca791ba9c14c751bb3ed5d3452a8fb4c3",
+  "results": {
+    "probe": "COMPLETED in container; helper pins (medaka 2.2.2 source SHAs, medaka_consensus SHA, mini_align SHA, model loading/selection) all validated against the image's own install — the pinned conda build py312h3050eb1_0 is byte-consistent between the local prefix and the OCI image",
+    "consumer": "COMPLETED in container; complete output FASTA (headers+DNA) identical to the native-v1 conda-prefix baseline",
+    "originals_unchanged": true
+  },
+  "evidence_sha256": {
+    "tests/run_medaka_podman_exec.py": "0d8566b9f7e240b846664c6ff6a601cc88a8188eac57f7aacddff6b459dbbf91",
+    "results/tool-audit/20261027-medaka-podman-v1/run.json": "6f247236cc2a348f35081801bee116e5c0474bfb7b6bd4939964b0cb3155a80c"
+  },
+  "limits": [
+    "single image/single backend (rootless Podman); no Docker/Singularity/Apptainer, remote executor or AWS acceptance",
+    "plain draft only; -x/-B/RLE branches not run under Podman",
+    "image digest recorded for this pull; no multi-registry mirror check",
+    "TA-091/TA-096 remain in_progress"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidates: extend task_provenance to ABRICATE_RUN and PLASMIDFINDER; not accepted",
+  "changes": "both modules: provenance tuple + shared 'prefix =' scope fix + BASH_SOURCE[0] copies in script and stub; PLASMIDFINDER probe is 'plasmidfinder.py -h' (no CLI version; pinned 2.1.6 stays the static record), ABRICATE probe is 'abricate --version'",
+  "verification": {
+    "plasmidfinder": "native py310 env, probe+consumer on the 540bp positive fixture: both COMPLETED; command file sha256 1a55e6da…",
+    "abricate": "native 1.0.1 env, probe+consumer on the full 2.5MB fixture with the private alias DB: both COMPLETED with a real BlaI hit; provenance file sample.alias.ABRICATE_RUN.task_command.sh (prefix includes the db via config) sha256 072f7362…"
+  },
+  "failed_attempt": "abricate v1: abricate_db='alias' with datadir=null needs the private alias DB dir; fixed in v2, retained",
+  "patch": "docs/tool-audit/patches/TA-016-abricate-plasmidfinder-provenance.diff sha256 85f82ff71a7a1b79c96e579f9e5e0c1c8fee0a5033f887d54a44ad2185508c98",
+  "limits": ["candidates not accepted; TA-016 remains in_progress", "probes/consumers themselves already carry receipts; these tuples cover the scientific consumer commands", "report end-to-end rerun pending"]
+}

@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidates: extend task_provenance to MOBSUITE_TYPER and MOBSUITE_RECON; not accepted",
+  "changes": "both modules: provenance tuple after the versions line, cp of BASH_SOURCE[0] in script and stub, shared 'prefix =' scope fix (typer had def prefix in script+stub, recon in script)",
+  "verification": "real Nextflow 26.10, micromamba cached env, controlled 3.1.8 DB: MOBSUITE_TYPER (pUTI89) and MOBSUITE_RECON (recon-positive) both COMPLETED; provenance command files sha256 f0752fa6… / 722453d3…",
+  "patch": "docs/tool-audit/patches/TA-016-mobsuite-provenance.diff sha256 c8c3a4867e08da321e71c193267941bcebe6954e151039dbdabde08fa1df9143",
+  "failed_attempt": "v1 compile error 'prefix is not defined' (def-scoped prefix invisible to output block), retained",
+  "limits": ["candidates not accepted; TA-016 remains in_progress", "report end-to-end rerun pending"]
+}

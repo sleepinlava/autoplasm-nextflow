@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to PLASME; not accepted",
+  "change": "modules/detection/plasme.nf: provenance tuple keyed on meta.id; cp of BASH_SOURCE[0] in script; probe is 'python3 plasme_runtime.py -h' (the runtime wrapper has no --version)",
+  "verification": "real Nextflow 26.10, native plasme-1.1 env + retained DB (DB/ subdir) + PLASMe source, pUTI89: COMPLETED, sha256 a3c75ee0… matches the actual task command file",
+  "failed_attempt": "v1: DB must point at the DB/ subdirectory (runtime refused on missing plsdb_Mar30.dmnd), retained",
+  "patch": "docs/tool-audit/patches/TA-016-plasme-provenance.diff sha256 060c7e2b9bb2f3ed2d009acc214efc0ff8f614dd4528c6267fd61efbc18c0f2b",
+  "harness": "tests/nextflow/plasme_provenance.nf",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "report end-to-end rerun pending"]
+}

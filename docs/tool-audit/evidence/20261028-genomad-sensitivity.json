@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-28",
+  "finding": "TT-003",
+  "scope": "decisive sensitivity check: can the pinned test-config geNomad (small subset DB + --disable-nn-classification) call any plasmid at all",
+  "method": "podman genomad:1.12.0--27836e6e665e84b5 end-to-end --disable-nn-classification on the known plasmid-positive B. fragilis genome (5.15Mbp chromosome + 47kb plasmid NZ_CP069564.1), test-subset DB",
+  "result": {
+    "plasmid_summary": "header only — zero plasmid calls, including on the actual 47kb plasmid contig",
+    "virus_summary": "1 provirus call: NZ_CP069563.1|provirus_511818_556016 (44,199 bp, virus_score 0.9878, Caudoviricetes)"
+  },
+  "interpretation": "the test-subset geNomad configuration calls zero plasmids even on a known plasmid-positive complete genome, so the nonempty plasmid-statistics branch of P4 is unreachable under the pinned test DB regardless of cohort. The marine cohort's zero-plasmid outcome is consistent with this sensitivity boundary. Reaching the fitted-model/eligible-network branches requires the full geNomad database (and, for deployment honesty, NN classification enabled) — i.e. a deployment P4, which is exactly what TT-003 requires",
+  "limits": [
+    "the provirus call is on the B. fragilis chromosome; it is not a viral fixture introduced by us",
+    "full geNomad DB not yet downloaded; no claim it will yield plasmid positives on the marine cohort"
+  ],
+  "next_step": "download the full pinned geNomad DB with integrity verification, then rerun the shotgun P4 contract with NN enabled; if marine yields no plasmids even then, select a plasmid-rich gut cohort"
+}

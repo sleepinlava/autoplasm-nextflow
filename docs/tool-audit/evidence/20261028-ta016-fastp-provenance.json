@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to FASTP (QC producer, 3 script branches + stub); not accepted",
+  "change": "modules/nf-core/fastp/main.nf: provenance tuple after the established pattern; 'def prefix' -> shared 'prefix =' in script and stub so the output block sees it; cp of BASH_SOURCE[0] at the top of every script branch with the $ escaped for Groovy",
+  "failed_attempts": "v1: harness passed 5 args for a 4-arg module (adapter_fasta sits in the tuple); v2: unescaped ${BASH_SOURCE[0]} hit Groovy 'BASH_SOURCE is not defined' at compile; both retained under results/tool-audit/20261028-fastp-provenance-v{1,2}",
+  "verification": "v3: real Nextflow 26.10 + podman fastp:1.3.6, PE branch on locked ENA read pair SRR19638267: task COMPLETED, provenance sha256 64f276c6… matches the actual task command file bytes",
+  "patch": "docs/tool-audit/patches/TA-016-fastp-provenance.diff sha256 7c44dcdb7690653345ab797fe8a95e28beff0cc0d6c7cfd25d599ce9384ad4de",
+  "harness": "tests/nextflow/fastp_provenance.nf",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "PE branch verified; interleaved/SE branches patched identically but not individually executed", "report end-to-end rerun pending"]
+}

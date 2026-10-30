@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-27",
+  "formal_acceptance": false,
+  "finding": "TA-091",
+  "result": "bounded native neural coverage and framework2/2 verified; invalid private MMI accepted with exit0/empty BAM; production resource/cache fix remains open",
+  "source_sha256": {
+    "modules/nf-core/medaka/tests/main.nf.test": "f86921891d4010fc75627cfb4d3d707ec01fae6223a72e8cf4d977abf2bf8978",
+    "tests/run_medaka_framework.py": "6c898d5d99fd1c84ced9c3b75efdedd60547f1172e4d816d36df489633f85537",
+    "bin/medaka_model_selection.py": "7dc0f4d6c265dd5a93d171d6eeeaf0fc82b77d9f274f5a8994e6a3a591fdd27a",
+    "tests/run_medaka_real_ont.py": "7f1fa070f65e3aa6dc6c58adc3fafa4ff533555de465ebf0572946259cdbc3c4",
+    "tests/check_medaka_probability_coverage.py": "9871f05b22ef8a584baff89988b4e77b78a8ef5b3216e54c5d961533f1e59499"
+  },
+  "evidence_sha256": {
+    "results/tool-audit/20261027-medaka-nomiss/review-recheck.json": "ee6d56016a73983ab1dd85f2e764d904a43754c9186861fd463aeb502fe3558b",
+    "results/tool-audit/20261027-medaka-nomiss/native-probability-coverage-recheck.json": "a620295290971ea95ac1f6674e7b9d9b885c4b7942eb82da3fcf51d1bb7c9b6a",
+    "results/tool-audit/20261027-medaka-nomiss/framework-v1/run.json": "e747222e14569a944652358d8d5600b637153b8fd5adcd50e8566fbbb62a634c",
+    "results/tool-audit/20261027-medaka-nomiss/framework-v1/stderr": "30756748cc5906303539ddd22b885b2d80afe17d0c549415c47b9ec52701b518",
+    "results/tool-audit/20261027-medaka-nomiss/framework-v2/run.json": "33de8563d5e66c24416c367aa802b082402156983f5db85f112729e9b427d87e",
+    "results/tool-audit/20261027-medaka-nomiss/framework-v2/stderr": "30756748cc5906303539ddd22b885b2d80afe17d0c549415c47b9ec52701b518",
+    "results/tool-audit/20261027-medaka-nomiss/framework-v3/run.json": "b07093f68c288ea1d2b4c1dc375b68d44de1107d5319167c808418c47d55894c",
+    "results/tool-audit/20261027-medaka-nomiss/framework-v3/junit.xml": "8beaac48cecfd04151d42533018096d3337e4222d19b01b751c2ee4af62e0736",
+    "results/tool-audit/20261027-medaka-nomiss/index-error-v1/observer-review.json": "32dfe8ebe1568ba5b51bf3f0e88ba78054d4987eafb74fa52fa44c52d41533fa",
+    "results/tool-audit/20261027-medaka-nomiss/index-error-v2/run.json": "6ee6948b01c208afd6bda3daf000cad6ce27a973bacb45666df28bc6faa2a0ce",
+    "results/tool-audit/20261027-medaka-nomiss/index-error-v2/native-exit.json": "df4d721d233a2334088d2d2e0110346ae9e509ff46bf0b379fbcfa85c715af4d",
+    "results/tool-audit/20261027-medaka-nomiss/index-error-v2/flagstat.txt": "4615a1b6c109bf6c30a22fbe5458bd21728b97afa35d06cae375ffd993c45b46",
+    "results/tool-audit/20261027-medaka-nomiss/run-index-error-observation.py": "3cf92fe4d4e5a5e39c34253918586c4721b17bd1475da25102683a4a34112b2f",
+    "results/tool-audit/20261027-medaka-nomiss/record-oracle-controls.groovy": "46aec83d3c1afc68352673853d5e7f61db6038bc6aee23482a77e104f4ab3b5b"
+  },
+  "scope": "Complete published real bacterial sample, unchanged original Medaka2.2.2 software/model; corrected test fixture propagation and full-record oracle; no biological genome accuracy or full-platform/OCI/cache acceptance"
+}

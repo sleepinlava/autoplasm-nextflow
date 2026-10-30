@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-27",
+  "scope": "production MOBSUITE_TYPER + MOBSUITE_RECON modules with the controlled prepared 3.1.8 DB, real Nextflow 26.10 + micromamba conda cache (reused pinned env, no rebuild)",
+  "harness": "tests/nextflow/mobsuite_prepared.nf — TYPER gets the DB as explicit path input with identity val; RECON gets it via ext.args --database_directory (its implicit-DB boundary is a recorded TA-091 aspect)",
+  "results": {
+    "MOBSUITE_TYPER": "COMPLETED; output row identical to the direct guard CLI positive (same contig stats/md5, IncFIA+IncFIB+rep_cluster_2131, MOBF+MOBP, MPF_F); only the sample_id prefix differs by construction",
+    "MOBSUITE_RECON": "COMPLETED; plasmid_AA337.fasta byte-identical to the direct CLI reconstruction (pUTI89), AF232 identical as well"
+  },
+  "failed_attempts_retained": "v1 (empty file() placeholder), v2 (conda binary missing: 'conda: command not found'), v3 (-log passed twice to runtime/bin/nextflow); v4 is the evidence run",
+  "ta091_boundary": "MOBSUITE_RECON has no DB path input — the database directory travels via ext.args and is not part of the deep cache key; TYPER carries db + identity val explicitly. Cache-identity wiring for the MOB pair remains open",
+  "evidence_sha256": {
+    "tests/nextflow/mobsuite_prepared.nf": "7dd548f3c0b63f22049c939ab16123674731aff15ae373b95d608aedf5cc261b"
+  },
+  "limits": ["conda-cache env reuse, not a cold deployment", "single positive fixture per module", "no optional filter_db, OCI or platform acceptance"]
+}

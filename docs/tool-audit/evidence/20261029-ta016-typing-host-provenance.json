@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidates: typing/host leftover batch task_provenance; not accepted",
+  "changes": "BAKTA_BAKTA, AMRFINDERPLUS_RUN, PLASMIDHOSTFINDER (meta task_provenance, cp in script+stub) and MACSYFINDER_DOWNLOAD (no meta; key is task.process literal)",
+  "verification": "compile-level only: tests/nextflow/typing_compile_check.nf (pre-existing harness from the typing batch) parsed all 9 typing/host processes under real Nextflow 26.10; patch reverse-applies cleanly",
+  "patch": "docs/tool-audit/patches/TA-016-typing-host-provenance.diff sha256 42a3d716458c48ebae50013c46aeec4ff8f800bc5249082eebc10e12a3e46b0c",
+  "limits": ["candidates not accepted; TA-016 remains in_progress", "no native env or local container image for bakta/amrfinderplus/plasmidhostfinder; MACSYFINDER_DOWNLOAD needs network macsydata", "real runs blocked on resources, documented rather than faked"]
+}

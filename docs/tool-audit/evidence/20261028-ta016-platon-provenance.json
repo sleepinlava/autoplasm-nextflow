@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to PLATON (detection producer, runs via the audited platon_checked.py wrapper); not accepted",
+  "change": "modules/detection/platon.nf: provenance tuple keyed on meta.id; cp of BASH_SOURCE[0] in script; probe is 'platon --version' (platon_checked.py has no --version)",
+  "verification": "real Nextflow 26.10, native platon-1.7 env + retained 2.8G DB, pUTI89: COMPLETED, sha256 8f8c4e49… matches the actual task command file",
+  "patch": "docs/tool-audit/patches/TA-016-platon-provenance.diff sha256 f8cf694de4742e0614e871d089b8e61d3ad0d91ff9eb64d900ac8bf0255a867e",
+  "harness": "tests/nextflow/platon_provenance.nf",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "report end-to-end rerun pending"]
+}

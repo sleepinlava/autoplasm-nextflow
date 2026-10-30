@@ -1,0 +1,134 @@
+diff --git c/modules/nf-core/mobsuite/recon/main.nf w/modules/nf-core/mobsuite/recon/main.nf
+index 794d8d3..4ccf7ab 100644
+--- c/modules/nf-core/mobsuite/recon/main.nf
++++ w/modules/nf-core/mobsuite/recon/main.nf
+@@ -12,6 +12,7 @@ process MOBSUITE_RECON {
+ 
+     input:
+     tuple val(meta), path(fasta)
++    tuple path(db), val(db_identity)
+     path(preflight_helper, stageAs: 'mobsuite_preflight.py')
+ 
+     output:
+@@ -29,6 +30,7 @@ process MOBSUITE_RECON {
+     def prefix = task.ext.prefix ?: "${meta.id}"
+     def is_compressed = fasta.getName().endsWith(".gz") ? true : false
+     def fasta_name = fasta.getName().replace(".gz", "")
++    def db_cmd = db ? "--database_directory ${mobsuiteQuote(db)}" : ''
+     """
+     if [ "${is_compressed}" == "true" ]; then
+         gzip -c -d ${mobsuiteQuote(fasta)} > ${mobsuiteQuote(fasta_name)}
+@@ -37,6 +39,7 @@ process MOBSUITE_RECON {
+     python3 mobsuite_preflight.py --tool mob_recon --output mobsuite_preflight.json --execute -- \\
+         --infile ${mobsuiteQuote(fasta_name)} \\
+         ${args} \\
++        ${db_cmd} \\
+         --num_threads ${task.cpus} \\
+         --outdir results \\
+         --sample_id ${mobsuiteQuote(prefix)}
+diff --git c/modules/nf-core/mobsuite/recon/tests/main.nf.test w/modules/nf-core/mobsuite/recon/tests/main.nf.test
+index f8e3c32..4700fce 100644
+--- c/modules/nf-core/mobsuite/recon/tests/main.nf.test
++++ w/modules/nf-core/mobsuite/recon/tests/main.nf.test
+@@ -13,13 +13,16 @@ nextflow_process {
+             process {
+                 """
+                 input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
+-                input[1]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
++                input[1]=[file(params.mobsuite_db.toString(),checkIfExists:true),[schema_version:2,resource_state:'provided']]
++                input[2]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
+                 """
+             }
+         }
+         then {
+             assert process.success
+-            def input=new File(params.mobsuite_bacterial_fasta.toString()).readLines()
++            def fastaPath=System.getenv('MOBSUITE_BACTERIAL_FASTA')
++            assert fastaPath!=null
++            def input=new File(fastaPath).readLines()
+             assert input.count { it.startsWith('>') }==1
+             def dna=input.findAll { !it.startsWith('>') }.join('')
+             assert dna.size()>450000
+@@ -37,7 +40,8 @@ nextflow_process {
+             process {
+                 """
+                 input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
+-                input[1]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
++                input[1]=[[],[schema_version:2,resource_state:'absent']]
++                input[2]=file(projectDir.resolve('bin/mobsuite_preflight.py'),checkIfExists:true)
+                 """
+             }
+         }
+diff --git c/modules/nf-core/mobsuite/typer/tests/main.nf.test w/modules/nf-core/mobsuite/typer/tests/main.nf.test
+index 6448407..f39f400 100644
+--- c/modules/nf-core/mobsuite/typer/tests/main.nf.test
++++ w/modules/nf-core/mobsuite/typer/tests/main.nf.test
+@@ -13,7 +13,7 @@ nextflow_process {
+             process {
+                 """
+                 input[0]=[[id:'test'],file(params.mobsuite_bacterial_fasta,checkIfExists:true)]
+-                input[1]=[[],[schema_version:2,resource_state:'absent']]
++                input[1]=[file(params.mobsuite_db.toString(),checkIfExists:true),[schema_version:2,resource_state:'provided']]
+                 input[2]=[]; input[3]=[]; input[4]=[]; input[5]=[]
+                 input[6]=[]; input[7]=[]; input[8]=[]
+                 input[9]=true; input[10]=true
+@@ -23,7 +23,9 @@ nextflow_process {
+         }
+         then {
+             assert process.success
+-            def input=new File(params.mobsuite_bacterial_fasta.toString()).readLines()
++            def fastaPath=System.getenv('MOBSUITE_BACTERIAL_FASTA')
++            assert fastaPath!=null
++            def input=new File(fastaPath).readLines()
+             assert input.count { it.startsWith('>') }==1
+             def dna=input.findAll { !it.startsWith('>') }.join('')
+             assert dna.size()>450000
+diff --git c/subworkflows/plasmid_downstream.nf w/subworkflows/plasmid_downstream.nf
+index 79af290..a0af615 100644
+--- c/subworkflows/plasmid_downstream.nf
++++ w/subworkflows/plasmid_downstream.nf
+@@ -161,7 +161,7 @@ workflow PLASMID_DOWNSTREAM {
+     if (selectedTools(params.annotation_optional_tools).contains('mob_suite')) {
+         // Uses the environment DB; native3.1.9 may auto-initialize/download if unprepared.
+         // Resource preflight/native validation remain pending; do not launch unprepared.
+-        MOB_SUITE_ANNOT(ch_plasmids,Channel.value(file("${moduleDir}/../bin/mobsuite_preflight.py",checkIfExists:true)))
++        MOB_SUITE_ANNOT(ch_plasmids,Channel.value(resourceInput(params.mob_suite_db)),Channel.value(file("${moduleDir}/../bin/mobsuite_preflight.py",checkIfExists:true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_SUITE_ANNOT.out], '08_annotation', 'MOB_SUITE_ANNOT'))
+     }
+     if (selectedTools(params.annotation_optional_tools).contains('rgi')) {
+@@ -183,7 +183,7 @@ workflow PLASMID_DOWNSTREAM {
+     if (selectedTools(params.plasmid_binning_tools).contains('mob_suite') || selectedTools(params.plasmid_binning_tools).contains('mob_recon')) {
+         // Uses the environment DB; native3.1.9 may auto-initialize/download if unprepared.
+         // Resource preflight/native validation remain pending; do not launch unprepared.
+-        MOB_RECON(ch_plasmids,Channel.value(file("${moduleDir}/../bin/mobsuite_preflight.py",checkIfExists:true)))
++        MOB_RECON(ch_plasmids,Channel.value(resourceInput(params.mob_suite_db)),Channel.value(file("${moduleDir}/../bin/mobsuite_preflight.py",checkIfExists:true)))
+         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_RECON.out], '05_plasmid_binning', 'MOB_RECON'))
+     }
+     if (selectedTools(params.plasmid_binning_tools).contains('recycler')) {
+diff --git 1/tests/nextflow/mobsuite_prepared.nf 2/tests/nextflow/mobsuite_prepared.nf
+new file mode 100644
+index 0000000..9d8ad74
+--- /dev/null
++++ 2/tests/nextflow/mobsuite_prepared.nf
+@@ -0,0 +1,21 @@
++include { MOBSUITE_TYPER } from '../../modules/nf-core/mobsuite/typer/main'
++include { MOBSUITE_RECON } from '../../modules/nf-core/mobsuite/recon/main'
++
++// Native prepared-resource integration check: production modules with the
++// controlled 3.1.8 DB. TYPER receives the DB as an explicit input; RECON
++// receives it via ext.args --database_directory (its implicit-DB boundary is
++// a recorded TA-091 aspect, not changed here). No mob_init, no default dir.
++workflow {
++    db = file(params.mobsuite_db, checkIfExists: true)
++    helper = Channel.value(file("${projectDir}/../../bin/mobsuite_preflight.py", checkIfExists: true))
++    MOBSUITE_TYPER(
++        Channel.of(tuple([id: 'typer-native'], file(params.mobsuite_typer_fasta, checkIfExists: true))),
++        Channel.of(tuple(db, 'sha256-controlled-3.1.8-db')),
++        Channel.value([]), Channel.value([]), Channel.value([]),
++        Channel.value([]), Channel.value([]), Channel.value([]),
++        Channel.value([]), true, true, helper)
++    MOBSUITE_RECON(
++        Channel.of(tuple([id: 'recon-native'], file(params.mobsuite_recon_fasta, checkIfExists: true))),
++        Channel.of(tuple(db, 'sha256-controlled-3.1.8-db')),
++        helper)
++}

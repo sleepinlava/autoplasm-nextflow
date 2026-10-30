@@ -1,0 +1,39 @@
+{
+  "date": "2026-10-27",
+  "formal_acceptance": false,
+  "production_wiring": false,
+  "findings": [
+    "TA-091",
+    "TA-096"
+  ],
+  "actual_index_gate_cases": 13,
+  "actual_model_gate_cases": 4,
+  "index_gate_result": "fixed-native canonical generation compares whole FAI/MMI/GZI bytes; same-size/mtime damage/stale reference refused; restoration identity unchanged; original resources unchanged",
+  "model_gate_result": "actual selection, complete gzip stream, native check_compatible and full CPU weight loading;18 finite tensors; original/unchanged/corrupt-trailer/restored controls; no original model changes",
+  "new_gzip_interface_result": "ordinary gzip from exact Flye gzip -c contract rejected at native index step; complete published BGZF succeeds; production enabled-Medaka interface remains uncorrected",
+  "source_sha256": {
+    "bin/medaka_index_resources.py": "76936a2864471c0f4da91c43228be7d5ed3c75f196c6134905991f67cd0f1e56",
+    "bin/medaka_model_resources.py": "ae20ddb4e2b025e759a89eee158a5733ca047eb975608d5f14dee9b8a3406d1e",
+    "tests/run_medaka_index_resources.py": "d7fc4999543d4b4d0f65be0654be622d2bc0888be0ca4cc1f346650420160167",
+    "tests/run_medaka_model_resources.py": "be98d318b38f8f04cd0f7a6c42a9691f950715dad30e89f2fce42a8069e8eab2"
+  },
+  "evidence_sha256": {
+    "results/tool-audit/20261027-medaka-index-gate/original.json": "b7e86e0a3807e75dd204a35305748362bb2143145a674577c8f956354d2c255a",
+    "results/tool-audit/20261027-medaka-index-gate/controls-v1/observer-review.json": "ad61ee7d0ed995e76db4843aed6f89b75751662653b4dfab2ff4c0bb11b2013e",
+    "results/tool-audit/20261027-medaka-index-gate/controls-v2/run.json": "7f3e90589d4864c280ecf414f1f4c363cf7f3a9782c7b83722a15ede43914473",
+    "results/tool-audit/20261027-medaka-index-gate/model-full-v1.json": "ccf0f6617e98f568bd97df014293ea7cc1cb4730acdcd658cef9efcb64cb1ee6",
+    "results/tool-audit/20261027-medaka-index-gate/model-controls-v1/run.json": "9856a4901d4ea38379d678485843621ce86072992d85f49220af61024460e724",
+    "results/tool-audit/20261027-medaka-index-gate/gzip-original-v1/run.json": "2433a89b4bd437f43a6a4cfa509ca10185c897a03b717560ac4959d32f0926b6",
+    "results/tool-audit/20261027-medaka-index-gate/gzip-original-v1/stderr": "cdb931e356100cb77b6c84d6b08b6bdfc6dd52410cd354b27428da4b3a8c4949",
+    "results/tool-audit/20261027-medaka-index-gate/gzip-flye-contract-v1/run.json": "d501ae9d2ae5129027d0a04611d46c07fbcb29ef2d98561df9e590409f1849d8",
+    "results/tool-audit/20261027-medaka-index-gate/gzip-flye-contract-v1/stderr": "a5e0f1650233254b0e56d0fee92c8b8c648f3640649ecad4f7b23db96c586c3c",
+    "results/tool-audit/20261027-medaka-index-gate/bgzip-capture-v1.json": "2403e83c48d18fe29b81abfbef482f5dc207966513a7f41540449868b8000f50"
+  },
+  "limits": [
+    "standalone candidates; no pre-cache/consumer production wiring",
+    "default non-RLE/non-force index scope only",
+    "no altered-model full inference or production cached/restored task proof",
+    "no independent biological accuracy or full platform/OCI acceptance",
+    "prior source receipts remain historical; accepted718 list unchanged"
+  ]
+}

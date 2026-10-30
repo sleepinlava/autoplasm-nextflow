@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-28",
+  "findings": ["TA-016", "TA-097"],
+  "scope": "SPADES provenance candidate (TA-016) plus the TA-097 completion-marker candidate fix it required; neither accepted",
+  "ta097_candidate": "bin/spades_graph_provenance.py accepts both 'finished.' and 'finished WITH WARNINGS!' as completion, records completed_with_warnings + warnings_count in the provenance JSON; K-iteration/copy markers and all structural checks unchanged; patch sha256 880b255b…",
+  "ta016_candidate": "modules/nf-core/spades/main.nf provenance tuple + shared prefix scope + BASH_SOURCE copies; patch sha256 8abb3d41…; harness tests/nextflow/spades_provenance.nf",
+  "verification": "v7: real podman SPAdes 4.1.0 on nf-core minigut (locked, blob-verified): COMPLETED; provenance sha256 ffae9f55… matches the task command file; graph provenance JSON records max_k=55, completed_with_warnings=true, warnings_count=4, graph/log/config/plan hashes",
+  "attempts_retained": "v1 harness arg count; v2 deep 16S amplicon correction pathological (stopped); v3 memory 6GB<8.3GB required (exit 21); v4 interrupted by app exit mid-assembly; v5/v6 real assemblies completed WITH WARNINGS and were correctly rejected by the old strict marker (the evidence for TA-097)",
+  "limits": ["candidates not accepted; TA-016/TA-097 remain open pending review", "warnings-content review policy (which warnings are acceptable) not defined — the candidate only records them", "report end-to-end rerun pending"]
+}

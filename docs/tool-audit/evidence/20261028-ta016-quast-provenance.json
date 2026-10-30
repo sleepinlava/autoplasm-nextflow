@@ -1,0 +1,15 @@
+{
+ "date": "2026-10-28",
+ "finding": "TA-016",
+ "scope": "candidate: extend task_provenance to QUAST (third producer, first non-R producer); not accepted",
+ "change": "modules/nf-core/quast/main.nf emits the same runtime_command tuple as the two R producers (script copy via BASH_SOURCE[0], native version probe, sha256sum eval); stub copies the command file too",
+ "verification": "real Nextflow 26.10 + podman quast:5.3.0 on pUTI89: task COMPLETED, task_provenance emitted (process=QUAST, probe='quast.py --version', sha256 629b83e2… matches the actual task command file bytes)",
+ "patch": "docs/tool-audit/patches/TA-016-quast-provenance.diff sha256 4f20ef0b779aaf62cd82aab688c1cf49a36fd442e4c8f3bcc925b55896bf7cb7",
+ "harness": "tests/nextflow/quast_provenance.nf (new)",
+ "limits": [
+  "candidate not accepted; TA-016 remains in_progress",
+  "single-module single-fixture run; report-level consumption of the new record not re-run end-to-end in this slice",
+  "remaining producers (assemblers, QC, detection, typing) not yet wired"
+ ],
+ "report_layer": "tests/test_generate_report.py 17/17 OK on the current tree; generic runtime_command coverage (bytes preserved, checksum mismatch/missing/duplicate rejected) applies to the QUAST-shaped record"
+}

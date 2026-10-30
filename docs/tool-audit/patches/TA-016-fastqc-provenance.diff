@@ -1,0 +1,54 @@
+diff --git c/modules/nf-core/fastqc/main.nf w/modules/nf-core/fastqc/main.nf
+index 1d9efcd..15bf8a7 100644
+--- c/modules/nf-core/fastqc/main.nf
++++ w/modules/nf-core/fastqc/main.nf
+@@ -14,13 +14,16 @@ process FASTQC {
+     tuple val(meta), path("*.html"), emit: html
+     tuple val(meta), path("*.zip"), emit: zip
+     tuple val("${task.process}"), val('fastqc'), eval('fastqc --version | sed "/FastQC v/!d; s/.*v//"'), emit: versions_fastqc, topic: versions
++    tuple val("${task.process}"), val(meta), path("${prefix}.FASTQC.task_command.sh"),
++          val('fastqc --version'), eval('fastqc --version'),
++          eval("sha256sum '${prefix}.FASTQC.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+ 
+     script:
+     def args = task.ext.args ?: ''
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     // Local patch (refactor/nf-core-modules): input symlinks keep the legacy
+     // alias scheme <prefix>.R1.fastq.gz / <prefix>.R2.fastq.gz (upstream uses
+     // <prefix>_N.<extension>), preserving the full .fastq/.fq(+gz) suffix.
+@@ -48,6 +51,7 @@ process FASTQC {
+     def fastqc_memory_arg = fastqc_memory ? "--memory ${fastqc_memory}" : ''
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTQC.task_command.sh'
+     printf "%s %s\\n" ${rename_to} | while read old_name new_name; do
+         [ -f "\${new_name}" ] || ln -s \$old_name \$new_name
+     done
+@@ -60,8 +64,9 @@ process FASTQC {
+     """
+ 
+     stub:
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTQC.task_command.sh'
+     touch ${prefix}.html
+     touch ${prefix}.zip
+     """
+diff --git 1/tests/nextflow/fastqc_provenance.nf 2/tests/nextflow/fastqc_provenance.nf
+new file mode 100644
+index 0000000..b799614
+--- /dev/null
++++ 2/tests/nextflow/fastqc_provenance.nf
+@@ -0,0 +1,7 @@
++include { FASTQC } from '../../modules/nf-core/fastqc/main'
++workflow {
++    FASTQC(Channel.of(tuple([id: 'fastqc-iface', single_end: false],
++        [file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261027-ena-multi/ena/SRR19638267_1.fastq.gz'),
++         file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261027-ena-multi/ena/SRR19638267_2.fastq.gz')])))
++    FASTQC.out.task_provenance.view { it -> "PROV ${it[0]} ${it[3]} sha=${it[5]}" }
++}

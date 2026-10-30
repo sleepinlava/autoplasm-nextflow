@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to INTEGRONFINDER; not accepted",
+  "changes": "provenance tuple after the versions line, cp of BASH_SOURCE[0] in script and stub, stub-only 'def prefix' -> shared 'prefix =' scope fix",
+  "verification": "real Nextflow 26.10 via nextflow-no-log, native integronfinder-2.0.5 env, Integron_Finder-2.0.5 repo fixture acba.007.p01.13.fst: INTEGRONFINDER_RESOURCE_PROBE + INTEGRONFINDER both COMPLETED; probe identity JSON records pinned 2.0.5 with model/executable/package SHAs; emitted provenance command file sha256 c617b3ce588ff5792800e2f2a539d8397fd342da14b1e26c626e139174e4288a (recomputed post-run)",
+  "patch": "docs/tool-audit/patches/TA-016-integronfinder-provenance.diff sha256 2631103ba91445e24e8dd6df3f95c8be0f071148e4d56c362b7ff1c1d600e1b1",
+  "harness": "tests/nextflow/integronfinder_runtime_native.nf (pre-existing, no new test file)",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "report end-to-end rerun pending", "typing/host batch (COPLA, MACSYFINDER x2, BAKTA, AMRFINDERPLUS, RGI, ISESCAN, PLASMIDHOSTFINDER) compile-checked only, real runs pending"]
+}

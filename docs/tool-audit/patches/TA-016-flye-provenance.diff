@@ -1,0 +1,48 @@
+diff --git c/modules/nf-core/flye/main.nf w/modules/nf-core/flye/main.nf
+index 271b4d7..fa3b500 100644
+--- c/modules/nf-core/flye/main.nf
++++ w/modules/nf-core/flye/main.nf
+@@ -19,16 +19,20 @@ process FLYE {
+     tuple val(meta), path("*.log")     , emit: log
+     tuple val(meta), path("*.json")    , emit: json
+     tuple val("${task.process}"), val('flye'), eval('flye --version'), emit: versions_flye, topic: versions
++    tuple val("${task.process}"), val(meta), path("${prefix}.FLYE.task_command.sh"),
++          val('flye --version'), eval('flye --version'),
++          eval("sha256sum '${prefix}.FLYE.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+ 
+     script:
+     def args = task.ext.args ?: ''
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     def valid_mode = ["--pacbio-raw", "--pacbio-corr", "--pacbio-hifi", "--nano-raw", "--nano-corr", "--nano-hq"]
+     if ( !valid_mode.contains(mode) )  { error "Unrecognised mode to run Flye. Options: ${valid_mode.join(', ')}" }
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.FLYE.task_command.sh'
+     flye \\
+         $mode \\
+         $reads \\
+@@ -46,8 +50,9 @@ process FLYE {
+     """
+ 
+     stub:
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.FLYE.task_command.sh'
+     echo stub | gzip -c > ${prefix}.assembly.fasta.gz
+     echo stub | gzip -c > ${prefix}.assembly_graph.gfa.gz
+     echo stub | gzip -c > ${prefix}.assembly_graph.gv.gz
+diff --git 1/tests/nextflow/flye_provenance.nf 2/tests/nextflow/flye_provenance.nf
+new file mode 100644
+index 0000000..899c19d
+--- /dev/null
++++ 2/tests/nextflow/flye_provenance.nf
+@@ -0,0 +1,5 @@
++include { FLYE } from '../../modules/nf-core/flye/main'
++workflow {
++    FLYE(Channel.of(tuple([id: 'flye-iface'], file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-flye-provenance/interface-control-20000reads.fastq.gz'))), '--nano-raw')
++    FLYE.out.task_provenance.view { it -> "PROV ${it[0]} ${it[3]} sha=${it[5]}" }
++}

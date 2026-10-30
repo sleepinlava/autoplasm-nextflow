@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-27",
+  "scope": "MOB-suite 3.1.8 default database archive retrieval and content screening; no extraction to a DB directory, no mob_init, no taxonomy initialization, no scientific run",
+  "source": {
+    "url": "https://zenodo.org/records/10304948/files/data.tar.gz?download=1",
+    "official_record": "https://zenodo.org/records/10304948",
+    "bytes": 472851578,
+    "md5": "670e293e4ff1918db5b654278a60bea8",
+    "md5_matches_official_metadata": true,
+    "sha256": "531f2124269b13e6fe59d0b01936276b5a47c0c0eebbc787f710cd376f77d3cd",
+    "retained_at": "results/tool-audit/20261027-mobsuite-db/data.tar.gz"
+  },
+  "contents": {
+    "layout": "data/{rep.dna.fas, mob.proteins.faa, mpf.proteins.faa, orit.fas, repetitive.dna.fas, ncbi_plasmid_full_seqs.fas, clusters.txt, host_range_literature_plasmidDB.txt, __init__.py} plus macOS AppleDouble sidecars (._*)",
+    "filename_viral_screen": "0 matches for vir/phage in member names",
+    "header_viral_screen": {
+      "rep.dna.fas": "2686 records, 0 virus/phage headers",
+      "ncbi_plasmid_full_seqs.fas": "23700 records, 0 virus/phage headers",
+      "orit.fas": "502 records, 0 virus/phage headers",
+      "mob.proteins.faa": "2050 records, 0 virus/phage headers",
+      "mpf.proteins.faa": "2066 records, 0 virus/phage headers",
+      "repetitive.dna.fas": "884 records, 0 virus/phage headers",
+      "total_records": 31888,
+      "viral_headers": 0
+    }
+  },
+  "limits": [
+    "header-level screening cannot prove absence of viral homologous fragments inside plasmid sequences; consistent with the standing constraint phrasing",
+    "archive identity verified via official MD5 + recorded SHA256; DB not yet built (BLAST/mash indexes), no scientific positive/negative run",
+    "mob_init deliberately not executed (it disables TLS verification and auto-initializes taxonomy)"
+  ],
+  "next_step": "build the DB in a controlled private directory with the fixed 3.1.9 wheel env (no mob_init), record per-file identities, then run the scientific positive/negative controls"
+}

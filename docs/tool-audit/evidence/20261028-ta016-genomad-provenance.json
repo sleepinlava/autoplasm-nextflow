@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to GENOMAD_ENDTOEND (detection producer); not accepted",
+  "change": "modules/nf-core/genomad/endtoend/main.nf: provenance tuple after the versions_genomad_db line; cp of BASH_SOURCE[0] in script and stub",
+  "verification": "real Nextflow 26.10 + podman genomad:1.12.0 with the locked subset DB on pUTI89: COMPLETED, provenance sha256 38b93e46… matches the actual task command file",
+  "failed_attempt": "v1: harness imported GENOMAD but the process is GENOMAD_ENDTOEND (GENOMAD is the call-site alias) — compile error, retained",
+  "patch": "docs/tool-audit/patches/TA-016-genomad-provenance.diff sha256 81bda150000a04ecb5b63bdfaaec5689aa8468bc236ab1f97855f7a8a7f66229",
+  "harness": "tests/nextflow/genomad_provenance.nf",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "subset DB interface run, not a detection-quality claim", "report end-to-end rerun pending"]
+}

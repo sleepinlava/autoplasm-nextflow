@@ -1,0 +1,41 @@
+diff --git c/modules/nf-core/nanoplot/main.nf w/modules/nf-core/nanoplot/main.nf
+index 2c9cf4e..f7c1532 100644
+--- c/modules/nf-core/nanoplot/main.nf
++++ w/modules/nf-core/nanoplot/main.nf
+@@ -15,6 +15,9 @@ process NANOPLOT {
+     tuple val(meta), path("*.png") , optional: true, emit: png
+     tuple val(meta), path("*.txt")                 , emit: txt
+     tuple val("${task.process}"), val('NanoPlot'), eval('NanoPlot --version | sed \'s/^.*NanoPlot //; s/ .*\$//\''), emit: versions_nanoplot, topic: versions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.NANOPLOT.task_command.sh"),
++          val('NanoPlot --version'), eval('NanoPlot --version'),
++          eval("sha256sum '${meta.id}.NANOPLOT.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -28,6 +31,7 @@ process NANOPLOT {
+         ("$ontfile".endsWith(".fastq") || "$ontfile".endsWith(".fq")) ? "--fastq ${ontfile}" :
+         ("$ontfile".endsWith(".txt")) ? "--summary ${ontfile}" : ''
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.NANOPLOT.task_command.sh'
+     NanoPlot \\
+         $args \\
+         -t $task.cpus \\
+@@ -36,6 +40,7 @@ process NANOPLOT {
+ 
+     stub:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.NANOPLOT.task_command.sh'
+     touch LengthvsQualityScatterPlot_dot.html
+     touch LengthvsQualityScatterPlot_kde.html
+     touch NanoPlot-report.html
+diff --git 1/tests/nextflow/nanoplot_provenance.nf 2/tests/nextflow/nanoplot_provenance.nf
+new file mode 100644
+index 0000000..de8b05e
+--- /dev/null
++++ 2/tests/nextflow/nanoplot_provenance.nf
+@@ -0,0 +1,5 @@
++include { NANOPLOT } from '../../modules/nf-core/nanoplot/main'
++workflow {
++    NANOPLOT(Channel.of(tuple([id: 'nanoplot-iface'], file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261028-flye-provenance/interface-control-20000reads.fastq.gz'))))
++    NANOPLOT.out.task_provenance.view { it -> "PROV ${it[0]} ${it[3]} sha=${it[5]}" }
++}

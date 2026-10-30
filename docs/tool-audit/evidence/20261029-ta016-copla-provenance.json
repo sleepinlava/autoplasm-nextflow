@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidate: COPLA task_provenance real verification; not accepted",
+  "verification": "real Nextflow 26.10 via nextflow-no-log, native copla-1.0 env + retained copla-install-1.0 RS84 databases + copla-macsyfinder-1.0.5, controlled two_plasmids.fna fixture: COPLA (two_plasmids) COMPLETED after ~80 min native run; real classification output (NZ_CP028167.1 -> PTU-X4, NZ_CP028329.1 -> PTU-Lab26, both score 1.0000); provenance file sha256 c18c4521c5124d2469c11a66cc485b997cd4b95bdb752e191faec70e1c8abbde",
+  "patch": "docs/tool-audit/patches/TA-016-copla-provenance.diff sha256 1f0af1499c97bb382e012cfc8133b20634b6a4732d0b627005217c4088203cf9",
+  "harness": "tests/nextflow/copla_native.nf (pre-existing)",
+  "notes": "session exit detached the background wrapper but the task itself completed (trace + .exitcode=0 verified directly)",
+  "limits": ["candidate not accepted; TA-016 remains in_progress"]
+}

@@ -1,0 +1,34 @@
+{
+  "existing_receipt_sha256": "b78768cd9ee116e0df546afb203f2e2902874d0d0e1542ff54f66e7829002810",
+  "receipt_pass": true,
+  "accepted_ids": [
+    "TA-092",
+    "TA-093",
+    "TA-094",
+    "TA-095"
+  ],
+  "audit_before": {
+    "TA-092": "mismatch",
+    "TA-093": "mismatch",
+    "TA-094": "mismatch",
+    "TA-095": "mismatch"
+  },
+  "audit_after": {
+    "TA-094": "fixed",
+    "TA-095": "fixed",
+    "TA-093": "fixed",
+    "TA-092": "fixed"
+  },
+  "accepted_sources_unchanged_vs_HEAD": [
+    "modules/nf-core/abricate/run/main.nf",
+    "bin/abricate_runtime_resources.pl",
+    "modules/nf-core/integronfinder/main.nf",
+    "bin/integronfinder_runtime_resources.py",
+    "modules/nf-core/plasmidfinder/main.nf",
+    "modules/nf-core/plasmidfinder/environment.yml",
+    "conf/nfcore_downstream.config",
+    "bin/plasmidfinder_runtime_resources.py"
+  ],
+  "generator_change": "Recognize existing source_state receipt schema in addition to source; append missing registry reference to existing acceptance",
+  "newly_accepted_findings": []
+}

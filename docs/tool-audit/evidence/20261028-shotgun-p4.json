@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-28",
+  "finding": "TT-003",
+  "scope": "first real shotgun multi-sample P4 execution (3 Sendai-Bay vs 3 Aline, ENA PRJDB5375) under real nf-test 0.9.5 + podman",
+  "result": "SUCCESS 1/1 (2706s); workflow succeededCount=100 failedCount=0; junit sha256 cc3638871d4c04a86223c36be7ba7ec386c961dc3acc5219fea3516f361443d3",
+  "data_outcome": {
+    "contig_abundance": "391,344 data rows across all 6 samples (non-empty)",
+    "diversity_metrics": "24 rows (6 samples x 4 metrics), group-labeled, independent alpha-formula assertions passed at 1e-6",
+    "plasmid_abundance": "header only — geNomad (small test subset DB, --disable-nn-classification per test config) called zero plasmid features in this marine cohort",
+    "deseq2_status": "all 6 rows model_fitted=FALSE reason=zero_features, failed_contrasts=0 — the legitimate no-fit branch executed with explicit per-sample reasons",
+    "network_status": "eligible=false reason=insufficient_features features_before=0 — the empty-table FastSpar skip executed with machine-readable reason; no correlation.tsv produced"
+  },
+  "interpretation": "the P4 gating machinery (DESeq2 zero-feature no-fit, FastSpar insufficient-features skip, diversity on real replicates) is now verified on real shotgun data with explicit reasons — the original defect class (silently permitting empty paths) is covered. However the cohort yielded zero plasmid features, so the strict 'nonempty plasmid statistics' reading of TT-003 is NOT met; a plasmid-rich cohort (e.g. gut/fecal) is required for the fitted-model and eligible-network branches on real data",
+  "cohort": {
+    "lock": "tests/nf-test/shotgun-multisample.lock.json (12 files, 1.63GB, MD5-verified)",
+    "substitution": "DRR083167 (mate 2 listed in ENA API but absent on FTP) replaced by DRR083259 per documented rule",
+    "constraint": "user approved marine cohort 2026-10-28; background phage content accepted"
+  },
+  "limits": [
+    "zero plasmid calls are with the small test-subset geNomad DB and disabled NN classification — a test-config sensitivity boundary, NOT evidence the marine samples contain no plasmids",
+    "MEGAHIT(DRR083252) ran ~25 min on 2 cpus — slow but progressing throughout (log-checked), distinct from the v3 flaky bowtie2 hang",
+    "no biological accuracy claim; 2-group natural-site design is ecological, not a controlled experiment"
+  ],
+  "next_step": "select a plasmid-rich shotgun cohort (gut/fecal microbiome with documented plasmid content, non-viral-fixture constraint as approved), run the same contract so the fitted-model and eligible-network branches also execute on real data"
+}

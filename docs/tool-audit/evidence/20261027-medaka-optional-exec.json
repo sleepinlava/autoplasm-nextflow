@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-27",
+  "formal_acceptance": false,
+  "findings": [
+    "TA-091"
+  ],
+  "scope": "full real CPU inference for optional branches -x and -B: native medaka_consensus baselines plus unmodified production probe+consumer via tests/nextflow/medaka_runtime_resources.nf",
+  "results": {
+    "x": "native -x consensus equals the default native-v1 consensus (headers+DNA); production -x probe+consumer COMPLETED, receipt force_indexes=true / source_indexes=null, output FASTA equals native baseline and gaps BED equal (empty)",
+    "b": "native -B contig_2:0-81815 still emits both contigs; contig_1 gap-filled from draft (gaps BED 'contig_1 0 4724790'), contig_2 stitched from restricted inference; production -B output FASTA and gaps BED byte-equal to the native baseline, receipt regions sha256 20fc8006f752dfefe2dbb86490194c02384480aeb50b0e8c56d7113728389263"
+  },
+  "native_behavior_finding": "medaka_consensus -B restricts medaka inference to BED regions but medaka sequence still outputs every contig, gap-filling non-region contigs from the draft; the gaps BED is the discriminating artifact. On this already-polished draft, sequences alone cannot distinguish polished from draft-filled contigs",
+  "failed_attempt_retained": "results/tool-audit/20261027-medaka-optional-exec/ (v1) failed on the reviewer's wrong assumption that -B restricts the output contig set; native evidence corrected the oracle, production code and helpers unchanged",
+  "originals_unchanged": true,
+  "evidence_sha256": {
+    "tests/run_medaka_optional_exec.py": "4beb5848c366cc3b617cf55c7dd8c4171fc1f4a55eb264cada45e2530f16bf37",
+    "results/tool-audit/20261027-medaka-optional-exec-v2/run.json": "441d49befe15e16d4d9753fc85e88e8942275202e5fa683f262be15a6f740a37"
+  },
+  "limits": [
+    "oracle weakness: the already-polished fixture draft makes polished and draft-filled sequences identical; -B discrimination rests on the gaps BED and receipt, not sequence divergence",
+    "RLE branch still not executed (no prepared RLE model; downloads prohibited)",
+    "single-contig single-interval BED only; no empty/multi-region edge cases, no retry or OCI/platform acceptance",
+    "TA-091 remains in_progress"
+  ]
+}

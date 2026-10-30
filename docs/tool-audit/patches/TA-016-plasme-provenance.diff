@@ -1,0 +1,35 @@
+diff --git c/modules/detection/plasme.nf w/modules/detection/plasme.nf
+index 34dc066..4414d7c 100644
+--- c/modules/detection/plasme.nf
++++ w/modules/detection/plasme.nf
+@@ -26,12 +26,16 @@ process PLASME {
+     tuple val(meta), path("${meta.id}.plasme.fasta"), emit: plasmid_fasta
+     tuple val(meta), path("${meta.id}.plasme_report.csv"), emit: report
+     tuple val(meta), path("${meta.id}.plasme_runtime.json"), emit: runtime
++    tuple val("${task.process}"), val(meta), path("${meta.id}.PLASME.task_command.sh"),
++          val('python3 plasme_runtime.py -h'), eval('python3 plasme_runtime.py -h'),
++          eval("sha256sum '${meta.id}.PLASME.task_command.sh'"), emit: task_provenance
+ 
+     script:
+     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+     def input_fasta = 'plasme_input.fasta'
+     def prepare = assembly.name.toLowerCase().endsWith('.gz') ? "gzip -cd -- ${shellQuote.call(assembly)} > ${input_fasta}" : "ln -s -- ${shellQuote.call(assembly)} ${input_fasta}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLASME.task_command.sh'
+     ${prepare}
+     python3 plasme_runtime.py run --source-dir ${plasme_source} \\
+         --assembly ${input_fasta} --database ${plasme_db} --output ${meta.id}.plasme \\
+diff --git 1/tests/nextflow/plasme_provenance.nf 2/tests/nextflow/plasme_provenance.nf
+new file mode 100644
+index 0000000..6148610
+--- /dev/null
++++ 2/tests/nextflow/plasme_provenance.nf
+@@ -0,0 +1,8 @@
++include { PLASME } from '../../modules/detection/plasme'
++workflow {
++    PLASME(Channel.of(tuple([id: 'plasme-iface'], file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261020-quast-real/pUTI89.fasta'))),
++           Channel.of(tuple(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/runtime/plasme-DB-8046934/DB'), 'retained-db')),
++           Channel.of(tuple(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/runtime/PLASMe-4405d5aa'), 'retained-source')),
++           Channel.of(tuple(file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/bin/normalize_plasme_outputs.py', checkIfExists: true), file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/bin/plasme_runtime.py', checkIfExists: true))))
++    PLASME.out.task_provenance.view { it -> "PROV ${it[0]} ${it[3]} sha=${it[5]}" }
++}

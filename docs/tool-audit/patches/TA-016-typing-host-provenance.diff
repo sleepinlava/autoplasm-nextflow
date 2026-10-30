@@ -1,0 +1,109 @@
+diff --git i/modules/host/plasmidhostfinder.nf w/modules/host/plasmidhostfinder.nf
+index de4b67c..2dacc1b 100644
+--- i/modules/host/plasmidhostfinder.nf
++++ w/modules/host/plasmidhostfinder.nf
+@@ -17,9 +17,14 @@ process PLASMIDHOSTFINDER {
+ 
+     output:
+     tuple val(meta), path("${meta.id}.plasmidhostfinder.tsv"), emit: predictions
++    tuple val("${task.process}"), val(meta), path("${meta.id}.PLASMIDHOSTFINDER.task_command.sh"),
++          val('plasmidhostfinder --version'), eval('plasmidhostfinder --version'),
++          eval("sha256sum '${meta.id}.PLASMIDHOSTFINDER.task_command.sh'"), emit: task_provenance
++
+ 
+     script:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${meta.id}.PLASMIDHOSTFINDER.task_command.sh'
+     plasmidhostfinder.py -i ${plasmid_contigs} -o . -l genus -t 0.3 -p ${phf_db}
+     find . -maxdepth 2 -name '*.tsv' ! -name '${meta.id}.plasmidhostfinder.tsv' \\
+         | head -1 | xargs -I{} cp {} ${meta.id}.plasmidhostfinder.tsv
+diff --git i/modules/nf-core/amrfinderplus/run/main.nf w/modules/nf-core/amrfinderplus/run/main.nf
+index 6a81c7f..b7b5d42 100644
+--- i/modules/nf-core/amrfinderplus/run/main.nf
++++ w/modules/nf-core/amrfinderplus/run/main.nf
+@@ -19,6 +19,9 @@ process AMRFINDERPLUS_RUN {
+     env 'DBVER'                                     , emit: db_version
+     tuple val("${task.process}"), val("amrfinderplus"), eval("amrfinder --version"), emit: versions_amrfinderplus, topic: versions
+     tuple val("${task.process}"), val("amrfinderplus_database"), eval("amrfinder --database amrfinderdb --database_version 2>&1 | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\\.[0-9]+' | tail -1"), emit: versions_amrfinderplus_database, topic: versions
++    tuple val("${task.process}"), val(meta), path("${prefix}.AMRFINDERPLUS_RUN.task_command.sh"),
++          val('amrfinder --version'), eval('amrfinder --version'),
++          eval("sha256sum '${prefix}.AMRFINDERPLUS_RUN.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -38,6 +41,7 @@ process AMRFINDERPLUS_RUN {
+         }
+     }
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.AMRFINDERPLUS_RUN.task_command.sh'
+     if [ "${is_compressed_fasta}" == "true" ]; then
+         gzip -c -d ${fasta} > ${fasta_name}
+     fi
+@@ -65,6 +69,7 @@ process AMRFINDERPLUS_RUN {
+     prefix = task.ext.prefix ?: "${meta.id}"
+     // WARN: DB version information will not be provided for the database in the stub run, since it is not actually downloaded through the update module
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.AMRFINDERPLUS_RUN.task_command.sh'
+     echo ${args}
+ 
+     touch ${prefix}.tsv
+diff --git i/modules/nf-core/bakta/bakta/main.nf w/modules/nf-core/bakta/bakta/main.nf
+index a1d74a7..8ad451f 100644
+--- i/modules/nf-core/bakta/bakta/main.nf
++++ w/modules/nf-core/bakta/bakta/main.nf
+@@ -29,6 +29,9 @@ process BAKTA_BAKTA {
+     tuple val(meta), path("${prefix}.txt"), emit: txt
+     tuple val(meta), path("${prefix}.json"), emit: json
+     tuple val("${task.process}"), val('bakta'), eval("bakta --version 2>&1 | sed 's/.*bakta //'"), emit: versions_bakta, topic: versions
++    tuple val("${task.process}"), val(meta), path("${prefix}.BAKTA_BAKTA.task_command.sh"),
++          val('bakta --version'), eval('bakta --version'),
++          eval("sha256sum '${prefix}.BAKTA_BAKTA.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -42,6 +45,7 @@ process BAKTA_BAKTA {
+     def hmms_opt = hmms ? "--hmms ${hmms}" : ""
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.BAKTA_BAKTA.task_command.sh'
+     ## Fake home due to fontconfig 'no writeable cache directory' issue
+     mkdir nxf_home
+     export HOME=\$PWD/nxf_home
+@@ -61,6 +65,7 @@ process BAKTA_BAKTA {
+     stub:
+     prefix = task.ext.prefix ?: "${meta.id}"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.BAKTA_BAKTA.task_command.sh'
+     export MPLCONFIGDIR=\$PWD/.matplotlib
+     export FONTCONFIG_PATH=\$PWD/.fontconfig
+     export XDG_CACHE_HOME=\$PWD/.cache
+diff --git i/modules/nf-core/macsyfinder/download/main.nf w/modules/nf-core/macsyfinder/download/main.nf
+index b9ce1b6..7adec04 100644
+--- i/modules/nf-core/macsyfinder/download/main.nf
++++ w/modules/nf-core/macsyfinder/download/main.nf
+@@ -14,6 +14,9 @@ process MACSYFINDER_DOWNLOAD {
+     path "models", emit: models
+     tuple val("${task.process}"), val('macsyfinder'), eval('macsyfinder --version 2>&1 | sed "1!d;s/^.*MacSyFinder //;s/ .*$//"'), topic: versions, emit: versions_macsyfinder
+     tuple val("${task.process}"), val('msf_data'), eval('msf_data --version 2>&1 | sed "4!d;s/^- MacSyLib //;s/ *$//"'), topic: versions, emit: versions_macsydata
++    tuple val("${task.process}"), val(['id': 'macsyfinder_download'] as Map), path("${task.process}.MACSYFINDER_DOWNLOAD.task_command.sh"),
++          val('macsyfinder --version'), eval('macsyfinder --version'),
++          eval("sha256sum '${task.process}.MACSYFINDER_DOWNLOAD.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -21,6 +24,7 @@ process MACSYFINDER_DOWNLOAD {
+     script:
+     def args = task.ext.args ?: ''
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${task.process}.MACSYFINDER_DOWNLOAD.task_command.sh'
+     # msf_data installs models into the current directory by default
+     # We'll create a models directory to store them
+     mkdir -p models
+@@ -33,6 +37,7 @@ process MACSYFINDER_DOWNLOAD {
+ 
+     stub:
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${task.process}.MACSYFINDER_DOWNLOAD.task_command.sh'
+     mkdir -p models/${model_name}
+     touch models/${model_name}/definitions.txt
+     """

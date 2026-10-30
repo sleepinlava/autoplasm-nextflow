@@ -1,0 +1,25 @@
+{
+ "date": "2026-10-27",
+ "finding": "TA-091",
+ "scope": "candidate fix: MOBSUITE_RECON explicit DB input closing the implicit-database cache gap; not yet accepted",
+ "change": {
+  "modules/nf-core/mobsuite/recon/main.nf": "new input 'tuple path(db), val(db_identity)' (deep-cached, in the cache key); script appends --database_directory only when db non-empty, preserving the native default-dir branch when absent",
+  "subworkflows/plasmid_downstream.nf": "both MOB_RECON and MOB_SUITE_ANNOT callers pass Channel.value(resourceInput(params.mob_suite_db)) — the same wiring MOB_TYPER already used; absent param yields the explicit [schema_version:2, resource_state:'absent'] identity",
+  "modules/nf-core/mobsuite/recon/tests/main.nf.test": "input list updated (db tuple at input[1], helper at input[2])",
+  "tests/nextflow/mobsuite_prepared.nf": "RECON now receives the controlled DB via the explicit input instead of ext.args"
+ },
+ "verification": {
+  "prepared_integration_v5": "real Nextflow 26.10: MOBSUITE_TYPER + MOBSUITE_RECON COMPLETED; RECON .command.sh carries --database_directory 'db' (staged explicit input); plasmid_AA337.fasta byte-identical to direct CLI and v4; TYPER output unchanged",
+  "stub_framework": "nf-test 0.9.5 mobsuite-guard-stub 2/2 SUCCESS with the updated interface",
+  "patch": "docs/tool-audit/patches/TA-091-mobsuite-recon-db-input.diff sha256 0bc678a366b0d11d98eafd702a121cb9e367f9a13168525e4c796d97f8591c30",
+  "native_prepared_framework": "nf-test 0.9.5 mobsuite-native-prepared 2/2 SUCCESS (first actual run of these cases): recon on single-contig 5,150,703 bp B. fragilis chromosome (sha256 0d6784aa...) gives chromosome==input DNA, no plasmids, version 3.1.9; typer report assertions pass. Fixture is the complete published chromosome extracted from the retained genome.fna, not a downsample",
+  "test_interface_fix": "then-block fixture reads switched to MOBSUITE_BACTERIAL_FASTA env var: nf-test 0.9.5 does not expose nextflow params in then context (null -> FileNotFoundException against the stray repo null/ dir); when-block param resolution via configFile unchanged and proven",
+  "framework_attempts": "framework-v2 first run: params null in then (FileNotFoundException null-is-directory); params{} block unsupported by nf-test 0.9.5 config (MissingMethodException); both retained; final run passes"
+ },
+ "framework_attempts_retained": "framework-v1 first run: nextflow binary not on PATH; second: wrapper -log conflict; third: stub eval of 'mob_typer --version' needs env bin on PATH — harness issues, not module defects; all retained under results/tool-audit/20261027-mobsuite-framework-v1",
+ "limits": [
+  "candidate not accepted; TA-091 remains in_progress",
+  "optional filter_db remains deferred; no OCI/platform acceptance"
+ ],
+ "patch": "docs/tool-audit/patches/TA-091-mobsuite-recon-db-input.diff sha256 72c47151c6c58f0f9b7ef464e55b122fb79db39d20847c0c1342c6096a63cc40 (5 files incl. typer test)"
+}

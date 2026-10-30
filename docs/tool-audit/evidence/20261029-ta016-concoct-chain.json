@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidates: CONCOCT MAG chain real verification (SAMTOOLS_INDEX, CONCOCT_CUTUPFASTA, CONCOCT_CONCOCTCOVERAGETABLE, CONCOCT_CONCOCT, CONCOCT_MERGECUTUPCLUSTERING); not accepted",
+  "verification": "real Nextflow 26.10 via nextflow-no-log, native concoct-1.1.0 env (bundles samtools), retained fixtures (official composition.fna[.gz] + controlled.bam) through tests/nextflow/concoct_mag.nf MAG_HOST(mag_tools=[concoct]): 12 tasks all COMPLETED across samples S1 and S.2; provenance command-file sha256: S1 d81a8969(SAMTOOLS_INDEX) 9d412811(CUTUPFASTA) 64ccc658(COVERAGETABLE) b660a9aa(CONCOCT) 3134e3cc(MERGECUTUP); S.2 7735b3f8 0ab6f0ba 4b27c85e 74bbb4e1 b0f69f2e respectively",
+  "also_fixed": "CONCOCT_EXTRACTFASTABINS (reportEvidence label CONCOCT) was missed in the earlier batch; wired now, compile-checked (29-process harness exit 0)",
+  "patch": "docs/tool-audit/patches/TA-016-mag-linking-provenance.diff sha256 abdeaf418784d21f8e0675d386678c93901771d8cf23892cdc3dff3de8e6a890",
+  "limits": ["candidates not accepted; TA-016 remains in_progress", "CONCOCT_EXTRACTFASTABINS real run pending (chain will rerun or standalone)", "DAS_TOOL route not exercised in this run (mag_tools=concoct only)"]
+}

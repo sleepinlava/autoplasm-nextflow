@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: extend task_provenance to HIFIASM_META (HiFi assembler, conda-only module); not accepted",
+  "change": "modules/assembly/hifiasm_meta.nf: provenance tuple keyed on meta.id (no prefix var); cp of BASH_SOURCE[0] in script",
+  "environment": "fresh micromamba env from envs/assembly_hifi.yml (results/tool-audit/runtime/hifiasm-meta); hifiasm_meta --version reports ha 0.13-r308 / hamt 0.3-r079",
+  "verification": "real Nextflow 26.10 native (conda directive disabled, env on PATH) on the 20k-read ONT interface control — technical control only: hifiasm_meta is a HiFi assembler and the ONT input is NOT a valid scientific input for it; the run exercises the interface/provenance path, not assembly quality. COMPLETED, sha256 04857bc4… matches the task command file; graph/FASTA products emitted",
+  "patch": "docs/tool-audit/patches/TA-016-hifiasm-meta-provenance.diff sha256 842f553110e38320275e6ea791ce392921404cc90166b09b2f9a5449245809c7",
+  "harness": "tests/nextflow/hifiasm_meta_provenance.nf",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "no HiFi test data locally; ONT-based interface control only", "report end-to-end rerun pending"]
+}

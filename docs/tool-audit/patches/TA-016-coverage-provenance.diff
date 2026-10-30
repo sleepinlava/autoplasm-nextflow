@@ -1,0 +1,307 @@
+diff --git c/modules/nf-core/bowtie2/align/main.nf w/modules/nf-core/bowtie2/align/main.nf
+index 9be0dfe..3b79956 100644
+--- c/modules/nf-core/bowtie2/align/main.nf
++++ w/modules/nf-core/bowtie2/align/main.nf
+@@ -25,6 +25,9 @@ process BOWTIE2_ALIGN {
+     tuple val("${task.process}"), val('bowtie2'), eval("bowtie2 --version 2>&1 | sed -n 's/.*bowtie2-align-s version //p'"), emit: versions_bowtie2, topic: versions
+     tuple val("${task.process}"), val('samtools'), eval("samtools version | sed '1!d;s/.* //'"), emit: versions_samtools, topic: versions
+     tuple val("${task.process}"), val('pigz'), eval("pigz --version 2>&1 | sed 's/pigz //'"), emit: versions_pigz, topic: versions
++    tuple val("${task.process}"), val(meta), path("${prefix}.BOWTIE2_ALIGN.task_command.sh"),
++          val('bowtie2 --version'), eval('bowtie2 --version'),
++          eval("sha256sum '${prefix}.BOWTIE2_ALIGN.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -32,7 +35,7 @@ process BOWTIE2_ALIGN {
+     script:
+     def args = task.ext.args ?: ""
+     def args2 = task.ext.args2 ?: ""
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     def rg = args.contains("--rg-id") ? "" : "--rg-id ${prefix} --rg SM:${prefix}"
+ 
+     def unaligned = ""
+@@ -53,6 +56,7 @@ process BOWTIE2_ALIGN {
+     if (!fasta && extension=="cram") error "Fasta reference is required for CRAM output"
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.BOWTIE2_ALIGN.task_command.sh'
+     INDEX=`find -L ./ -name "*.rev.1.bt2" | sed "s/\\.rev.1.bt2\$//"`
+     [ -z "\$INDEX" ] && INDEX=`find -L ./ -name "*.rev.1.bt2l" | sed "s/\\.rev.1.bt2l\$//"`
+     [ -z "\$INDEX" ] && echo "Bowtie2 index files not found" 1>&2 && exit 1
+@@ -78,7 +82,7 @@ process BOWTIE2_ALIGN {
+ 
+     stub:
+     def args2 = task.ext.args2 ?: ""
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     def extension_pattern = /(--output-fmt|-O)+\s+(\S+)/
+     def extension = (args2 ==~ extension_pattern) ? (args2 =~ extension_pattern)[0][2].toLowerCase() : "bam"
+     def create_unmapped = ""
+@@ -97,6 +101,7 @@ process BOWTIE2_ALIGN {
+     }
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.BOWTIE2_ALIGN.task_command.sh'
+     touch ${prefix}.${extension}
+     ${create_index}
+     touch ${prefix}.bowtie2.log
+diff --git c/modules/nf-core/coverm/contig/main.nf w/modules/nf-core/coverm/contig/main.nf
+index 7503e6a..dd03070 100644
+--- c/modules/nf-core/coverm/contig/main.nf
++++ w/modules/nf-core/coverm/contig/main.nf
+@@ -22,13 +22,16 @@ process COVERM_CONTIG {
+     tuple val(meta), path('*.tsv')   , emit: coverage
+     tuple val(meta), path('*.bam')   , emit: bam, optional: true
+     tuple val("${task.process}"), val('coverm'), eval('coverm --version | sed "s/coverm //"'), emit: versions_coverm, topic: versions
++    tuple val("${task.process}"), val(meta), path("${prefix}.COVERM_CONTIG.task_command.sh"),
++          val('coverm --version'), eval('coverm --version'),
++          eval("sha256sum '${prefix}.COVERM_CONTIG.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+ 
+     script:
+     def args           = task.ext.args ?: ""
+-    def prefix         = task.ext.prefix ?: "${meta.id}"
++    prefix         = task.ext.prefix ?: "${meta.id}"
+     def suffix         = task.ext.suffix ?: ".depth.tsv"
+     def fastq_input    = meta.single_end ? "--single" : interleaved ? "--interleaved" : "--coupled"
+     def input_type     = bam_input ? "--bam-files" : "${fastq_input}"
+@@ -36,6 +39,7 @@ process COVERM_CONTIG {
+     def reference_str  = bam_input ? "" : "--reference ${reference}"
+     def bam_output_str = enable_bam_output ? "--bam-file-cache-directory _bam_cache/" : ""
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.COVERM_CONTIG.task_command.sh'
+     TMPDIR=.
+ 
+     coverm contig \\
+@@ -50,9 +54,10 @@ process COVERM_CONTIG {
+     """
+ 
+     stub:
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     def suffix = task.ext.suffix ?: ".depth.tsv"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.COVERM_CONTIG.task_command.sh'
+     touch ${prefix}${suffix}
+     touch ${prefix}.bam
+     """
+diff --git c/modules/nf-core/minimap2/align/main.nf w/modules/nf-core/minimap2/align/main.nf
+index 1f15fe2..a32a34f 100644
+--- c/modules/nf-core/minimap2/align/main.nf
++++ w/modules/nf-core/minimap2/align/main.nf
+@@ -21,6 +21,9 @@ process MINIMAP2_ALIGN {
+     tuple val(meta), path("*.bam")                       , optional: true, emit: bam
+     tuple val(meta), path("*.bam.${bam_index_extension}"), optional: true, emit: index
+     tuple val("${task.process}"), val("minimap2"), eval("minimap2 --version"), topic: versions, emit: versions_minimap2
++    tuple val("${task.process}"), val(meta), path("${prefix}.MINIMAP2_ALIGN.task_command.sh"),
++          val('minimap2 --version'), eval('minimap2 --version'),
++          eval("sha256sum '${prefix}.MINIMAP2_ALIGN.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -30,7 +33,7 @@ process MINIMAP2_ALIGN {
+     def args2 = task.ext.args2 ?: ''
+     def args3 = task.ext.args3 ?: ''
+     def args4 = task.ext.args4 ?: ''
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     def bam_index = bam_index_extension ? "${prefix}.bam##idx##${prefix}.bam.${bam_index_extension} --write-index" : "${prefix}.bam"
+     def bam_output = bam_format ? "-a | samtools sort -@ ${task.cpus-1} -o ${bam_index} ${args2}" : "-o ${prefix}.paf"
+     def cigar_paf = cigar_paf_format && !bam_format ? "-c" : ''
+@@ -40,6 +43,7 @@ process MINIMAP2_ALIGN {
+     def query = bam_input ? "-" : reads
+     def target = reference ?: (bam_input ? error("Error: minimap2/align BAM input mode requires reference") : reads)
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MINIMAP2_ALIGN.task_command.sh'
+     # Local audit patch: do not accept a valid downstream BAM if an upstream
+     # mapper/reset/FASTQ command failed after writing some output.
+     set -o pipefail
+@@ -55,7 +59,7 @@ process MINIMAP2_ALIGN {
+     """
+ 
+     stub:
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     def output_file = bam_format ? "${prefix}.bam" : "${prefix}.paf"
+     def bam_index = bam_index_extension ? "touch ${prefix}.bam.${bam_index_extension}" : ""
+     def bam_input = "${reads.extension}".matches('sam|bam|cram')
+@@ -63,6 +67,7 @@ process MINIMAP2_ALIGN {
+         error("Error: minimap2/align BAM input mode requires reference!")
+ 	}
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.MINIMAP2_ALIGN.task_command.sh'
+     touch $output_file
+     ${bam_index}
+     """
+diff --git c/modules/nf-core/samtools/fastq/main.nf w/modules/nf-core/samtools/fastq/main.nf
+index 7b0a2c4..64b5a2b 100644
+--- c/modules/nf-core/samtools/fastq/main.nf
++++ w/modules/nf-core/samtools/fastq/main.nf
+@@ -17,19 +17,23 @@ process SAMTOOLS_FASTQ {
+     tuple val(meta), path("*_singleton.fastq.gz"), optional: true, emit: singleton
+     tuple val(meta), path("*_other.fastq.gz"), optional: true, emit: other
+     tuple val("${task.process}"), val('samtools'), eval("samtools version | sed '1!d;s/.* //'"), emit: versions_samtools, topic: versions
++    tuple val("${task.process}"), val(meta), path("${prefix}.SAMTOOLS_FASTQ.task_command.sh"),
++          val('samtools --version'), eval('samtools --version'),
++          eval("sha256sum '${prefix}.SAMTOOLS_FASTQ.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+ 
+     script:
+     def args = task.ext.args ?: ''
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     def output = interleave && !meta.single_end
+         ? "> ${prefix}_interleaved.fastq"
+         : meta.single_end
+             ? "-1 ${prefix}_1.fastq.gz -s ${prefix}_singleton.fastq.gz"
+             : "-1 ${prefix}_1.fastq.gz -2 ${prefix}_2.fastq.gz -s ${prefix}_singleton.fastq.gz"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_FASTQ.task_command.sh'
+     # Note: --threads value represents *additional* CPUs to allocate (total CPUs = 1 + --threads).
+     samtools \\
+         fastq \\
+@@ -41,7 +45,7 @@ process SAMTOOLS_FASTQ {
+     """
+ 
+     stub:
+-    def prefix = task.ext.prefix ?: "${meta.id}"
++    prefix = task.ext.prefix ?: "${meta.id}"
+     def output_command = interleave && !meta.single_end
+         ? "touch ${prefix}_interleaved.fastq"
+         : meta.single_end
+@@ -49,6 +53,7 @@ process SAMTOOLS_FASTQ {
+             : "echo | bgzip -c > ${prefix}_1.fastq.gz && echo | bgzip -c > ${prefix}_2.fastq.gz && echo | bgzip -c > ${prefix}_singleton.fastq.gz"
+     def other_command = "echo | bgzip -c > ${prefix}_other.fastq.gz"
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_FASTQ.task_command.sh'
+     ${output_command}
+     ${other_command}
+     """
+diff --git c/modules/nf-core/samtools/merge/main.nf w/modules/nf-core/samtools/merge/main.nf
+index e73c11b..ecf622e 100644
+--- c/modules/nf-core/samtools/merge/main.nf
++++ w/modules/nf-core/samtools/merge/main.nf
+@@ -17,6 +17,9 @@ process SAMTOOLS_MERGE {
+     tuple val(meta), path("${prefix}.cram"), optional: true, emit: cram
+     tuple val(meta), path("${prefix}.${file_type}.{bai,crai,csi}"), optional: true, emit: index
+     tuple val("${task.process}"), val('samtools'), eval("samtools version | sed '1!d;s/.* //'"), topic: versions, emit: versions_samtools
++    tuple val("${task.process}"), val(meta), path("${prefix}.SAMTOOLS_MERGE.task_command.sh"),
++          val('samtools --version'), eval('samtools --version'),
++          eval("sha256sum '${prefix}.SAMTOOLS_MERGE.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -39,6 +42,7 @@ process SAMTOOLS_MERGE {
+         output_file = "${prefix}.${file_type}##idx##${prefix}.${file_type}.${index_format}"
+     }
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_MERGE.task_command.sh'
+     # Note: --threads value represents *additional* CPUs to allocate (total CPUs = 1 + --threads).
+     samtools \\
+         merge \\
+@@ -63,6 +67,7 @@ process SAMTOOLS_MERGE {
+     def index = index_format ? "touch ${prefix}.${file_type}.${index_format}" : ""
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_MERGE.task_command.sh'
+     touch ${prefix}.${file_type}
+     ${index}
+     """
+diff --git c/modules/nf-core/samtools/sort/main.nf w/modules/nf-core/samtools/sort/main.nf
+index 01f4f8c..29ee51e 100644
+--- c/modules/nf-core/samtools/sort/main.nf
++++ w/modules/nf-core/samtools/sort/main.nf
+@@ -18,6 +18,9 @@ process SAMTOOLS_SORT {
+     tuple val(meta), path("${prefix}.sam"), emit: sam, optional: true
+     tuple val(meta), path("${prefix}.${extension}.{crai,csi,bai}"), emit: index, optional: true
+     tuple val("${task.process}"), val('samtools'), eval("samtools version | sed '1!d;s/.* //'"), topic: versions, emit: versions_samtools
++    tuple val("${task.process}"), val(meta), path("${prefix}.SAMTOOLS_SORT.task_command.sh"),
++          val('samtools --version'), eval('samtools --version'),
++          eval("sha256sum '${prefix}.SAMTOOLS_SORT.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -60,6 +63,7 @@ process SAMTOOLS_SORT {
+     def pre_command = is_sam ? "" : "samtools cat ${bam} | "
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_SORT.task_command.sh'
+     ${pre_command}samtools sort \\
+         ${args} \\
+         -T ${prefix} \\
+@@ -91,6 +95,7 @@ process SAMTOOLS_SORT {
+     index = index_format ? "touch ${prefix}.${extension}.${index_format}" : ""
+ 
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_SORT.task_command.sh'
+     touch ${prefix}.${extension}
+     ${index}
+     """
+diff --git c/modules/nf-core/samtools/view/main.nf w/modules/nf-core/samtools/view/main.nf
+index 459d4f2..77303da 100644
+--- c/modules/nf-core/samtools/view/main.nf
++++ w/modules/nf-core/samtools/view/main.nf
+@@ -24,6 +24,9 @@ process SAMTOOLS_VIEW {
+     tuple val(meta), path("${prefix}.unselected.${file_type}"), emit: unselected, optional: true
+     tuple val(meta), path("${prefix}.unselected.${file_type}.{csi,crai}"), emit: unselected_index, optional: true
+     tuple val("${task.process}"), val('samtools'), eval('samtools version | sed "1!d;s/.* //"'), emit: versions_samtools, topic: versions
++    tuple val("${task.process}"), val(meta), path("${prefix}.SAMTOOLS_VIEW.task_command.sh"),
++          val('samtools --version'), eval('samtools --version'),
++          eval("sha256sum '${prefix}.SAMTOOLS_VIEW.task_command.sh'"), emit: task_provenance
+ 
+     when:
+     task.ext.when == null || task.ext.when
+@@ -58,6 +61,7 @@ process SAMTOOLS_VIEW {
+         }
+     }
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_VIEW.task_command.sh'
+     # Note: --threads value represents *additional* CPUs to allocate (total CPUs = 1 + --threads).
+     samtools \\
+         view \\
+@@ -101,6 +105,7 @@ process SAMTOOLS_VIEW {
+         }
+     }
+     """
++    cp -- "\${BASH_SOURCE[0]}" '${prefix}.SAMTOOLS_VIEW.task_command.sh'
+     touch ${prefix}.${file_type}
+     ${index}
+     ${unselected}
+diff --git 1/tests/nextflow/coverage_provenance.nf 2/tests/nextflow/coverage_provenance.nf
+new file mode 100644
+index 0000000..2a19a8b
+--- /dev/null
++++ 2/tests/nextflow/coverage_provenance.nf
+@@ -0,0 +1,13 @@
++include { BOWTIE2_ALIGN } from '../../modules/nf-core/bowtie2/align/main'
++include { COVERM_CONTIG } from '../../modules/nf-core/coverm/contig/main'
++workflow {
++    idx_dir = file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261029-coverage-provenance/index')
++    reads = Channel.of(tuple([id: 'cov-iface', single_end: false],
++        [file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261027-ena-multi/ena/SRR19638267_1.fastq.gz'),
++         file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261027-ena-multi/ena/SRR19638267_2.fastq.gz')]))
++    BOWTIE2_ALIGN(reads, Channel.of(tuple([:], idx_dir)),
++                  Channel.of(tuple([:], file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261020-quast-real/pUTI89.fasta'))), false, true)
++    BOWTIE2_ALIGN.out.task_provenance.view { it -> "PROV ${it[0]} sha=${it[5]}" }
++    COVERM_CONTIG(BOWTIE2_ALIGN.out.bam, Channel.of(tuple([:], file('/home/sleepinlava/Projects/vibe_coding/trash_vibe_project/autoplasm-nextflow/results/tool-audit/20261020-quast-real/pUTI89.fasta'))), true, false, false)
++    COVERM_CONTIG.out.task_provenance.view { it -> "PROV ${it[0]} sha=${it[5]}" }
++}
+diff --git 1/tests/nextflow/coverage_compile_check.nf 2/tests/nextflow/coverage_compile_check.nf
+new file mode 100644
+index 0000000..273b39e
+--- /dev/null
++++ 2/tests/nextflow/coverage_compile_check.nf
+@@ -0,0 +1,8 @@
++include { BOWTIE2_ALIGN } from '../../modules/nf-core/bowtie2/align/main'
++include { COVERM_CONTIG } from '../../modules/nf-core/coverm/contig/main'
++include { SAMTOOLS_FASTQ } from '../../modules/nf-core/samtools/fastq/main'
++include { SAMTOOLS_MERGE } from '../../modules/nf-core/samtools/merge/main'
++include { SAMTOOLS_SORT } from '../../modules/nf-core/samtools/sort/main'
++include { SAMTOOLS_VIEW } from '../../modules/nf-core/samtools/view/main'
++include { MINIMAP2_ALIGN } from '../../modules/nf-core/minimap2/align/main'
++workflow { println 'compiled' }

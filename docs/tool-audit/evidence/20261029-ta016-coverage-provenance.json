@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidates: extend task_provenance to the coverage/alignment group: BOWTIE2_ALIGN, COVERM_CONTIG, SAMTOOLS_FASTQ, SAMTOOLS_MERGE, SAMTOOLS_SORT, SAMTOOLS_VIEW, MINIMAP2_ALIGN; not accepted",
+  "changes": "provenance tuple inserted before each module's when block; 'def prefix' normalized to shared 'prefix ='; cp of BASH_SOURCE[0] at the top of script and stub blocks",
+  "verification": {
+    "compile": "all 7 modules parse together (tests/nextflow/coverage_compile_check.nf)",
+    "real_run": "BOWTIE2_ALIGN + COVERM_CONTIG chain on locked SRR19638267 PE reads vs pUTI89 (bowtie2 index built in the local image): both COMPLETED; provenance sha256 d11a4b8a… / 78e2da25… match the actual task command files"
+  },
+  "failed_attempt": "first batch patcher inserted cp lines after closing triple-quotes too (parse error); reverted via git checkout and repatched only after script:/stub: blocks; retained in the run record",
+  "patch": "docs/tool-audit/patches/TA-016-coverage-provenance.diff sha256 c7650248be0c7d4f093199034f244da930c1728d12a248d5dac44714f538b2dc",
+  "limits": ["candidates not accepted; TA-016 remains in_progress", "SAMTOOLS_*/MINIMAP2_ALIGN compile-checked only, not individually executed", "report end-to-end rerun pending"]
+}

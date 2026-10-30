@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidates: extend task_provenance to ISESCAN and RGI_MAIN; not accepted",
+  "changes": "both modules: provenance tuple after versions lines, cp of BASH_SOURCE[0] in script and stub. RGI_MAIN additionally: batch-inserted cp had landed inside the load_wildcard Groovy assignment string (would have folded cp args into `rgi load` whenever wildcard DB present); moved to top of the script block before export MPLCONFIGDIR",
+  "verification": "real Nextflow 26.10 via nextflow-no-log. ISESCAN: native isescan-1.7.3-modern env on locked fixture NC_012624.fna, ISESCAN_RESOURCE_PROBE+ISESCAN COMPLETED, real IS5 hit in .tsv, provenance file sha256 50e835f29ba3ae487cb6ceedfe42718179e3ebc3e89375a34defb06ab24ccfd3. RGI_MAIN: native rgi-6.0.8 env, retained CARD 3.2.8 fixture (card.json + annotation fastas), RGI COMPLETED with `rgi load --local` against real DB, DB_VERSION_CAPTURE=3.2.8, pUTI89 zero AMR hits (header-only tsv, scientific empty result), provenance file sha256 8d57cabd7d113313528a162d13203ed0427e2da34ee793b19e80779c22a2a053",
+  "patch": "docs/tool-audit/patches/TA-016-isescan-rgi-provenance.diff sha256 b572fc57da8b96e3c550d5dc45c78c61dd93258e22c98ba07ddc09d7394a993e",
+  "harness": "tests/nextflow/isescan_runtime_native.nf and tests/nextflow/rgi_database_scope.nf (both pre-existing, no new test files)",
+  "limits": ["candidates not accepted; TA-016 remains in_progress", "report end-to-end rerun pending", "COPLA, MACSYFINDER x2, BAKTA, AMRFINDERPLUS, PLASMIDHOSTFINDER compile-checked only"]
+}

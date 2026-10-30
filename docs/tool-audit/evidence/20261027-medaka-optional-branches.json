@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-27",
+  "formal_acceptance": false,
+  "findings": [
+    "TA-091"
+  ],
+  "scope": "probe-level optional CLI branch verification (-x force, -B regions, RLE detection); no polishing inference executed in this round",
+  "scenarios": {
+    "force-corrupt-adjacent": "rc 0 with deliberately corrupt adjacent FAI/MMI present; receipt force_indexes=true, source_indexes=null — helper does not bind indexes native never reads (-x adds -f to mini_align, pinned medaka_consensus lines 170-172)",
+    "default-corrupt-adjacent": "same fixture without -x refused rc 1: 'Adjacent Medaka index differs from native reference rebuild: .fai'; no receipt written",
+    "regions": "-B regions.bed (contig_2:0-81815) captured: receipt regions sha256 20fc8006f752dfefe2dbb86490194c02384480aeb50b0e8c56d7113728389263, native_args echo the flag; native passes --regions only to medaka inference (pinned lines 186-204)",
+    "no-regions": "control receipt regions=null, force_indexes=false, same selected model",
+    "rle-detection-equivalence": "native 'medaka tools is_rle_model' CLI == helper is_rle_encoder == receipt rle == false on the selected sup_v5.2.0 model"
+  },
+  "rle_gap": "package ships exactly 4 non-RLE models; no prepared RLE model and downloads prohibited, so the RLE fastrle transformed-draft branch (pinned lines 148-165) is grounded in source pinning and detection equivalence only, not executed",
+  "caller_boundary": "conf/nfcore_qc_assembly.config withName '^MEDAKA(_RESOURCE_PROBE)?$' gives probe and consumer identical ext.prefix/args; runtime identity including args is compared before cache lookup, and staged-input identity resolves symlinks to the same original files so probe receipt and consumer verify agree",
+  "originals_unchanged": true,
+  "helper_sha256": {
+    "bin/medaka_runtime_resources.py": "13781c3020b72b75911377d625f3c5850814b3e000d11c055cf4f650ca1e4498",
+    "bin/medaka_index_resources.py": "76936a2864471c0f4da91c43228be7d5ed3c75f196c6134905991f67cd0f1e56",
+    "bin/medaka_model_resources.py": "ae20ddb4e2b025e759a89eee158a5733ca047eb975608d5f14dee9b8a3406d1e",
+    "bin/medaka_model_selection.py": "7dc0f4d6c265dd5a93d171d6eeeaf0fc82b77d9f274f5a8994e6a3a591fdd27a"
+  },
+  "evidence_sha256": {
+    "tests/run_medaka_optional_branches.py": "646148752d7756a2ae09e019e48e41cc17985d8aca2c5a1d63d78dc09a84625d",
+    "results/tool-audit/20261027-medaka-optional-branches/run.json": "d3924227b4dcc021ba6756006d624da2ac4bb3293263307bc0ce1ddb5fcdce05"
+  },
+  "limits": [
+    "probe-level only; no -x/-B full inference execution this round",
+    "RLE branch not executed (no prepared RLE model; downloads prohibited)",
+    "regions used a single-contig BED on the private fixture copy; no multi-region/empty-region edge cases",
+    "no OCI/platform/provider acceptance; TA-091 remains in_progress"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-28",
+  "finding": "TA-016",
+  "scope": "candidate: cohort-level runtime provenance (design in contracts/ta016-cohort-provenance-design.md) implemented for DIVERSITY; not accepted",
+  "changes": {
+    "lib/report_events.nf": "new cohort_provenance branch: cohort:true + cohort_samples from the task-time CSV; single-sample task_provenance untouched",
+    "bin/generate_report.R": "cohort records: cohort_samples must be non-empty and all in the expected sample domain; script checksum/probe/duplicate checks unchanged",
+    "modules/cross_sample/diversity.nf": "emits cohort_provenance; cohort domain read from the staged cohort metadata at task time via cut/sort/paste",
+    "tests/test_generate_report.py": "+3 cohort cases (valid accepted; empty/unknown-member rejected)"
+  },
+  "verification": "unit 20/20; real Nextflow + podman autoplasm-r-analysis on an explicit technical-control cohort table: DIVERSITY COMPLETED, cohort_provenance = s1,s2,s3 (the real staged domain)",
+  "failed_attempts": "v1: diversity.R sources statistics_input_contract.R (missing from code_assets); v2: awk -F'\\t' double-escaping produced unsplit lines (s1\\ta) — caught by inspection; both retained",
+  "patch": "docs/tool-audit/patches/TA-016-cohort-provenance.diff sha256 88a545572defa580bca99e85613af21d363efe845195562977548139a172f611",
+  "limits": ["candidate not accepted; TA-016 remains in_progress", "other cohort producers (DESEQ2/FASTSPAR/MERGE_ABUNDANCE/NETWORK_PREPARE/SHARED_*/STATISTICS_INPUTS/REPORT) not yet wired", "report end-to-end rerun pending"]
+}

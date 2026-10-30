@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-27",
+  "finding": "TA-093",
+  "scope": "independent re-confirmation of the ready candidate, not a consolidated formal acceptance",
+  "artifact_integrity": "all 20 SHA256-pinned artifacts in evidence/20261026-integronfinder-runtime.json re-hashed and matching (native-cache-v4, units-v3, mock-v3, framework-v2, native-original, topology-before-after, source-comparison, locks, patch-roundtrip, before-state copies)",
+  "fresh_native_rerun": {
+    "fixture": "acba.007.p01.13.fst, sha256 65afe4e7c10b876383cd32db4f010119f5658ce53ff8a0bdc7aa721bfc6ddb81 (matches recorded)",
+    "env": "integronfinder-2.0.5 prefix, reports integron_finder 2.0.5 f98c682",
+    "default": "exit 0; ACBA.007.P01_13 CALIN=0 complete=1 In0=0 topology=circ — confirms native implicitly treats the unmarked single replicon as circular",
+    "linear": "exit 0; CALIN=1 complete=0 In0=1 topology=lin — the approved unknown-linear reference",
+    "circ": "exit 0; CALIN=0 complete=1 In0=0 topology=circ — explicit --circ preserves the original result"
+  },
+  "current_source": "modules/nf-core/integronfinder/main.nf stages bin/integronfinder_topology.py at both call sites (lines 20, 78); helper bin/integronfinder_runtime_resources.py present",
+  "outcome": "core claim re-confirmed; recommend acceptance in the next consolidated batch",
+  "limits": [
+    "candidate pipeline's 12-phase cache/framework evidence is relied upon from 2026-10-26, not re-executed",
+    "the fixture's true biological topology is not claimed; this is software-policy behavior",
+    "findings ledger and 718-item accepted-source list unchanged",
+    "no OCI/platform acceptance"
+  ]
+}

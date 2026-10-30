@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-29",
+  "finding": "TA-016",
+  "scope": "candidates: MAG/host/linking/basecalling batch task_provenance; not accepted",
+  "changes": "29 modules wired (EGGNOGMAPPER, BOWTIE2_BUILD, DASTOOL_FASTATOCONTIG2BIN, CHECKM2_PREDICT, GPLAS2_NODES, GPLAS2_PREDICTIONS, GPLAS2 added after first capture; per-process patcher handles the two-process gplas_inputs.nf and gplas2 meta.gplas_original_meta.id) by guarded patcher (results/tool-audit/20261029-mag-linking-patch/apply_provenance.py): SAMTOOLS_INDEX, METABAT2 x2, CONCOCT x4, DASTOOL_DASTOOL, SEMIBIN_SINGLEEASYBIN, GTDBTK_CLASSIFYWF, KRAKEN2_KRAKEN2, METAPHLAN_METAPHLAN, PRODIGAL, HIFIADAPTERFILT, RECYCLER, PLASMAAG, PROTEIN_INPUTS, DORADO_BASECALL, LINK_SEQUENCE/HOTSPOT/LONGREAD as meta task_provenance; LINK_COABUNDANCE as cohort_provenance (sample domain from host_sample_ids input val). Probes reuse each module's existing version idioms or staged-helper -h",
+  "verification": "compile-level: tests/nextflow/mag_linking_compile_check.nf (new untracked harness) includes all 22 processes, real Nextflow 26.10 exit 0; combined patch reverse-applies cleanly",
+  "patch": "docs/tool-audit/patches/TA-016-mag-linking-provenance.diff sha256 abdeaf418784d21f8e0675d386678c93901771d8cf23892cdc3dff3de8e6a890",
+  "failed_attempt": "patcher v1 dropped lines after the inserted cp (missing tail slice), truncating all 22 files; detected by line-count check, all files restored via git checkout before any other change, incident retained; v1 compile error on DAS_TOOL include name (real process is DASTOOL_DASTOOL) fixed in patch and harness",
+  "limits": ["candidates not accepted; TA-016 remains in_progress", "real runs pending for all 22 (envs retained for concoct/dastool/metabat2/semibin/gtdbtk; kraken2/metaphlan DBs not retained; dorado is PATH-only)", "LINK_CRISPR deliberately not wired (process is a permanent exit-2 placeholder)"]
+}

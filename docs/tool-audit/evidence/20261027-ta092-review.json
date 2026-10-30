@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-27",
+  "finding": "TA-092",
+  "scope": "independent re-confirmation of the ready candidate, not a consolidated formal acceptance",
+  "artifact_integrity": "all 22 SHA256-pinned artifacts in evidence/20261026-abricate-runtime.json re-hashed and matching (native-v4 13-phase, units-v2, native-errors, downstream, framework-v2, real-error-pair, guarded-source.pl, locks, patch-roundtrips)",
+  "fresh_driver_rerun": {
+    "driver": "tests/run_abricate_errors.py sha256 16a6f9d49406f90a1009448c3b9db6563e051e559fb814bbb80f5c98dc18d6f7 (matches pin)",
+    "helper": "bin/abricate_runtime_resources.pl sha256 427bc8a98228e245540a8a02c6e75c3940764995fb72e5358af6441e427c9d4c (matches pin)",
+    "fixture": "assembly.fa sha256 b1be888ba95d0d9daaa6844063b8b1c1b3074d8a133e99b5e208e34b3fe061ce (matches recorded)",
+    "results": {
+      "converter-failure": "original exit 0 with 5 real hits despite late exit 7; guarded exit 1",
+      "blast-failure": "original exit 0 with 5 real hits despite late exit 9; guarded exit 1",
+      "legitimate-zero": "both exit 0 with 0 hits; guard does not false-positive on a valid empty result"
+    },
+    "output": "results/tool-audit/20261027-ta092-review/native-errors-rerun/run.json, pass_checks=true, source_unchanged=true"
+  },
+  "outcome": "core claim re-confirmed; recommend acceptance in the next consolidated batch",
+  "limits": [
+    "the 13-phase native/cache and framework-v2 chains from 2026-10-26 are relied upon via hash-intact artifacts, not re-executed",
+    "late-exit wrappers are explicit observers; the real mmap missing-nhr case remains documented in real-error-pair.json",
+    "findings ledger and 718-item accepted-source list unchanged",
+    "no OCI/platform acceptance"
+  ]
+}

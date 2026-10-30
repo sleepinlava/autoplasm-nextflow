@@ -1,0 +1,26 @@
+{
+  "run_id": "20261027-cleanup-8",
+  "pass_cleanup_integrity_checks": true,
+  "formal_acceptance": false,
+  "cleanup_receipt": "results/tool-audit/20261027-cleanup-8/cleanup.json",
+  "cleanup_receipt_sha256": "3c4fac1b744e682592abce3832e5b91816d20bdefcbcb7a1d581be74fb91bd76",
+  "targets_removed": 50,
+  "target_kinds": {
+    "unused-package-extraction": 47,
+    "duplicate-HOTSPOT-models": 2,
+    "duplicate-COPLA-databases": 1
+  },
+  "logical_bytes": 7384706875,
+  "observed_available_delta_bytes": 4540817408,
+  "measurement_seconds": 5.212457895278931,
+  "retained_raw_archives": 47,
+  "retained_installed_environments": 57,
+  "installed_environments_removed": 0,
+  "fixed_artifacts_verified_after": 116,
+  "committed_files_verified_after": 270,
+  "reviewed_json_indexes": 2650,
+  "installed_symlinks_reviewed": 71914,
+  "replacement_files_sha_verified": 20142,
+  "formal_source_manifest_sha256": "d32cbf875ed61e448109837372efbd3ceb7f5f7116ffb01a078024053686219d",
+  "scope": "Only unused exact Conda package extractions and byte-identical disposable private HOTSPOT/COPLA resource copies. Main DB/model/tool environments and complete real Medaka input retained; historical private paths now unavailable, rebuild from verified primaries/raw archives. No scientific/resource-cache acceptance, commit/push or deleted installed environments. Observed free-space delta is not guaranteed exclusive physical recovery."
+}
