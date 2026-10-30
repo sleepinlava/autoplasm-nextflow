@@ -31,6 +31,7 @@ lazygit
 # nf-test runtime artifacts (plugin cache, wrapper scripts)
 .nf-test/
 .nf-test-*.nf
+.nf-core.yml
 
 # agent tooling dirs
 .codex/
@@ -38,3 +39,6 @@ lazygit
 # Local test publication and external-tool scratch output
 /null/
 /blast-log.txt
+
+# docs/
+tool-audit
