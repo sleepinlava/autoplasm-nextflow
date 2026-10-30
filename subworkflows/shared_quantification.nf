@@ -35,7 +35,9 @@ workflow SHARED_QUANTIFICATION {
     ch_report_events = ch_report_events.mix(reportEvidence([channels: SHARED_CATALOGUE.out], '10_abundance', 'SHARED_CATALOGUE'))
     ch_catalogue = SHARED_CATALOGUE.out.catalogue.first()
     ch_reference = ch_catalogue.filter { dir -> dir.resolve('reference.fasta').size() > 0 }
-        .map { dir -> tuple([id: 'shared_reference'], dir.resolve('reference.fasta')) }.first()
+        .combine(ch_sources.map { ids, assemblies, plasmids -> [samples: ids] })
+        .map { dir, domain -> tuple([id: 'shared_reference', cohort: true, cohort_samples: domain.samples],
+                                    dir.resolve('reference.fasta')) }.first()
     ch_mapped = Channel.empty()
     if (read_mode == 'short') {
         BOWTIE2_BUILD_SHARED(ch_reference)

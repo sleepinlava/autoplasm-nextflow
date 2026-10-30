@@ -15,11 +15,16 @@ process SHARED_CATALOGUE {
 
     output:
     path 'catalogue', emit: catalogue
+    tuple val("${task.process}"), path("SHARED_CATALOGUE.task_command.sh"),
+          val('python3 analysis_code/build_shared_catalogue.py -h'), eval('python3 analysis_code/build_shared_catalogue.py -h'),
+          eval("sha256sum 'SHARED_CATALOGUE.task_command.sh'"),
+          val((sample_ids instanceof List ? sample_ids : [sample_ids]).join(',')), emit: cohort_provenance
 
     script:
     def quoted = { values -> (values instanceof List ? values : [values])
         .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ') }
     """
+    cp -- "\${BASH_SOURCE[0]}" 'SHARED_CATALOGUE.task_command.sh'
     mkdir -p analysis_code
     cp -L source_assets/* analysis_code/
     python3 analysis_code/build_shared_catalogue.py \\

@@ -19,6 +19,10 @@ process MERGE_ABUNDANCE {
 
     output:
     path "${label_name}.tsv", emit: table
+    tuple val("${task.process}"), path("MERGE_ABUNDANCE.task_command.sh"),
+          val('Rscript --version'), eval('Rscript --version'),
+          eval("sha256sum 'MERGE_ABUNDANCE.task_command.sh'"),
+          val((sample_ids instanceof List ? sample_ids : [sample_ids]).join(',')), emit: cohort_provenance
 
     script:
     def files = (coverm_tables in List ? coverm_tables : [coverm_tables])
@@ -26,6 +30,7 @@ process MERGE_ABUNDANCE {
     def ids = (sample_ids in List ? sample_ids : [sample_ids])
         .collect { "'" + it.toString().replace("'", "'\"'\"'") + "'" }.join(' ')
     """
+    cp -- "\${BASH_SOURCE[0]}" 'MERGE_ABUNDANCE.task_command.sh'
     merge_abundance.R --tables ${files} --sample-ids ${ids} \\
         --id-column '${id_column}' --out '${label_name}.tsv'
     """

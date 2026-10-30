@@ -20,11 +20,16 @@ process DIFFERENTIAL_ABUNDANCE {
 
     output:
     path "differential_abundance.tsv", emit: results
+    tuple val("${task.process}"), path("DIFFERENTIAL_ABUNDANCE.task_command.sh"),
+          val('Rscript --version'), eval('Rscript --version'),
+          eval("sha256sum 'DIFFERENTIAL_ABUNDANCE.task_command.sh'"),
+          eval("cut -f1 cohort/* | tail -n +2 | sort -u | paste -sd, -"), emit: cohort_provenance
 
     script:
     def minimum_replicates = params.min_group_replicates == null ? 3 : params.min_group_replicates
     def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
     """
+    cp -- "\${BASH_SOURCE[0]}" 'DIFFERENTIAL_ABUNDANCE.task_command.sh'
     mkdir -p analysis_code
     cp -L source_assets/* analysis_code/
     Rscript analysis_code/differential_abundance.R --abundance ${abundance_table} \\

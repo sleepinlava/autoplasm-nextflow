@@ -1,0 +1,10 @@
+include { DESEQ2 } from '../../modules/cross_sample/deseq2'
+include { DIFFERENTIAL_ABUNDANCE } from '../../modules/cross_sample/differential'
+include { NETWORK_PREPARE } from '../../modules/cross_sample/network_prepare'
+include { STATISTICS_INPUTS } from '../../modules/cross_sample/statistics_inputs'
+include { FASTSPAR } from '../../modules/cross_sample/fastspar'
+include { MERGE_ABUNDANCE } from '../../modules/cross_sample/merge_abundance'
+include { SHARED_ABUNDANCE_TABLES } from '../../modules/cross_sample/shared_abundance'
+include { SHARED_CATALOGUE } from '../../modules/cross_sample/shared_catalogue'
+include { DIVERSITY } from '../../modules/cross_sample/diversity'
+workflow { println 'compiled' }

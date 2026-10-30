@@ -22,12 +22,17 @@ process NETWORK_PREPARE {
     path "fastspar_input.tsv", emit: network_input
     path "network_status.json", emit: status
     path "fastspar_eligible.tsv", optional: true, emit: eligible_input
+    tuple val("${task.process}"), path("NETWORK_PREPARE.task_command.sh"),
+          val('Rscript --version'), eval('Rscript --version'),
+          eval("sha256sum 'NETWORK_PREPARE.task_command.sh'"),
+          eval("cut -f1 cohort/* | tail -n +2 | sort -u | paste -sd, -"), emit: cohort_provenance
 
     script:
     def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
     def metadata_arg = sample_metadata ? "--metadata ${quote.call(sample_metadata)}" : ''
     def minimum_samples = params.network_min_samples == null ? 20 : params.network_min_samples
     """
+    cp -- "\${BASH_SOURCE[0]}" 'NETWORK_PREPARE.task_command.sh'
     mkdir -p analysis_code
     cp -L source_assets/* analysis_code/
     Rscript analysis_code/network_prepare.R --abundance ${abundance_table} ${metadata_arg} \\

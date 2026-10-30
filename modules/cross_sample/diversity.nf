@@ -22,9 +22,14 @@ process DIVERSITY {
     path "diversity_metrics.tsv", emit: metrics
     path "bray_curtis_matrix.tsv", emit: beta
     path "diversity_status.json", emit: status
+    tuple val("${task.process}"), path("DIVERSITY.task_command.sh"),
+          val('Rscript --version'), eval('Rscript --version'),
+          eval("sha256sum 'DIVERSITY.task_command.sh'"),
+          eval("cut -f1 cohort/* | tail -n +2 | sort -u | paste -sd, -"), emit: cohort_provenance
 
     script:
     """
+    cp -- "\${BASH_SOURCE[0]}" 'DIVERSITY.task_command.sh'
     mkdir -p analysis_code
     cp -L source_assets/* analysis_code/
     Rscript analysis_code/diversity.R --abundance ${abundance_table} --metadata ${sample_metadata} \\

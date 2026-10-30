@@ -17,9 +17,14 @@ process FASTSPAR {
     output:
     path "correlation.tsv", emit: correlation
     path "covariance.tsv", emit: covariance
+    tuple val("${task.process}"), path("FASTSPAR.task_command.sh"),
+          val('fastspar --version 2>&1'), eval('fastspar --version 2>&1'),
+          eval("sha256sum 'FASTSPAR.task_command.sh'"),
+          eval("head -1 ${network_input} | cut -f2- | tr '\\t' ','"), emit: cohort_provenance
 
     script:
     """
+    cp -- "\${BASH_SOURCE[0]}" 'FASTSPAR.task_command.sh'
     fastspar --otu_table ${network_input} \\
         --correlation correlation.tsv \\
         --covariance covariance.tsv \\

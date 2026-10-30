@@ -20,6 +20,11 @@ process LINK_COABUNDANCE {
 
     output:
     path "coabundance_links.tsv", emit: links
+    tuple val("${task.process}"), path("LINK_COABUNDANCE.task_command.sh"),
+          val('Rscript --version'), eval('Rscript --version'),
+          eval("sha256sum 'LINK_COABUNDANCE.task_command.sh'"),
+          val((host_sample_ids instanceof List ? host_sample_ids : [host_sample_ids]).join(',')), emit: cohort_provenance
+
 
     script:
     def shellQuote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
@@ -28,6 +33,7 @@ process LINK_COABUNDANCE {
     def sampleIds = (host_sample_ids in List ? host_sample_ids : (host_sample_ids ? [host_sample_ids] : []))
         .collect { shellQuote.call(it) }.join(' ')
     """
+    cp -- "\${BASH_SOURCE[0]}" 'LINK_COABUNDANCE.task_command.sh'
     coabundance_link.R \\
         --plasmid-abundance ${shellQuote.call(plasmid_abundance_merged)} \\
         --host-profiles ${profileFiles} \\

@@ -20,6 +20,7 @@ process REPORT {
     path 'methods.md', emit: methods_md
     path 'report_data.json', emit: data_json
     path 'report_inputs.json', emit: inputs_json
+    path 'REPORT.task_command.sh', emit: task_command
 
     script:
     def paths = report_files instanceof List ? report_files : [report_files]
@@ -29,6 +30,7 @@ process REPORT {
     }]
     def json = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest))
     """
+cp -- "\${BASH_SOURCE[0]}" REPORT.task_command.sh
 cat > report_inputs.json <<'AUTOPLASM_REPORT_INPUTS_JSON'
 ${json}
 AUTOPLASM_REPORT_INPUTS_JSON
