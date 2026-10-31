@@ -1,44 +1,59 @@
+# Nextflow state and scientific outputs; retain locally for resume/evidence
 .nextflow*
-work/
-results/
-data/
-.DS_Store
-__pycache__/
-*.pyc
+/work/
+/results/
+/data/
 
-# doc
-docs/review-fix-plan.md
-docs/计划书.md
-docs/review-executability-repro.py
-docs/review-executability-round2.md
-docs/review-fix-plan-detailed.md
-docs/*
-!docs/tool-interface-audit-plan.md
-!docs/tool-audit/
-!docs/tool-audit/**
-
-# lazygit
-lazygit
-
-# log
-*.log
-
-# agent
-.code/
-.aws/
-.agents/
-
-# nf-test runtime artifacts (plugin cache, wrapper scripts)
+# nf-test runtime state
 .nf-test/
 .nf-test-*.nf
 .nf-core.yml
 
-# agent tooling dirs
-.codex/
-
-# Local test publication and external-tool scratch output
+# Local tools, scratch publications and logs
+/.local-dev/
+/lazygit
 /null/
 /blast-log.txt
 
-# docs/
-tool-audit
+# Machine-specific agent state and credentials
+.code/
+.aws/
+.agents/
+.codex/
+
+# Curated documentation: retain source, current guides and cited history.
+# Draft reviews, large exported diagrams and source documents stay local.
+/docs/*
+!/docs/README.md
+!/docs/usage.md
+!/docs/development.md
+!/docs/workspace-layout.md
+!/docs/methods-and-limits.md
+!/docs/development-validation-history.md
+!/docs/platform-workflows.md
+!/docs/protocol-implementation-status-20261031.md
+!/docs/protocol-requirements-audit-20261030.md
+!/docs/计划书.md
+!/docs/analysis-framework-plan.md
+!/docs/fact-reliability-audit.md
+!/docs/mock-e2e-validation.md
+!/docs/analysis-framework.html
+!/docs/analysis-framework.css
+!/docs/analysis-framework.ts
+!/docs/analysis-framework.js
+!/docs/tsconfig.json
+!/docs/visual-acceptance.md
+!/docs/visual-acceptance/
+!/docs/visual-acceptance/**
+!/docs/tool-interface-audit-plan.md
+!/docs/tool-audit/
+!/docs/tool-audit/**
+
+# Cache exclusions come after documentation allow rules.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.log
+*.log.[0-9]*
+.DS_Store
