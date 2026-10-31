@@ -12,6 +12,12 @@ def reportValue(value) {
 def reportEvidence(recordedOutputs, section, producer) {
     def outputs = recordedOutputs.channels
     def streams = outputs.getNames().collect { outputName ->
+        if (outputName == 'commands') {
+            return outputs.getProperty(outputName).map { command ->
+                tuple([section:section,producer:producer,kind:'evidence',output:'execution_script',
+                       evidence:command.toString()], [command])
+            }
+        }
         if (outputName == 'cohort_provenance') {
             return outputs.getProperty(outputName).map { process, command, probe, stdout, checksum, cohort_csv ->
                 def members = cohort_csv.toString().trim() ? cohort_csv.toString().trim().split(',') as List : []
@@ -68,6 +74,11 @@ def reportSettings(params) {
                 'mag_tools', 'comparative_tools', 'comparative_optional_tools',
                 'host_plasmid_linking', 'host_linking_methods', 'host_linking_optional_methods',
                 'run_fastqc', 'run_multiqc', 'run_diversity', 'run_differential_internal',
-                'run_differential_deseq2', 'run_network']
+                'run_differential_deseq2', 'run_network', 'short_read_protocol', 'catalogue_identity', 'catalogue_coverage',
+                'protocol_complete_ids', 'protocol_host_models', 'mostplas_source','mostplas_threshold','plsdb_fasta','plsdb_hosts',
+                'protocol_host_strata','protocol_host_subject','protocol_host_bootstraps','protocol_mag_min_completeness','protocol_mag_max_contamination',
+                'protocol_arg_window','protocol_evolution','protocol_tree_min_members','protocol_tree_min_core','protocol_strain',
+                'protocol_strain_min_coverage','protocol_strain_ani','protocol_strain_min_compared_bases','protocol_min_breadth',
+                'beta_normalization','ecology_formula','ecology_block','ecology_permutations','run_ancombc2','ancombc2_formula','ancombc2_random_formula','ancombc2_prevalence']
     return keys.findAll { params.containsKey(it) }.collectEntries { key -> [(key): reportValue(params[key])] }
 }

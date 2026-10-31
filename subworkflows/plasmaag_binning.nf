@@ -36,14 +36,13 @@ workflow PLASMAAG_BINNING {
         } else {
             ch_rows = ch_rows.map { id, meta, fasta, r1, r2 -> [meta: meta, reads: [r1, r2], assembly: fasta] }
         }
-        ch_cohort = ch_rows.toList().map { values ->
-            if (!values) error('PlasMAAG cohort is empty')
+        ch_cohort = ch_rows.toList().filter { it }.map { values ->
             def rows = values.sort { a, b -> a.meta.id.toString() <=> b.meta.id.toString() }
             def ids = rows.collect { it.meta.id.toString() }
             if (ids.toSet().size() != ids.size()) error('PlasMAAG cohort has duplicate sample IDs')
             def digest = java.security.MessageDigest.getInstance('SHA-256')
                 .digest(groovy.json.JsonOutput.toJson(ids).getBytes('UTF-8')).encodeHex().toString()
-            tuple([id: "plasmaag_cohort_${digest}"], rows.collect { it.meta }, rows.collectMany { it.reads }, rows.collect { it.assembly })
+            tuple([id: "plasmaag_cohort_${digest}",cohort:true,cohort_samples:ids], rows.collect { it.meta }, rows.collectMany { it.reads }, rows.collect { it.assembly })
         }
         PLASMAAG(ch_cohort,
             Channel.value(resource.call(params.plasmaag_source)),

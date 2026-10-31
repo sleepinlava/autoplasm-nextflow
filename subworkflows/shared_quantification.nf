@@ -1,7 +1,9 @@
+include { protocolAssets } from '../lib/protocol_assets'
 include { reportEvidence; reportSamples } from '../lib/report_events'
 /* Cross-sample measurements: one DNA reference, one read technology per sample.
  * Local per-sample coverage remains separate for MAG and host linking.
  */
+include { PROTOCOL_PAIRED_QUANTIFICATION } from '../modules/protocol/paired_quantification'
 include { SHARED_CATALOGUE } from '../modules/cross_sample/shared_catalogue'
 include { SHARED_ABUNDANCE_TABLES } from '../modules/cross_sample/shared_abundance'
 include { BOWTIE2_BUILD as BOWTIE2_BUILD_SHARED } from '../modules/nf-core/bowtie2/build/main'
@@ -34,8 +36,30 @@ workflow SHARED_QUANTIFICATION {
     SHARED_CATALOGUE(ch_sources, n_samples, [file("${moduleDir}/../bin/build_shared_catalogue.py",checkIfExists:true)])
     ch_report_events = ch_report_events.mix(reportEvidence([channels: SHARED_CATALOGUE.out], '10_abundance', 'SHARED_CATALOGUE'))
     ch_catalogue = SHARED_CATALOGUE.out.catalogue.first()
+    QUANTIFY_CATALOGUE(ch_catalogue, ch_short_reads, ch_long_reads, read_mode,
+        ch_sources.map { ids, assemblies, plasmids -> [samples:ids] })
+    ch_report_events = ch_report_events.mix(QUANTIFY_CATALOGUE.out.report_events)
+
+    emit:
+    report_events = ch_report_events
+    contigs = QUANTIFY_CATALOGUE.out.contigs
+    plasmids = QUANTIFY_CATALOGUE.out.plasmids
+    states = QUANTIFY_CATALOGUE.out.states
+    method = QUANTIFY_CATALOGUE.out.method
+    catalogue = ch_catalogue
+}
+
+workflow QUANTIFY_CATALOGUE {
+    take:
+    ch_catalogue
+    ch_short_reads
+    ch_long_reads
+    read_mode
+    ch_domain
+    main:
+    ch_report_events = Channel.empty()
     ch_reference = ch_catalogue.filter { dir -> dir.resolve('reference.fasta').size() > 0 }
-        .combine(ch_sources.map { ids, assemblies, plasmids -> [samples: ids] })
+        .combine(ch_domain)
         .map { dir, domain -> tuple([id: 'shared_reference', cohort: true, cohort_samples: domain.samples],
                                     dir.resolve('reference.fasta')) }.first()
     ch_mapped = Channel.empty()
@@ -56,12 +80,24 @@ workflow SHARED_QUANTIFICATION {
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MINIMAP2_ALIGN_SHARED.out], '10_abundance', 'MINIMAP2_ALIGN_SHARED'))
         ch_mapped = MINIMAP2_ALIGN_SHARED.out.bam
     }
+    ch_mapping_stats = Channel.empty()
+    ch_qualified_bam = Channel.empty()
+    ch_measured = Channel.empty()
+    if (params.short_read_protocol) {
+        PROTOCOL_PAIRED_QUANTIFICATION(ch_mapped,ch_catalogue, protocolAssets("${moduleDir}/../bin",'protocol_quantification.py'))
+        ch_measured = PROTOCOL_PAIRED_QUANTIFICATION.out.coverage
+        ch_mapping_stats = PROTOCOL_PAIRED_QUANTIFICATION.out.mapping_stats.map { meta,p -> p }
+        ch_qualified_bam = PROTOCOL_PAIRED_QUANTIFICATION.out.qualified_bam
+        ch_report_events = ch_report_events.mix(reportEvidence([channels:PROTOCOL_PAIRED_QUANTIFICATION.out],'10_abundance','PROTOCOL_PAIRED_QUANTIFICATION'))
+    } else {
     SAMTOOLS_VIEW_SHARED(ch_mapped.map { meta, bam -> tuple(meta, bam, []) },
                          [[], [], []], [[], []], [[], []], '')
     ch_report_events = ch_report_events.mix(reportEvidence([channels: SAMTOOLS_VIEW_SHARED.out], '10_abundance', 'SAMTOOLS_VIEW_SHARED'))
     COVERM_SHARED(SAMTOOLS_VIEW_SHARED.out.bam, [[], []], true, false, false)
     ch_report_events = ch_report_events.mix(reportEvidence([channels: COVERM_SHARED.out], '10_abundance', 'COVERM_SHARED'))
-    ch_tables = COVERM_SHARED.out.coverage.toList().map { entries ->
+    ch_measured = COVERM_SHARED.out.coverage
+    }
+    ch_tables = ch_measured.toList().map { entries ->
         tuple(entries.collect { it[0].id }, entries.collect { it[1] })
     }
     SHARED_ABUNDANCE_TABLES(ch_catalogue, ch_tables, read_mode == 'short' ? 'bowtie2' : 'minimap2',
@@ -74,5 +110,9 @@ workflow SHARED_QUANTIFICATION {
     plasmids = SHARED_ABUNDANCE_TABLES.out.plasmids
     states = SHARED_ABUNDANCE_TABLES.out.states
     method = SHARED_ABUNDANCE_TABLES.out.method
-    catalogue = ch_catalogue
+    prevalence = SHARED_ABUNDANCE_TABLES.out.prevalence
+    mapping_stats = ch_mapping_stats
+    bam = ch_mapped
+    qualified_bam = ch_qualified_bam
+    reference = ch_reference
 }

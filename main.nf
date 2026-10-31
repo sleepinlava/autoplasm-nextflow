@@ -1,7 +1,7 @@
 #!/usr/bin/env nextflow
 /*
  * AutoPlasm — Metagenomic Plasmid Analysis (standalone Nextflow DSL2
- * pipeline; the authoritative design specification is docs/计划书.md in
+ * pipeline; the short-read protocol audit is docs/protocol-requirements-audit-20261030.md in
  * this repository).
  *
  * Usage: nextflow run . --samplesheet samples.tsv --platform illumina -profile conda
@@ -42,7 +42,7 @@ def toolChoices() {
         typing_tools: ['plasmidfinder','mob_typer'],
         typing_optional_tools: ['copla','conjscan','macsyfinder'],
         host_prediction_tools: ['metaphlan','kraken2','plasmidhostfinder'],
-        mag_tools: ['metabat2','concoct','semibin','das_tool','checkm2','gtdbtk'],
+        mag_tools: ['plasmaag','metabat2','concoct','semibin','das_tool','checkm2','gtdbtk'],
         host_linking_methods: ['co_abundance','sequence','long_read'],
         host_linking_optional_methods: ['crispr','hotspot'],
         annotation_tools: ['bakta','amrfinderplus','abricate','isescan','integronfinder','prodigal'],
@@ -100,6 +100,14 @@ def cell(header, row, name) {
 }
 
 def validateParams() {
+    if (params.short_read_protocol && (params.platform != 'illumina' ||
+        params.short_read_assembler != 'metaspades' ||
+        !selectedTools(params.plasmid_binning_tools).contains('plasmaag'))) {
+        paramError('short_read_protocol requires illumina, metaspades and PlasMAAG')
+    }
+    if (selectedTools(params.mag_tools).contains('plasmaag') && !params.short_read_protocol) {
+        paramError('MAG source plasmaag requires --short_read_protocol')
+    }
     def magError = magSelectionError(params.mag_tools)
     if (magError) paramError(magError)
     if (params.host_plasmid_linking && selectedTools(params.host_linking_optional_methods).contains('crispr')) {
@@ -128,6 +136,11 @@ def validateParams() {
     }
     // Every enabled tool that needs a database must have it configured
     def required = []
+    if (params.short_read_protocol && params.protocol_host_models) {
+        required << ['mostplas_source',params.mostplas_source]
+        required << ['plsdb_fasta',params.plsdb_fasta]
+        required << ['plsdb_hosts',params.plsdb_hosts]
+    }
     if (selectedTools(params.plasmid_detection_tools).contains('plasme')) {
         required << ['plasme_db', params.plasme_db]
         required << ['plasme_dir', params.plasme_dir]
@@ -243,6 +256,37 @@ def validateParams() {
 }
 
 workflow {
+    def run_sample_ids = []
+    if (params.short_read_protocol) {
+        def info_directory = new File(params.outdir.toString(),'pipeline_info')
+        def run_metadata = workflow
+        workflow.onComplete {
+            info_directory.mkdirs()
+            def state = [success:run_metadata.success,exit_status:run_metadata.exitStatus,run_name:run_metadata.runName,
+                command_line:run_metadata.commandLine,session_id:run_metadata.sessionId.toString(),
+                revision:run_metadata.revision,error_message:run_metadata.errorMessage,duration:run_metadata.duration.toString()]
+            new File(info_directory,'run_state.json').text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(state)) + '\n'
+            def trace_file = new File(info_directory,'trace.tsv')
+            def failures = []
+            if (trace_file.exists()) {
+                def lines = trace_file.readLines()
+                def columns = lines[0].split('\t') as List
+                lines.drop(1).each { line ->
+                    def values = line.split('\t',-1)
+                    def record = columns.withIndex().collectEntries { name,i -> [(name):values[i]] }
+                    if (record.status in ['FAILED','ABORTED']) {
+                        def tag = record.name =~ / \(([^()]*)\)$/
+                        def sample = tag.find() && run_sample_ids.contains(tag.group(1)) ? tag.group(1) : ''
+                        failures << [sample,sample ? 'sample' : 'cohort_or_unresolved',record.name,record.hash,record.status,record.exit].join('\t')
+                    }
+                }
+            }
+            if (!failures && !run_metadata.success)
+                failures << ['', 'workflow', 'workflow', '', 'FAILED', run_metadata.exitStatus == null ? 'not_available' : run_metadata.exitStatus].join('\t')
+            new File(info_directory,'failed_samples.tsv').text = 'sample_id\tfailure_scope\ttask_name\ttask_hash\tstatus\texit_status\n' +
+                (failures ? failures.join('\n')+'\n' : '')
+        }
+    }
     normalizeToolSelections()
 
     validateParams()
@@ -257,6 +301,7 @@ workflow {
     def rows = rowsWithLines.collect { entry -> entry[1] }
     if (col(header, 'sample_id') < 0) paramError("samplesheet needs a sample_id column")
     if (rows.isEmpty()) paramError("samplesheet has no data rows")
+    run_sample_ids = rows.collect { it[col(header,'sample_id')] }.toSet()
     SAMPLE_ID_VALIDATION(Channel.fromList(rowsWithLines), header)
     def groupIdx = col(header, 'group')
     def n_samples = rows.size()

@@ -52,7 +52,9 @@ workflow PLASMID_DOWNSTREAM {
     def run_conjscan    = selectedTools(params.typing_optional_tools).contains('conjscan')
     def run_macsyfinder = selectedTools(params.typing_optional_tools).contains('macsyfinder')
     def run_eggnog = selectedTools(params.annotation_optional_tools).contains('eggnog_mapper')
-    def needs_proteins = run_conjscan || run_macsyfinder || run_eggnog
+    def bakta_proteins = params.short_read_protocol && selectedTools(params.annotation_tools).contains('bakta')
+    def needs_proteins = run_conjscan || run_macsyfinder || (run_eggnog && !bakta_proteins)
+    ch_mob = Channel.empty()
     ch_proteins = Channel.empty()
     if (needs_proteins || selectedTools(params.annotation_tools).contains('prodigal') || selectedTools(params.annotation_optional_tools).contains('prodigal')) {
         // One gene call supplies annotation and all protein consumers.
@@ -87,6 +89,7 @@ workflow PLASMID_DOWNSTREAM {
                   Channel.value(resourceInput(params.mob_suite_db)),
                   [], [], [], [], [], [], [],
                   false, false,ch_mob_typer_preflight)
+        ch_mob = MOB_TYPER.out.report
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MOB_TYPER.out], '06_plasmid_typing', 'MOB_TYPER'))
     }
     if (selectedTools(params.typing_optional_tools).contains('copla')) {
@@ -118,7 +121,13 @@ workflow PLASMID_DOWNSTREAM {
     }
 
     // ---------------- annotation (08) ----------------
+    ch_eggnog_annotations = Channel.empty()
     ch_bakta_dir = Channel.empty()
+    ch_bakta_faa = Channel.empty()
+    ch_bakta_gff = Channel.empty()
+    ch_arg = Channel.empty()
+    ch_is = Channel.empty()
+    ch_integron = Channel.empty()
     if (selectedTools(params.annotation_tools).contains('bakta')) {
         // optional proteins/prodigal-tf/regions/hmms inputs left empty
         BAKTA(ch_plasmids,
@@ -126,10 +135,13 @@ workflow PLASMID_DOWNSTREAM {
               [], [], [], [])
         ch_report_events = ch_report_events.mix(reportEvidence([channels: BAKTA.out], '08_annotation', 'BAKTA'))
         // clinker consumes the directory holding the *.gbff files (the task dir itself)
+        ch_bakta_faa = BAKTA.out.faa
+        ch_bakta_gff = BAKTA.out.gff
         ch_bakta_dir = BAKTA.out.gbff.map { meta, gbff -> tuple(meta, gbff.parent) }
     }
     if (selectedTools(params.annotation_tools).contains('amrfinderplus')) {
         AMRFINDERPLUS(ch_plasmids, Channel.value(resourceInput(params.amrfinderplus_db)))
+        ch_arg = AMRFINDERPLUS.out.report
         ch_report_events = ch_report_events.mix(reportEvidence([channels: AMRFINDERPLUS.out], '08_annotation', 'AMRFINDERPLUS'))
     }
     if (selectedTools(params.annotation_tools).contains('abricate') || selectedTools(params.annotation_optional_tools).contains('abricate')) {
@@ -147,6 +159,7 @@ workflow PLASMID_DOWNSTREAM {
         ch_report_events = ch_report_events.mix(reportEvidence([channels: ISESCAN_RESOURCE_PROBE.out], '08_annotation', 'ISESCAN_RESOURCE_PROBE'))
         ch_isescan_identity = ISESCAN_RESOURCE_PROBE.out.identity.map { meta, receipt -> isescanResourceRecord(meta, receipt) }
         ISESCAN(ch_plasmids.join(ch_isescan_identity, failOnDuplicate: true, failOnMismatch: true), ch_isescan_resource_helper)
+        ch_is = ISESCAN.out.results
         ch_report_events = ch_report_events.mix(reportEvidence([channels: ISESCAN.out], '08_annotation', 'ISESCAN'))
     }
     if (selectedTools(params.annotation_tools).contains('integronfinder')) {
@@ -156,6 +169,7 @@ workflow PLASMID_DOWNSTREAM {
         ch_report_events = ch_report_events.mix(reportEvidence([channels: INTEGRONFINDER_RESOURCE_PROBE.out], '08_annotation', 'INTEGRONFINDER_RESOURCE_PROBE'))
         ch_integronfinder_identity = INTEGRONFINDER_RESOURCE_PROBE.out.identity.map { meta, receipt -> integronfinderResourceRecord(meta,receipt) }
         INTEGRONFINDER(ch_plasmids.join(ch_integronfinder_identity,failOnDuplicate:true,failOnMismatch:true),ch_integronfinder_resource_helper,ch_integronfinder_topology_helper)
+        ch_integron = INTEGRONFINDER.out.integrons
         ch_report_events = ch_report_events.mix(reportEvidence([channels: INTEGRONFINDER.out], '08_annotation', 'INTEGRONFINDER'))
     }
     if (selectedTools(params.annotation_optional_tools).contains('mob_suite')) {
@@ -172,10 +186,12 @@ workflow PLASMID_DOWNSTREAM {
         ch_report_events = ch_report_events.mix(reportEvidence([channels: RGI.out], '08_annotation', 'RGI'))
     }
     if (run_eggnog) {
+        ch_eggnog = bakta_proteins ? ch_bakta_faa : ch_proteins.map { meta, proteins, topology -> tuple(meta, proteins) }
         // search_mode=diamond with no explicit dmnd db (falls back to --data_dir)
-        EGGNOG_MAPPER(ch_proteins.map { meta, proteins, topology -> tuple(meta, proteins) },
+        EGGNOG_MAPPER(ch_eggnog,
                       Channel.value(taggedResourceInput('diamond', null)),
                       Channel.value(resourceInput(params.eggnog_db)))
+        ch_eggnog_annotations = EGGNOG_MAPPER.out.annotations
         ch_report_events = ch_report_events.mix(reportEvidence([channels: EGGNOG_MAPPER.out], '08_annotation', 'EGGNOG_MAPPER'))
     }
 
@@ -195,5 +211,12 @@ workflow PLASMID_DOWNSTREAM {
 
     emit:
     report_events = ch_report_events
+    functional_annotations = ch_eggnog_annotations
+    args = ch_arg
+    insertion_sequences = ch_is
+    integrons = ch_integron
+    mobility = ch_mob
+    proteins = ch_bakta_faa
+    genes = ch_bakta_gff
     bakta_dir = ch_bakta_dir  // tuple(meta, dir containing *.gbff) for clinker; may be empty
 }

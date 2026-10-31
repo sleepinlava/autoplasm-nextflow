@@ -84,5 +84,6 @@ workflow PLASMID_DETECTION {
     predictions     = PLASMID_CONSENSUS.out.predictions
     consensus       = PLASMID_CONSENSUS.out.consensus
     structure       = PLASMID_STRUCTURE.out.structure
+    genomad_summary = GENOMAD.out.plasmid_summary
     aggregated_classification = GENOMAD.out.aggregated_classification
 }

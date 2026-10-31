@@ -1,3 +1,4 @@
+include { protocolAssets } from '../lib/protocol_assets'
 include { reportEvidence; reportSamples } from '../lib/report_events'
 /*
  * Illumina platform subworkflow (platform: illumina):
@@ -29,6 +30,8 @@ include { SHARED_QUANTIFICATION } from './shared_quantification'
 include { HOST_PREDICTION } from './host_prediction'
 include { MAG_HOST } from './mag_host'
 include { HOST_LINKING } from './host_linking'
+include { PROTOCOL_INPUT_AUDIT; PROTOCOL_RETENTION; PROTOCOL_HOST_FILTER } from '../modules/protocol/input_audit'
+include { SHORT_READ_PROTOCOL } from './short_read_protocol'
 include { COMPARATIVE } from './comparative'
 
 workflow ILLUMINA {
@@ -68,12 +71,19 @@ workflow ILLUMINA {
         false  // sort_bam
     )
     ch_report_events = ch_report_events.mix(reportEvidence([channels: BOWTIE2_ALIGN_HOST.out], '01_qc', 'BOWTIE2_ALIGN_HOST'))
+    ch_final_reads = Channel.empty()
+    if (params.short_read_protocol) {
+        PROTOCOL_HOST_FILTER(BOWTIE2_ALIGN_HOST.out.bam.join(ch_host_ref,failOnDuplicate:true,failOnMismatch:true))
+        ch_final_reads = ch_br.nohost.mix(PROTOCOL_HOST_FILTER.out.reads)
+        ch_report_events = ch_report_events.mix(reportEvidence([channels:PROTOCOL_HOST_FILTER.out],'01_qc','PROTOCOL_HOST_FILTER'))
+    } else {
     ch_final_reads = ch_br.nohost.mix(
         BOWTIE2_ALIGN_HOST.out.fastq.map { meta, fqs ->
             def pair = fqs in List ? fqs : [fqs]
             tuple(meta, pair[0], pair[1])
         }
     )
+    }
 
     // ---------------- assembly (02) ----------------
     ch_assembly = Channel.empty()
@@ -105,12 +115,34 @@ workflow ILLUMINA {
     ch_report_events = ch_report_events.mix(reportEvidence([channels: QUAST.out], '03_assembly_qc', 'QUAST'))
 
     // ---------------- contig coverage (02/coverage) ----------------
-    CONTIG_COVERAGE(ch_assembly, ch_final_reads, Channel.empty(), 'map-ont')
-    ch_report_events = ch_report_events.mix(CONTIG_COVERAGE.out.report_events)
+    if (!params.short_read_protocol) {
+        CONTIG_COVERAGE(ch_assembly, ch_final_reads, Channel.empty(), 'map-ont')
+        ch_report_events = ch_report_events.mix(CONTIG_COVERAGE.out.report_events)
+    }
 
     // ---------------- plasmid detection (04) ----------------
     PLASMID_DETECTION(ch_assembly)
     ch_report_events = ch_report_events.mix(PLASMID_DETECTION.out.report_events)
+    ch_contig_tables = Channel.empty()
+    ch_plasmid_tables = Channel.empty()
+    ch_quantification_states = Channel.empty()
+    ch_plasmids = Channel.empty()
+    if (params.short_read_protocol) {
+        PROTOCOL_INPUT_AUDIT(ch_samples, protocolAssets("${moduleDir}/../bin",'protocol_input_audit.py'))
+        PROTOCOL_RETENTION(FASTP.out.json.join(ch_final_reads,failOnDuplicate:true,failOnMismatch:true), protocolAssets("${moduleDir}/../bin",'protocol_input_audit.py'))
+        ch_report_events = ch_report_events.mix(reportEvidence([channels:PROTOCOL_INPUT_AUDIT.out],'01_qc','PROTOCOL_INPUT_AUDIT'),
+            reportEvidence([channels:PROTOCOL_RETENTION.out],'01_qc','PROTOCOL_RETENTION'))
+        ch_qc_evidence = PROTOCOL_INPUT_AUDIT.out.audit.mix(PROTOCOL_RETENTION.out.retention,PROTOCOL_HOST_FILTER.out.statistics,PROTOCOL_HOST_FILTER.out.reference_identity).map { meta,path -> path }
+            .mix(PROTOCOL_INPUT_AUDIT.out.commands,PROTOCOL_RETENTION.out.commands,PROTOCOL_HOST_FILTER.out.commands,
+                 ch_report_events.filter { record,files -> record.kind == 'runtime_command' }.flatMap { record,files -> files })
+        SHORT_READ_PROTOCOL(ch_assembly, ch_final_reads, PLASMAAG_BINNING.out.bins,
+            PLASMID_DETECTION.out.genomad_summary, PLASMID_DETECTION.out.structure,ch_qc_evidence,ch_report_events)
+        ch_report_events = ch_report_events.mix(SHORT_READ_PROTOCOL.out.report_events)
+        ch_plasmids = SHORT_READ_PROTOCOL.out.plasmids
+        ch_contig_tables = SHORT_READ_PROTOCOL.out.contig_tables
+        ch_plasmid_tables = SHORT_READ_PROTOCOL.out.plasmid_tables
+        ch_quantification_states = SHORT_READ_PROTOCOL.out.states
+    } else {
     // Skip samples whose consensus is empty so downstream tools never see
     // an empty FASTA
     ch_plasmids = PLASMID_DETECTION.out.plasmid_contigs.filter { meta, f -> f.size() > 0 }
@@ -152,6 +184,11 @@ workflow ILLUMINA {
     COMPARATIVE(ch_plasmids, PLASMID_DOWNSTREAM.out.bakta_dir)
     ch_report_events = ch_report_events.mix(COMPARATIVE.out.report_events)
 
+        ch_contig_tables = SHARED_QUANTIFICATION.out.contigs
+        ch_plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
+        ch_quantification_states = SHARED_QUANTIFICATION.out.states
+    }
+
     // ---------------- MultiQC ----------------
     if (params.run_multiqc) {
         ch_fastqc_raw = Channel.empty()
@@ -161,8 +198,9 @@ workflow ILLUMINA {
             ch_fastqc_clean = FASTQC_CLEAN.out.zip
         }
         SHORT_READ_MULTIQC_INPUTS(FASTP.out.json, ch_fastqc_raw, ch_fastqc_clean, params.run_fastqc)
-        MULTIQC(SHORT_READ_MULTIQC_INPUTS.out.files.map { files ->
-            tuple([id: 'multiqc_illumina'], files, [], [], [], [])
+        ch_qc_domain = ch_samples.map { meta,r1,r2 -> meta.id }.toSortedList().map { ids -> [samples:ids] }
+        MULTIQC(SHORT_READ_MULTIQC_INPUTS.out.files.map { files -> [files:files] }.combine(ch_qc_domain).map { bundle,domain ->
+            tuple([id: 'multiqc_illumina',cohort:true,cohort_samples:domain.samples], bundle.files, [], [], [], [])
         })
         ch_report_events = ch_report_events.mix(reportEvidence([channels: MULTIQC.out], '01_qc', 'MULTIQC'))
     }
@@ -170,8 +208,8 @@ workflow ILLUMINA {
     emit:
     report_events = ch_report_events
     plasmids       = ch_plasmids
-    contig_tables  = SHARED_QUANTIFICATION.out.contigs
-    plasmid_tables = SHARED_QUANTIFICATION.out.plasmids
-    quantification_states = SHARED_QUANTIFICATION.out.states
+    contig_tables  = ch_contig_tables
+    plasmid_tables = ch_plasmid_tables
+    quantification_states = ch_quantification_states
     done = ch_report_events
 }

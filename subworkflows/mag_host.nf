@@ -119,11 +119,13 @@ workflow MAG_HOST {
         ch_final_bins = DAS_TOOL.out.bins
     }
 
+    ch_quality = Channel.empty()
     if (selectedTools(params.mag_tools).contains('checkm2')) {
         CHECKM2(
             ch_final_bins,
             Channel.value(taggedResourceInput([id: 'checkm2_db'], params.checkm2_db))
         )
+        ch_quality = CHECKM2.out.checkm2_tsv
         ch_report_events = ch_report_events.mix(reportEvidence([channels: CHECKM2.out], '07_host_prediction', 'CHECKM2'))
     }
 
@@ -140,6 +142,7 @@ workflow MAG_HOST {
 
     emit:
     report_events = ch_report_events
+    quality = ch_quality
     mag_bins = ch_final_bins  // tuple(meta, bin fasta/list); samples with no bins are absent
     taxonomy = ch_taxonomy    // tuple(meta, [gtdbtk summary tsv, ...]); may be empty
 }
