@@ -19,21 +19,28 @@ process DIVERSITY {
     path code_assets, stageAs: 'source_assets/*'
 
     output:
-    path "diversity_metrics.tsv", emit: metrics
-    path "bray_curtis_matrix.tsv", emit: beta
-    path "diversity_status.json", emit: status
+    path "${prefix}diversity_metrics.tsv", emit: metrics
+    path "${prefix}bray_curtis_matrix.tsv", emit: beta
+    path "${prefix}diversity_status.json", emit: status
+    path "${prefix}ecology", emit: inference
+    path "${prefix}r_package_versions.tsv", emit: versions_r_packages
     tuple val("${task.process}"), path("DIVERSITY.task_command.sh"),
           val('Rscript --version'), eval('Rscript --version'),
           eval("sha256sum 'DIVERSITY.task_command.sh'"),
           eval("cut -f1 cohort/* | tail -n +2 | sort -u | paste -sd, -"), emit: cohort_provenance
 
     script:
+    prefix = params.short_read_protocol ? (task.process.tokenize(':').last() == 'SYSTEM_DIVERSITY' ? 'systems.' : 'plasmids.') : ''
+    def q = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
     """
     cp -- "\${BASH_SOURCE[0]}" 'DIVERSITY.task_command.sh'
     mkdir -p analysis_code
     cp -L source_assets/* analysis_code/
     Rscript analysis_code/diversity.R --abundance ${abundance_table} --metadata ${sample_metadata} \\
-        --out-metrics diversity_metrics.tsv \\
-        --out-beta bray_curtis_matrix.tsv --out-status diversity_status.json
+        --out-metrics '${prefix}diversity_metrics.tsv' \\
+        --out-beta '${prefix}bray_curtis_matrix.tsv' --out-status '${prefix}diversity_status.json' \\
+        --beta-normalization ${q.call(params.beta_normalization)} --inference-dir '${prefix}ecology' \\
+        --formula ${q.call(params.ecology_formula)} --block ${q.call(params.ecology_block ?: "")} --permutations ${params.ecology_permutations}
+    Rscript -e 'write.table(installed.packages()[,c("Package","Version")],"${prefix}r_package_versions.tsv",sep="\\t",row.names=FALSE,quote=FALSE)'
     """
 }

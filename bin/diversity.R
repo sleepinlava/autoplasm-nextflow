@@ -93,7 +93,11 @@ spec <- list(
   "out-metrics" = list(required = TRUE),
   "out-beta" = list(required = TRUE),
   "beta-normalization" = list(default = "none"),
-  "out-status" = list(required = FALSE)
+  "out-status" = list(required = FALSE),
+  "inference-dir" = list(required = FALSE),
+  "formula" = list(default = "group"),
+  "block" = list(default = ""),
+  "permutations" = list(default = "999")
 )
 opts <- parse_args(commandArgs(trailingOnly = TRUE), spec)
 beta_norm <- opts[["beta-normalization"]]
@@ -102,8 +106,10 @@ if (!(beta_norm %in% c("none", "tss"))) {
              "' (choose from 'none', 'tss')"))
 }
 
-ab <- fread(opts$abundance, colClasses = c(sample_id = "character", contig_id = "character"),
+identity_fields <- intersect(c("sample_id","contig_id","plasmid_id"), names(fread(opts$abundance,nrows=0)))
+ab <- fread(opts$abundance, colClasses = list(character=identity_fields),
             na.strings = NULL)
+if ("plasmid_id" %in% names(ab)) setnames(ab, "plasmid_id", "contig_id")
 required <- c("sample_id", "contig_id", "coverage")
 if (!all(required %in% names(ab)))
   die(paste0(opts$abundance, ": missing required columns: ", paste(setdiff(required, names(ab)), collapse = ", ")))
@@ -197,4 +203,57 @@ if (!is.null(opts[["out-status"]])) {
     sample_ids=as.list(samples), feature_count=length(contigs), zero_samples=as.list(samples[rowSums(site_mat)==0]),
     alpha_empty_policy="richness/shannon/simpson/pielou0", beta_zero_pair_policy="Bray-Curtis undefined for two zeros; compatibility convention0, not measured similarity",
     beta_normalization=beta_norm), opts[["out-status"]], auto_unbox=TRUE, pretty=TRUE)
+}
+
+if (!is.null(opts[["inference-dir"]])) {
+  source(file.path(dirname(normalizePath(script_file)), "statistics_design.R"))
+  output <- opts[["inference-dir"]]
+  dir.create(output)
+  eligible <- samples[nonempty]
+  status <- list(status="ineligible",reason="fewer_than_three_nonempty_samples",excluded_empty=as.list(samples[!nonempty]),
+                 formula=opts$formula,block=opts$block,seed=20261030L)
+  fwrite(data.table(sample_id=character(),PCoA1=numeric(),PCoA2=numeric()),file.path(output,"ordination.tsv"),sep="\t")
+  fwrite(data.table(term=character(),Df=numeric(),SumOfSqs=numeric(),R2=numeric(),F=numeric(),p_value=numeric()),file.path(output,"permanova.tsv"),sep="\t")
+  fwrite(data.table(statistic=numeric(),p_value=numeric()),file.path(output,"dispersion.tsv"),sep="\t")
+  if (length(eligible) >= 3L) {
+    md <- meta[match(eligible,meta$sample_id),,drop=FALSE]
+    block <- if (nzchar(opts$block)) opts$block else NULL
+    can_test <- !(opts$formula == "group" && (!"group" %in% names(md) || length(unique(md$group[!is.na(md$group)])) < 2L))
+    design <- if(can_test) analysis_design(md,opts$formula,block) else NULL
+    if(can_test) md <- design$metadata
+    distance <- as.dist(bd[eligible,eligible,drop=FALSE])
+    if (any(as.numeric(distance) > 0)) {
+      pc <- cmdscale(distance,k=min(2L,length(eligible)-2L),eig=TRUE,add=TRUE)
+      coords <- as.matrix(pc$points)
+      ordination <- data.table(sample_id=eligible,PCoA1=coords[,1],PCoA2=if(ncol(coords)>1) coords[,2] else 0)
+      fwrite(ordination,file.path(output,"ordination.tsv"),sep="\t")
+      colours <- if ('group' %in% names(md)) as.integer(factor(md$group)) else rep(1L,nrow(md))
+      pdf(file.path(output,'ordination.pdf'),width=7,height=6)
+      plot(ordination$PCoA1,ordination$PCoA2,col=colours,pch=19,xlab='PCoA 1',ylab='PCoA 2',main=paste('Bray-Curtis PCoA;',beta_norm))
+      text(ordination$PCoA1,ordination$PCoA2,labels=eligible,pos=3,cex=.6)
+      if ('group' %in% names(md)) legend('topright',legend=levels(factor(md$group)),col=seq_along(levels(factor(md$group))),pch=19,bty='n')
+      dev.off()
+      status$status <- "ordination_only";status$reason <- "insufficient_groups_for_inference"
+      if (can_test) {
+      permutations <- as.integer(opts$permutations)
+      if (is.na(permutations) || permutations < 1L) stop('permutations must be a positive integer')
+      control <- permute::how(nperm=permutations,blocks=if(is.null(block)) NULL else md[[block]])
+      set.seed(20261030L)
+      model <- as.formula(paste('distance ~',design$rhs))
+      fit <- adonis2(model,data=md,permutations=control,by="margin")
+      result <- data.table(term=rownames(fit),as.data.frame(fit),check.names=FALSE)
+      setnames(result,"Pr(>F)","p_value")
+      fwrite(result,file.path(output,"permanova.tsv"),sep="\t")
+      status$status <- "measured";status$reason <- "";status$sample_ids <- as.list(eligible)
+      if ("group" %in% names(md) && length(unique(md$group)) >= 2L && all(table(md$group)>=2L)) {
+        dispersion <- betadisper(distance,md$group,bias.adjust=TRUE)
+        test <- permutest(dispersion,permutations=control)
+        fwrite(data.table(statistic=test$tab[1,"F"],p_value=test$tab[1,"Pr(>F)"]),file.path(output,"dispersion.tsv"),sep="\t")
+        status$dispersion <- "measured"
+      } else status$dispersion <- "insufficient_group_replicates"
+      }
+    } else status$reason <- "zero_between_sample_distance"
+  }
+  status$versions <- as.list(sapply(c('vegan','permute','data.table'),function(p) as.character(packageVersion(p))))
+  jsonlite::write_json(status,file.path(output,"status.json"),pretty=TRUE,auto_unbox=TRUE)
 }

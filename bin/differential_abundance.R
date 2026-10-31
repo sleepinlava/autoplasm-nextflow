@@ -129,8 +129,10 @@ if (is.na(min_prev) || min_prev < 0 || min_prev > 1) {
              "' (expected a number between 0 and 1)"))
 }
 
-ab <- fread(opts$abundance, colClasses = c(sample_id = "character", contig_id = "character"),
+identity_fields <- intersect(c("sample_id","contig_id","plasmid_id"), names(fread(opts$abundance,nrows=0)))
+ab <- fread(opts$abundance, colClasses = list(character=identity_fields),
             na.strings = NULL)
+if ("plasmid_id" %in% names(ab)) setnames(ab, "plasmid_id", "contig_id")
 required <- c("sample_id", "contig_id", "coverage")
 if (!all(required %in% names(ab)))
   die(paste0(opts$abundance, ": missing required columns: ", paste(setdiff(required, names(ab)), collapse = ", ")))

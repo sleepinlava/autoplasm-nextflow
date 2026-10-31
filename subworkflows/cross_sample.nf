@@ -1,3 +1,4 @@
+include { protocolAssets } from '../lib/protocol_assets'
 include { reportEvidence; reportSamples; reportSettings } from '../lib/report_events'
 /*
  * Cross-sample subworkflow: merged abundance tables (tables/), diversity and
@@ -7,6 +8,7 @@ include { reportEvidence; reportSamples; reportSettings } from '../lib/report_ev
 include { STATISTICS_INPUTS } from '../modules/cross_sample/statistics_inputs'
 include { DIVERSITY } from '../modules/cross_sample/diversity'
 include { DIFFERENTIAL_ABUNDANCE } from '../modules/cross_sample/differential'
+include { ANCOMBC2 } from '../modules/cross_sample/ancombc2'
 include { DESEQ2 } from '../modules/cross_sample/deseq2'
 include { NETWORK_PREPARE } from '../modules/cross_sample/network_prepare'
 include { FASTSPAR } from '../modules/cross_sample/fastspar'
@@ -49,15 +51,19 @@ workflow CROSS_SAMPLE {
         ch_valid_metadata = STATISTICS_INPUTS.out.metadata
         ch_stats_done = ch_stats_done.mix(ch_contig_merged, ch_plasmid_merged)
 
-        if (params.run_diversity && n_samples >= params.min_diversity_samples) {
-            DIVERSITY(ch_contig_merged, ch_valid_metadata, [file("${moduleDir}/../bin/diversity.R",checkIfExists:true), file("${moduleDir}/../bin/statistics_input_contract.R",checkIfExists:true)])
+        if (!params.short_read_protocol && params.run_diversity && n_samples >= params.min_diversity_samples) {
+            DIVERSITY(ch_plasmid_merged, ch_valid_metadata, [file("${moduleDir}/../bin/diversity.R",checkIfExists:true), file("${moduleDir}/../bin/statistics_design.R",checkIfExists:true), file("${moduleDir}/../bin/statistics_input_contract.R",checkIfExists:true)])
             ch_report_events = ch_report_events.mix(reportEvidence([channels: DIVERSITY.out], '11_diversity', 'DIVERSITY'))
             ch_stats_done = ch_stats_done.mix(DIVERSITY.out.metrics, DIVERSITY.out.beta)
         }
         if (params.run_differential_internal && n_groups >= 2) {
-            DIFFERENTIAL_ABUNDANCE(ch_contig_merged, ch_valid_metadata, [file("${moduleDir}/../bin/differential_abundance.R",checkIfExists:true), file("${moduleDir}/../bin/statistics_input_contract.R",checkIfExists:true)])
+            DIFFERENTIAL_ABUNDANCE(ch_plasmid_merged, ch_valid_metadata, [file("${moduleDir}/../bin/differential_abundance.R",checkIfExists:true), file("${moduleDir}/../bin/statistics_input_contract.R",checkIfExists:true)])
             ch_report_events = ch_report_events.mix(reportEvidence([channels: DIFFERENTIAL_ABUNDANCE.out], '11_diversity', 'DIFFERENTIAL_ABUNDANCE'))
             ch_stats_done = ch_stats_done.mix(DIFFERENTIAL_ABUNDANCE.out.results)
+        }
+        if (!params.short_read_protocol && params.run_ancombc2 && n_groups >= 2) {
+            ANCOMBC2(ch_plasmid_merged,ch_valid_metadata, protocolAssets("${moduleDir}/../bin",'ancombc2_plasmid.R'))
+            ch_report_events = ch_report_events.mix(reportEvidence([channels:ANCOMBC2.out],'11_diversity','ANCOMBC2'))
         }
         if (params.run_differential_deseq2 && n_groups >= 2) {
             DESEQ2(ch_plasmid_merged, ch_valid_metadata, [file("${moduleDir}/../bin/deseq2_plasmid.R",checkIfExists:true), file("${moduleDir}/../bin/statistics_input_contract.R",checkIfExists:true)])
