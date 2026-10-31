@@ -301,7 +301,7 @@ elif tool == 'minimap2':
         payload.update(unpaired=True, fastq=data)
         print(json.dumps(payload))
 elif tool == 'samtools':
-    if args[0] == 'version':
+    if args[0] in ['version','--version']:
         print('samtools 1.24')
     elif args[0] == 'cat':
         for name in args[1:]:
@@ -396,6 +396,9 @@ elif tool == 'coverm':
             rows.append(f'{name}\t{mean:.17g}\t{tpm:.17g}\t{rpkm:.17g}' + (f'\t{count}' if counted else ''))
         write(output, '\n'.join(rows) + '\n')
 elif tool == 'plasmidfinder.py':
+    if args in (['-h'],['--help']):
+        print('usage: plasmidfinder.py -i FASTA -o OUTPUT -x')
+        sys.exit(0)
     # nf-core plasmidfinder 2.1.6: `plasmidfinder.py -i <fasta> -o ./ -x`;
     # the module renames the five hard-coded products with the task prefix.
     assert '--legacy' not in args, 'Fixed PlasmidFinder 2.1.6 rejects --legacy'

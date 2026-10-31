@@ -255,7 +255,8 @@ def validate(base, empty, platform='illumina', assembler='opera_ms', long_input=
         assert sum(row['plasmid_call'] == 'plasmid' for row in consensus) == (0 if empty else 1)
     # diversity.R emits 4 metrics per sample (richness/shannon/simpson/pielou)
     assert len(rows(out / '11_diversity/diversity_metrics.tsv')) == 24
-    expected_tested = sum(truth['expected_primary_reads'][feature['owner']][kind][feature['local_id']]['count'] > 0 for feature in labels.values())
+    plasmid_features = {r['plasmid_id'] for r in plasmids}
+    expected_tested = sum(truth['expected_primary_reads'][labels[fid]['owner']][kind][labels[fid]['local_id']]['count'] > 0 for fid in plasmid_features)
     assert len(rows(out / '11_diversity/differential_abundance.tsv')) == expected_tested
     report = (out / 'report/report.md').read_text()
     assert '- Samples: 6' in report, 'Report lost samples'
