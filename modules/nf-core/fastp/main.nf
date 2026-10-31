@@ -40,16 +40,18 @@ process FASTP {
     // fastp (1.3.6) --thread excludes its reader threads (and gzip if interleaved); keep >= 2 so workers do the gz compression
     def is_interleaved = task.ext.args?.contains('--interleaved_in')
     def threads        = Math.max(2, task.cpus - (is_interleaved || !meta.single_end ? 2 : 1))
+    def read_files = reads instanceof List ? reads : [reads]
+    def input1 = "${prefix}${is_interleaved || meta.single_end ? '' : '_R1'}.fastq${read_files[0].name.endsWith('.gz') ? '.gz' : ''}"
     // Added soft-links to original fastqs for consistent naming in MultiQC
     // Use single ended for interleaved. Add --interleaved_in in config.
     if ( is_interleaved ) {
         """
 cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTP.task_command.sh'
-        [ ! -f  ${prefix}.fastq.gz ] && ln -sf $reads ${prefix}.fastq.gz
+        [ ! -f '${input1}' ] && ln -sf '${read_files[0]}' '${input1}'
 
         fastp \\
             --stdout \\
-            --in1 ${prefix}.fastq.gz \\
+            --in1 '${input1}' \\
             --thread $threads \\
             --json ${prefix}.fastp.json \\
             --html ${prefix}.fastp.html \\
@@ -62,10 +64,10 @@ cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTP.task_command.sh'
     } else if (meta.single_end) {
         """
 cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTP.task_command.sh'
-        [ ! -f  ${prefix}.fastq.gz ] && ln -sf $reads ${prefix}.fastq.gz
+        [ ! -f '${input1}' ] && ln -sf '${read_files[0]}' '${input1}'
 
         fastp \\
-            --in1 ${prefix}.fastq.gz \\
+            --in1 '${input1}' \\
             $out_fq1 \\
             --thread $threads \\
             --json ${prefix}.fastp.json \\
@@ -76,14 +78,15 @@ cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTP.task_command.sh'
             2>| >(tee ${prefix}.fastp.log >&2)
         """
     } else {
+        def input2 = "${prefix}_R2.fastq${read_files[1].name.endsWith('.gz') ? '.gz' : ''}"
         def merge_fastq = save_merged ? "-m --merged_out ${prefix}.merged.fastq.gz" : ''
         """
 cp -- "\${BASH_SOURCE[0]}" '${prefix}.FASTP.task_command.sh'
-        [ ! -f  ${prefix}_R1.fastq.gz ] && ln -sf ${reads[0]} ${prefix}_R1.fastq.gz
-        [ ! -f  ${prefix}_R2.fastq.gz ] && ln -sf ${reads[1]} ${prefix}_R2.fastq.gz
+        [ ! -f '${input1}' ] && ln -sf '${reads[0]}' '${input1}'
+        [ ! -f '${input2}' ] && ln -sf '${reads[1]}' '${input2}'
         fastp \\
-            --in1 ${prefix}_R1.fastq.gz \\
-            --in2 ${prefix}_R2.fastq.gz \\
+            --in1 '${input1}' \\
+            --in2 '${input2}' \\
             $out_fq1 \\
             $out_fq2 \\
             --json ${prefix}.fastp.json \\
