@@ -14,6 +14,7 @@ process EGGNOGMAPPER {
     tuple path(eggnog_data_dir), val(eggnog_data_identity)
 
     output:
+    tuple val('eggnog_db'), val(eggnog_data_identity), emit: database_identity
     tuple val(meta), path("*.emapper.annotations")   , emit: annotations
     tuple val(meta), path("*.emapper.seed_orthologs"), emit: orthologs, optional: true
     tuple val(meta), path("*.emapper.hits")          , emit: hits     , optional: true

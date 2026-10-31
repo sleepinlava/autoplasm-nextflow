@@ -14,6 +14,7 @@ process GENOMAD_ENDTOEND {
     tuple val(meta2), path(genomad_db), val(genomad_db_identity)
 
     output:
+    tuple val('genomad_db'), val(genomad_db_identity), emit: database_identity
     tuple val(meta), path("${prefix}/")                                                              , emit: genomad_results
     tuple val(meta), path("${prefix}/*_aggregated_classification/*_aggregated_classification.tsv")   , emit: aggregated_classification, optional: true
     tuple val(meta), path("${prefix}/*_marker_classification/*_marker_classification.tsv")           , emit: marker_classification, optional: true

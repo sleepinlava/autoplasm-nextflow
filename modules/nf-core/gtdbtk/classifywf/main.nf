@@ -16,6 +16,7 @@ process GTDBTK_CLASSIFYWF {
     path(autoplasm_helper_0, stageAs: 'normalize_gtdb_bins.py')
 
     output:
+    tuple val('gtdbtk_db'), val(db_identity), emit: database_identity
     tuple val(meta), path("${prefix}")                               , emit: gtdb_outdir
     tuple val(meta), path("${prefix}/classify/*.summary.tsv")        , emit: summary
     tuple val(meta), path("${prefix}/classify/*.classify.tree")      , emit: tree       , optional: true

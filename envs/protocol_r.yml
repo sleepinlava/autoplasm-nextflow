@@ -1,0 +1,12 @@
+name: autoplasm-protocol-r
+channels: [conda-forge, bioconda]
+dependencies:
+  - r-base=4.4.3
+  - r-vegan=2.6_8
+  - r-data.table=1.16.4
+  - r-jsonlite=1.8.9
+  - r-digest=0.6.37
+  - r-rmarkdown=2.29
+  - pandoc=3.6.4
+  - bioconductor-biostrings=2.74.0
+  - bioconductor-rsamtools=2.22.0

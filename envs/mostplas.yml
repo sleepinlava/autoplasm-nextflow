@@ -1,0 +1,7 @@
+name: autoplasm-mostplas
+channels: [conda-forge, bioconda]
+dependencies:
+  - python=3.10
+  - pytorch=2.5.1=cpu*
+  - biopython=1.85
+  - numpy=1.26

@@ -13,6 +13,7 @@ process AMRFINDERPLUS_RUN {
     tuple path(db), val(db_identity)
 
     output:
+    tuple val('amrfinderplus_db'), val(db_identity), emit: database_identity
     tuple val(meta), path("${prefix}.tsv")          , emit: report
     tuple val(meta), path("${prefix}-mutations.tsv"), emit: mutation_report, optional: true
     env 'VER'                                       , emit: tool_version

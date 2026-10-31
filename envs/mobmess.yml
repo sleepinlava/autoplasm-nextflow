@@ -1,0 +1,16 @@
+name: autoplasm-mobmess
+channels: [conda-forge, bioconda]
+dependencies:
+  - python=3.9
+  - numpy=1.23
+  - pandas=1.5
+  - scipy=1.10
+  - numba=0.57
+  - python-igraph=0.10
+  - scikit-learn=1.2
+  - python-blosc=1.11.1
+  - mummer4=4.0.0rc1
+  - pip
+  - pip:
+      - plasx @ git+https://github.com/michaelkyu/PlasX.git@5c9acfd00a597da27ef5261acf72dbaf2117b645
+      - mobmess @ git+https://github.com/michaelkyu/MobMess.git@97c0cfc0f810062e32dcf34f700b1fc8be8029a4

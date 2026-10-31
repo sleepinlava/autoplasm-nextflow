@@ -1,0 +1,3 @@
+name: autoplasm-seqkit
+channels: [conda-forge, bioconda]
+dependencies: [python=3.12, seqkit=2.10.1]

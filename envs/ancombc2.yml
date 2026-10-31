@@ -1,0 +1,9 @@
+name: autoplasm-ancombc2
+channels: [conda-forge, bioconda]
+dependencies:
+  - r-base=4.4
+  - bioconductor-ancombc=2.8.0
+  - r-cvxr=1.0_15
+  - r-lme4=1.1_37=r44h3697838_2
+  - r-data.table
+  - r-jsonlite

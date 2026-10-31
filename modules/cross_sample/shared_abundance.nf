@@ -18,6 +18,7 @@ process SHARED_ABUNDANCE_TABLES {
     path 'quantification/plasmid_abundance.tsv', emit: plasmids
     path 'quantification/sample_states.tsv', emit: states
     path 'quantification/method.json', emit: method
+    path 'quantification/prevalence.tsv', emit: prevalence
     tuple val("${task.process}"), path("SHARED_ABUNDANCE_TABLES.task_command.sh"),
           val('python3 analysis_code/collect_shared_abundance.py -h'), eval('python3 analysis_code/collect_shared_abundance.py -h'),
           eval("sha256sum 'SHARED_ABUNDANCE_TABLES.task_command.sh'"),
@@ -32,6 +33,8 @@ process SHARED_ABUNDANCE_TABLES {
     cp -L source_assets/* analysis_code/
     python3 analysis_code/collect_shared_abundance.py \\
         --catalogue ${catalogue} --sample-ids ${quoted.call(sample_ids)} \\
-        --tables ${quoted.call(tables)} --mapper '${mapper}' --out-dir quantification
+        --tables ${quoted.call(tables)} --mapper '${mapper}' --out-dir quantification \\
+        --count-unit '${params.short_read_protocol ? 'proper_paired_fragment' : 'primary_read_alignment'}' \\
+        --min-breadth ${params.protocol_min_breadth} --min-depth ${params.protocol_min_depth}
     """
 }

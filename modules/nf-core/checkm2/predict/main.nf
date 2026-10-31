@@ -13,6 +13,7 @@ process CHECKM2_PREDICT {
     tuple val(dbmeta), path(db), val(db_identity)
 
     output:
+    tuple val('checkm2_db'), val(db_identity), emit: database_identity
     tuple val(meta), path("${prefix}")                   , emit: checkm2_output
     tuple val(meta), path("${prefix}_checkm2_report.tsv"), emit: checkm2_tsv
     tuple val("${task.process}"), val('checkm2'), eval('checkm2 --version'), topic: versions, emit: versions_checkm2_predict

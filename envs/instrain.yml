@@ -1,0 +1,3 @@
+name: autoplasm-instrain
+channels: [conda-forge, bioconda]
+dependencies: [python=3.10, instrain=1.12.0, samtools=1.21]

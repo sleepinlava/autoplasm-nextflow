@@ -17,6 +17,7 @@ process BAKTA_BAKTA {
     path hmms
 
     output:
+    tuple val('bakta_db'), val(db_identity), emit: database_identity
     tuple val(meta), path("${prefix}.embl"), emit: embl
     tuple val(meta), path("${prefix}.faa"), emit: faa
     tuple val(meta), path("${prefix}.ffn"), emit: ffn

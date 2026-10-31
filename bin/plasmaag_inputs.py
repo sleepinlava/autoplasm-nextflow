@@ -148,9 +148,11 @@ def validate(sample_map, native_results, output):
             if fasta(path) != expected[cluster]:
                 raise ValueError('Native PlasMAAG bin DNA differs from original sample')
         groups_by_class[category] = expected
+    scores = {}
     for name in ['plasmid_scores.tsv', 'virus_genomes_scores.tsv']:
         rows = table(native_results / name, ['clustername', 'chromosome_score', 'plasmid_score', 'virus_score'])
         for row in rows:
+            scores[row['clustername']] = row
             values = [float(row[k]) for k in ['chromosome_score', 'plasmid_score', 'virus_score']]
             if not row['clustername'] or any(not math.isfinite(v) or not 0 <= v <= 1 for v in values) or abs(sum(values) - 1) > .0021:
                 raise ValueError('Invalid native PlasMAAG score')
@@ -164,6 +166,18 @@ def validate(sample_map, native_results, output):
             if {origin[name][0] for name in members} != {prefix}:
                 continue
             write_fasta(folder / (cluster + '.fna'), {origin[name][1]: dna for name, dna in members.items()}); count += 1
+        with (folder / 'bin_evidence.tsv').open('w') as stream:
+            writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
+            writer.writerow(['bin_id','plasmid_score','chromosome_score','virus_score','graph_support'])
+            for cluster,members in groups_by_class['candidate_plasmids'].items():
+                if {origin[name][0] for name in members} == {prefix}:
+                    score=scores[cluster]
+                    writer.writerow([cluster,score['plasmid_score'],score['chromosome_score'],score['virus_score'],
+                                     'assembly_graph_available_not_independently_validated' if state['assembler']=='metaspades' else 'no_assembly_graph'])
+        genomes = folder / 'cellular'; genomes.mkdir()
+        for cluster, members in groups_by_class['candidate_genomes'].items():
+            if {origin[name][0] for name in members} == {prefix}:
+                write_fasta(genomes / (cluster + '.fna'), {origin[name][1]: dna for name, dna in members.items()})
         samples.append(dict(meta=meta, tool_contig_prefix=prefix, relative_directory=str(folder.relative_to(output)),
                             bins=count, state='candidate_plasmid_bins' if count else 'no_candidate_plasmid_bins'))
     manifest = dict(schema=1, samples=samples, native_results='native_results',

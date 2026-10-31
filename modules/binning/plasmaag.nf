@@ -15,6 +15,8 @@ process PLASMAAG {
     tuple path(input_helper, stageAs: 'plasmaag_inputs.py'), path(runtime_helper, stageAs: 'plasmaag_checked.py')
 
     output:
+    tuple val('genomad_db'), val(database_identity), emit: database_identity
+    tuple val('plasmaag_source'), val(program_identity), emit: source_identity
     tuple val(meta), path("${meta.id}.plasmaag", type: 'dir'), emit: bins
     tuple val(meta), path("${meta.id}.plasmaag_runtime.json"), emit: runtime
     tuple val("${task.process}"), val(meta), path("${meta.id}.PLASMAAG.task_command.sh"),

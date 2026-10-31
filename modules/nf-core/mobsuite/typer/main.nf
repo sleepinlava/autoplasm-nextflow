@@ -25,6 +25,7 @@ process MOBSUITE_TYPER {
     path(preflight_helper, stageAs: 'mobsuite_preflight.py')
 
     output:
+    tuple val('mob_suite_db'), val(db_identity), emit: database_identity
     tuple val(meta), path("*.txt"), emit: report
     tuple val(meta), path("*_biomarker_report.txt"), optional: true, emit: biomarker_report
     tuple val(meta), path("*_mge_report.txt"), optional: true, emit: mge_report

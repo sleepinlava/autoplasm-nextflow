@@ -31,7 +31,7 @@ def number(text, location, integer=False):
     return str(int(value)) if integer else text
 
 
-def collect(catalogue, sample_ids, tables, mapper, output):
+def collect(catalogue, sample_ids, tables, mapper, output, count_unit="primary_read_alignment", min_breadth=0.75, min_depth=1.0):
     _, features = read_rows(catalogue / 'features.tsv')
     _, samples = read_rows(catalogue / 'samples.tsv')
     expected = [r['sample_id'] for r in samples]
@@ -48,17 +48,22 @@ def collect(catalogue, sample_ids, tables, mapper, output):
     try:
         measured = dict(zip(sample_ids, tables))
         states = []
+        paired = count_unit == "proper_paired_fragment"
+        prevalence = dict.fromkeys((r["feature_id"] for r in features), 0)
         with (stage / 'contig_abundance.tsv').open('w') as all_stream, (stage / 'plasmid_abundance.tsv').open('w') as plasmid_stream:
             writers = [csv.writer(s, delimiter='\t', lineterminator='\n') for s in [all_stream, plasmid_stream]]
             common = ['sample_id', 'rpkm', 'tpm', 'coverage', 'raw_count', 'mapper', 'count_unit']
-            writers[0].writerow(['contig_id'] + common)
-            writers[1].writerow(['plasmid_id'] + common)
+            extra = ['median_depth','breadth','ambiguous_alignment_fraction'] if paired else []
+            writers[0].writerow(['contig_id'] + common + extra)
+            writers[1].writerow(['plasmid_id'] + common + extra)
             for sample in expected:
                 values = {}
                 if features:
                     fields, rows = read_rows(measured[sample])
                     columns = {}
-                    for key, suffix in [('coverage', ' Mean'), ('rpkm', ' RPKM'), ('tpm', ' TPM'), ('raw_count', ' Read Count')]:
+                    measurements = [('coverage', ' Mean'), ('rpkm', ' RPKM'), ('tpm', ' TPM'), ('raw_count', ' Read Count')]
+                    if paired: measurements += [('median_depth',' Median'),('breadth',' Covered Fraction'),('ambiguous_alignment_fraction',' Ambiguous Alignment Fraction')]
+                    for key, suffix in measurements:
                         matches = [f for f in fields[1:] if f.endswith(suffix)]
                         if len(matches) != 1:
                             raise ValueError(f'{measured[sample]}: expected exactly one {suffix.strip()} column')
@@ -75,7 +80,8 @@ def collect(catalogue, sample_ids, tables, mapper, output):
                     fid = feature['feature_id']
                     val = values[fid]
                     total += int(val['raw_count'])
-                    row = [fid, sample, val['rpkm'], val['tpm'], val['coverage'], val['raw_count'], mapper, 'primary_read_alignment']
+                    row = [fid, sample, val['rpkm'], val['tpm'], val['coverage'], val['raw_count'], mapper, count_unit] + [val[k] for k in extra]
+                    prevalence[fid] += (float(val['breadth']) >= min_breadth and float(val['coverage']) >= min_depth) if paired else float(val['coverage']) > 0
                     writers[0].writerow(row)
                     if feature['is_plasmid'] == '1':
                         writers[1].writerow(row)
@@ -85,11 +91,15 @@ def collect(catalogue, sample_ids, tables, mapper, output):
             writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
             writer.writerow(['sample_id', 'reference_features', 'plasmid_features', 'eligible_read_alignments', 'plasmid_read_alignments', 'quantification_status'])
             writer.writerows(states)
-        (stage / 'method.json').write_text(json.dumps({'mapper': mapper, 'count_unit': 'primary_read_alignment',
-            'paired_end': 'each eligible mate counts separately; not fragment counts',
+        with (stage / 'prevalence.tsv').open('w') as stream:
+            writer=csv.writer(stream,delimiter='\t',lineterminator='\n')
+            writer.writerow(['feature_id','detected_samples','total_samples','prevalence','detection_rule'])
+            for fid,n in sorted(prevalence.items()): writer.writerow([fid,n,len(expected),n/len(expected),'breadth>='+str(min_breadth)+';depth>='+str(min_depth) if paired else 'coverage>0'])
+        (stage / 'method.json').write_text(json.dumps({'mapper': mapper, 'count_unit': count_unit,
+            'paired_end': 'proper primary same-reference pairs, both MAPQ>=10 and !=255; once per query name' if paired else 'each eligible mate counts separately; not fragment counts',
             'alignment_filter': 'exclude unmapped, secondary and supplementary; MAPQ >= 10 and != 255',
             'ambiguity': 'MAPQ below 10 excluded (Bowtie2 ties may have MAPQ 1); MAPQ is aligner confidence, not proof of unique biological origin',
-            'coverage': 'CoverM mean/TPM/RPKM/count over the same filtered BAM; end exclusion 0',
+            'coverage': 'pysam paired-fragment depth, overlapping mates once per base; breadth/median across all positions; RPKM/TPM from fragment counts' if paired else 'CoverM mean/TPM/RPKM/count over the same filtered BAM; end exclusion 0',
             'reference': 'all samples compete against one assembly-sequence catalogue; plasmid subset by source union'}, indent=2) + '\n')
         stage.rename(output)
     except BaseException:
@@ -104,8 +114,11 @@ if __name__ == '__main__':
     parser.add_argument('--tables', nargs='*', type=Path, default=[])
     parser.add_argument('--mapper', required=True)
     parser.add_argument('--out-dir', type=Path, required=True)
+    parser.add_argument('--count-unit',choices=['primary_read_alignment','proper_paired_fragment'],default='primary_read_alignment')
+    parser.add_argument('--min-breadth',type=float,default=0.75)
+    parser.add_argument('--min-depth',type=float,default=1.0)
     args = parser.parse_args()
     try:
-        collect(args.catalogue, args.sample_ids, args.tables, args.mapper, args.out_dir)
+        collect(args.catalogue, args.sample_ids, args.tables, args.mapper, args.out_dir, args.count_unit, args.min_breadth, args.min_depth)
     except (ValueError, OSError, KeyError) as error:
         parser.exit(2, str(error) + '\n')
