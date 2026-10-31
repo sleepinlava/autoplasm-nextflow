@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="AutoPlasm Nextflow DSL2 流程设计：五平台路由、00–12 分析阶段、模块开关、通道依赖与输出结构。"
+    />
+    <title>AutoPlasm · Nextflow 流程设计</title>
+    <link rel="stylesheet" href="analysis-framework.css" />
+  </head>
+  <body>
+    <aside class="wrap" aria-label="文档版本说明" style="padding: 1rem">
+      2026-10-31 文档更新：本页交互图展示通用五平台，未模拟 short_read_protocol。
+      <a href="README.md">文档导航</a> · <a href="platform-workflows.md">完整平台路线与 protocol</a> ·
+      <a href="usage.md">使用指南</a> · <a href="../PROTOCOL.md">协议资源和交付</a>。
+      页面保留的早期审查、视觉截图和设计 PDF 是历史记录。
+    </aside>
+    <a class="skip" href="#framework">跳到流程图</a>
+
+    <header class="bar">
+      <div class="wrap">
+        <a class="brand" href="#top"
+          ><span class="brand-mark" aria-hidden="true"></span>AutoPlasm<span
+            class="edition"
+          >
+            / NEXTFLOW DSL2</span
+          ></a
+        >
+        <nav aria-label="页面导航">
+          <a href="#framework">流程总览</a><a href="#modules">模块设计</a
+          ><a href="#configure">参数交互</a><a href="#outputs">输出与实现</a>
+        </nav>
+        <span class="edition">PIPELINE NOTES · 2026.10</span>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero wrap">
+        <div class="hero-grid">
+          <div>
+            <div class="eyebrow">Our metagenomic plasmid pipeline</div>
+            <h1>多种测序输入，<br />一条<span>质粒分析主线。</span></h1>
+            <p>
+              AutoPlasm 以 Nextflow DSL2
+              组织五个平台子工作流，从原始数据、组装与质粒识别，延伸到分型、注释、宿主候选和跨样本分析。
+            </p>
+            <div class="actions">
+              <a class="primary" href="#framework">展开我们的流程 ↗</a
+              ><a class="ghost" href="#modules">查看默认工具链</a>
+            </div>
+          </div>
+          <figure class="hero-figure">
+            <svg
+              viewBox="0 0 540 380"
+              role="img"
+              aria-labelledby="heroTitle heroDesc"
+            >
+              <title id="heroTitle">从测序片段重建质粒及其生态关系</title>
+              <desc id="heroDesc">
+                蓝色短读段汇入环形质粒，金色功能片段与绿色宿主候选形成证据联系。仅为概念示意。
+              </desc>
+              <defs>
+                <pattern
+                  id="grid"
+                  width="28"
+                  height="28"
+                  patternUnits="userSpaceOnUse"
+                >
+                  <path
+                    d="M28 0H0V28"
+                    fill="none"
+                    stroke="#8caac4"
+                    stroke-opacity=".09"
+                    stroke-width=".6"
+                  />
+                </pattern>
+              </defs>
+              <rect x="5" y="15" width="530" height="345" fill="url(#grid)" />
+              <path
+                d="M40 320H505M65 345V40"
+                stroke="#52677c"
+                stroke-width=".7"
+              />
+              <path
+                d="M501 316l6 4-6 4M61 44l4-6 4 6"
+                fill="none"
+                stroke="#52677c"
+              />
+              <text x="27" y="72" fill="#6e8ba4" font-size="12" class="math">
+                evidence
+              </text>
+              <text x="465" y="341" fill="#6e8ba4" font-size="12" class="math">
+                sequence
+              </text>
+              <g
+                stroke="#65bcf5"
+                stroke-width="3"
+                stroke-linecap="round"
+                class="drift"
+              >
+                <path
+                  d="M91 141h30m-21 15h46m-64 16h31m-9 16h47m-58 17h26m-35 15h40m-21 16h32"
+                />
+              </g>
+              <path
+                d="M147 187C177 187 172 169 185 169"
+                fill="none"
+                stroke="#65bcf5"
+                stroke-dasharray="3 5"
+              />
+              <circle
+                cx="270"
+                cy="205"
+                r="100"
+                fill="none"
+                stroke="#65bcf5"
+                stroke-opacity=".12"
+              />
+              <g class="orbit">
+                <circle
+                  cx="270"
+                  cy="205"
+                  r="83"
+                  fill="none"
+                  stroke="#65bcf5"
+                  stroke-width="2.5"
+                />
+                <circle
+                  cx="270"
+                  cy="205"
+                  r="76"
+                  fill="none"
+                  stroke="#65bcf5"
+                  stroke-width=".8"
+                  stroke-opacity=".6"
+                />
+                <circle
+                  cx="270"
+                  cy="205"
+                  r="83"
+                  fill="none"
+                  stroke="#edc66b"
+                  stroke-width="8"
+                  stroke-dasharray="52 470"
+                  transform="rotate(-72 270 205)"
+                />
+                <circle
+                  cx="270"
+                  cy="205"
+                  r="83"
+                  fill="none"
+                  stroke="#62d8bc"
+                  stroke-width="6"
+                  stroke-dasharray="34 488"
+                  transform="rotate(40 270 205)"
+                />
+                <circle
+                  cx="270"
+                  cy="205"
+                  r="83"
+                  fill="none"
+                  stroke="#bcabeb"
+                  stroke-width="6"
+                  stroke-dasharray="25 497"
+                  transform="rotate(168 270 205)"
+                />
+              </g>
+              <text
+                x="270"
+                y="200"
+                text-anchor="middle"
+                font-size="24"
+                fill="#edf1f5"
+                class="math"
+              >
+                p ∈ P
+              </text>
+              <text
+                x="270"
+                y="223"
+                text-anchor="middle"
+                font-size="9"
+                fill="#91a5b9"
+                letter-spacing="2"
+              >
+                PLASMID CANDIDATE
+              </text>
+              <path
+                d="M330 147Q376 109 420 108M352 207Q402 193 443 221M318 270Q363 296 405 282"
+                fill="none"
+                stroke="#62d8bc"
+                stroke-dasharray="4 5"
+                stroke-opacity=".7"
+              />
+              <g fill="#0f2220" stroke="#62d8bc" stroke-width="1.3">
+                <ellipse
+                  cx="437"
+                  cy="108"
+                  rx="23"
+                  ry="15"
+                  transform="rotate(-25 437 108)"
+                />
+                <ellipse
+                  cx="463"
+                  cy="228"
+                  rx="23"
+                  ry="15"
+                  transform="rotate(30 463 228)"
+                />
+                <ellipse
+                  cx="427"
+                  cy="282"
+                  rx="22"
+                  ry="14"
+                  transform="rotate(-10 427 282)"
+                />
+              </g>
+              <g fill="#62d8bc" font-size="10">
+                <text x="468" y="100">h₁</text>
+                <text x="490" y="238">h₂</text>
+                <text x="455" y="290">h₃</text>
+              </g>
+              <path
+                d="M270 106V75h55"
+                stroke="#edc66b"
+                stroke-width=".8"
+                fill="none"
+              />
+              <text x="334" y="78" fill="#edc66b" font-size="11">
+                基因与可移动元件
+              </text>
+              <text x="80" y="267" fill="#65bcf5" font-size="11">reads</text>
+              <text x="362" y="168" fill="#91a5b9" font-size="10">
+                候选关联 ≠ 已证实宿主
+              </text>
+            </svg>
+            <figcaption>概念示意 · 所有图形均不代表真实样本结果</figcaption>
+          </figure>
+        </div>
+        <div class="hero-foot">
+          <span><b>05</b> 平台入口</span><span><b>00—12</b> 阶段与独立报告</span
+          ><span><code>tuple(meta, files)</code> 贯穿样本身份</span
+          ><button class="motion-toggle" id="motion" aria-pressed="false">
+            暂停动画
+          </button>
+        </div>
+      </section>
+
+      <section class="section" id="framework">
+        <div class="wrap">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">01 / One entry, five routes</div>
+              <h2>从 main.nf，<span class="phrase">进入共同主干。</span></h2>
+            </div>
+            <p>
+              切换平台查看输入、工具与比对路径。点击流程节点阅读具体模块、参数和产物。图中省略部分文件依赖；阶段编号用于输出组织，各分支按通道依赖执行。
+            </p>
+          </div>
+          <div class="toolbar">
+            <div
+              class="segmented"
+              id="platforms"
+              role="group"
+              aria-label="输入平台"
+            >
+              <button data-platform="illumina" aria-pressed="true">
+                Illumina</button
+              ><button data-platform="ont" aria-pressed="false">ONT</button
+              ><button data-platform="pacbio_hifi" aria-pressed="false">
+                PacBio HiFi</button
+              ><button data-platform="hybrid" aria-pressed="false">
+                Hybrid</button
+              ><button data-platform="assembly" aria-pressed="false">
+                Assembly
+              </button>
+            </div>
+            <span class="tag blue" id="platform-code">--platform illumina</span>
+          </div>
+          <div class="platform-note" id="platform-note"></div>
+          <div
+            class="platform-strip"
+            id="platform-strip"
+            aria-live="polite"
+          ></div>
+          <div class="board">
+            <div class="diagram-title">
+              <div class="eyebrow">WORKFLOW / 点击节点展开</div>
+              <span>实线：主干 / 默认分支<br />虚线：可选或条件分支</span>
+            </div>
+            <svg
+              class="dag-desktop"
+              id="dag"
+              viewBox="0 0 1080 545"
+              role="group"
+              aria-label="AutoPlasm 依赖关系示意图"
+            ></svg>
+            <div
+              class="dag-mobile"
+              id="mobile-stages"
+              role="group"
+              aria-label="分析阶段"
+            ></div>
+            <div
+              class="chapter live-chapter"
+              id="chapter"
+              aria-live="polite"
+            ></div>
+            <div class="chapter-controls">
+              <div class="stage-pager">
+                <button id="prev" aria-label="上一阶段">← 上一阶段</button
+                ><select id="stage-select" aria-label="跳转到分析阶段"></select
+                ><button id="next" aria-label="下一阶段">下一阶段 →</button>
+              </div>
+              <span class="small" id="step-count"></span
+              ><button id="play" aria-pressed="false">▶ 自动讲解</button>
+            </div>
+          </div>
+          <div class="legend">
+            <span><i></i>当前选中的分析阶段</span
+            ><span><i class="gold"></i>默认关闭的可选扩展</span
+            ><span><i class="teal"></i>在下方参数区启用的演示分支</span
+            ><span>暗色：所选平台跳过</span>
+          </div>
+          <div class="print-stages" id="print-stages"></div>
+        </div>
+      </section>
+
+      <section class="section" id="modules">
+        <div class="wrap">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">02 / Shared subworkflows</div>
+              <h2>
+                共同模块，<span class="phrase">让平台差异止于入口。</span>
+              </h2>
+            </div>
+            <p>
+              平台子工作流把序列、reads、图和覆盖度传入共享分析模块。默认工具负责形成基础产物；列表参数按需实例化扩展模块。
+            </p>
+          </div>
+          <div class="default-grid">
+            <article class="module-box">
+              <span class="tag blue">必选主干 · 04</span>
+              <h3>质粒检测与结构</h3>
+              <div class="module-tools">
+                geNomad → 共识整合 → 结构检测<small
+                  >可选 PLASMe / PlasX / Platon</small
+                >
+              </div>
+              <p>
+                保留逐工具判定、支持 /
+                冲突信息和候选序列；无质粒样本不进入需要非空 FASTA 的下游工具。
+              </p>
+              <code
+                >PLASMID_DETECTION<br />plasmid_detection_tools =
+                ['genomad']</code
+              >
+            </article>
+
+            <article class="module-box">
+              <span class="tag teal">默认开启 · 06</span>
+              <h3>复制子与 MOB 分型</h3>
+              <div class="module-tools">
+                PlasmidFinder + MOB-typer<small
+                  >可选 COPLA / CONJScan / MacSyFinder</small
+                >
+              </div>
+              <p>
+                从共识质粒 FASTA
+                分析复制子、可移动性相关标记；与功能注释、分箱并行。
+              </p>
+              <code
+                >PLASMID_DOWNSTREAM<br />typing_tools =
+                ['plasmidfinder','mob_typer']</code
+              >
+            </article>
+
+            <article class="module-box">
+              <span class="tag teal">默认开启 · 08</span>
+              <h3>基因与可移动元件注释</h3>
+              <div class="module-tools">
+                Bakta + AMRFinderPlus<br />ISEScan + IntegronFinder<small
+                  >可选 Prodigal / RGI / eggNOG-mapper 等</small
+                >
+              </div>
+              <p>
+                生成基因、AMR 候选、IS 和 integron 结果；Bakta 的 GBFF 可供可选
+                clinker 使用。
+              </p>
+              <code>PLASMID_DOWNSTREAM<br />annotation_tools = [...]</code>
+            </article>
+
+            <article class="module-box">
+              <span class="tag teal">默认开启 · 07</span>
+              <h3>群落 profile 与宿主扩展</h3>
+              <div class="module-tools">
+                MetaPhlAn（reads 路径）<small
+                  >可选 Kraken2 / PlasmidHostFinder；MAG /
+                  宿主关联默认关闭</small
+                >
+              </div>
+              <p>
+                先区分群落组成与质粒宿主候选，再按条件接入
+                MAG、共丰度、序列组成或长读桥接。
+              </p>
+              <code>HOST_PREDICTION / MAG_HOST<br />HOST_LINKING</code>
+            </article>
+
+            <article class="module-box">
+              <span class="tag teal">默认开启 · 09</span>
+              <h3>跨样本质粒目录</h3>
+              <div class="module-tools">
+                MMseqs2 聚类<small>可选 BLASTn / MUMmer / clinker</small>
+              </div>
+              <p>
+                收集候选、增加样本前缀并聚类；默认 identity 0.95、target
+                coverage 0.8。当前目录未反馈给定量分支。
+              </p>
+              <code>COMPARATIVE<br />comparative_tools = ['mmseqs2']</code>
+            </article>
+
+            <article class="module-box">
+              <span class="tag teal">有 reads 时开启 · 10—12</span>
+              <h3>定量与跨样本汇总</h3>
+              <div class="module-tools">
+                bowtie2 / minimap2 → CoverM<small
+                  >默认质粒多样性与内部差异；DESeq2 / FastSpar
+                  默认关闭</small
+                >
+              </div>
+              <p>
+                区分局部覆盖与共享统计：Hybrid 局部 contig 覆盖可合并两路 BAM；
+                跨样本 contig 和 plasmid 表均由统一参考上的短读重映射生成。
+              </p>
+              <code>PLASMID_ABUNDANCE<br />CROSS_SAMPLE</code>
+            </article>
+          </div>
+          <div class="audit-note">
+            这里展示当前仓库的设计与接线。结构候选、宿主候选与生态统计各有适用边界，详见末尾的
+            <a href="#audit">实现审查说明 ↓</a>。
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="configure">
+        <div class="wrap">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">03 / Parameters become branches</div>
+              <h2>一个开关，<span class="phrase">改变一条计算分支。</span></h2>
+            </div>
+            <p>
+              参数区演示默认开关、样本门槛和命令结构；只改变页面展示，不修改项目配置或提交计算任务。
+            </p>
+          </div>
+          <div class="two-col">
+            <article class="lab-card">
+              <div class="lab-header">
+                <h3>可选分支如何接入？</h3>
+                <span class="tag gold">默认均关闭</span>
+              </div>
+              <p>
+                选择分支后，流程图同步标记相应节点。数据库路径以占位符呈现，需要替换成真实资源。
+              </p>
+              <div class="toggle-row">
+                <input id="binning" type="checkbox" /><label for="binning"
+                  >质粒分箱 · MOB-recon<small
+                    >--plasmid_binning_tools mob_recon</small
+                  ></label
+                ><span class="tag gold">05</span>
+              </div>
+              <div class="toggle-row">
+                <input id="mag" type="checkbox" /><label for="mag"
+                  >MAG 基因组链<small
+                    >MetaBAT2 + CheckM2 + GTDB-Tk</small
+                  ></label
+                ><span class="tag gold">07</span>
+              </div>
+              <div class="toggle-row">
+                <input id="linking" type="checkbox" /><label for="linking"
+                  >宿主–质粒共丰度关联<small
+                    >--host_plasmid_linking true</small
+                  ></label
+                ><span class="tag gold">07</span>
+              </div>
+              <div class="toggle-row">
+                <input id="network" type="checkbox" /><label for="network"
+                  >FastSpar 共变网络<small>--run_network true</small></label
+                ><span class="tag gold">12</span>
+              </div>
+              <div class="control-box">
+                <label for="samples"
+                  >演示样本总数
+                  <output id="samples-value" for="samples">6</output></label
+                ><input
+                  id="samples"
+                  type="range"
+                  min="1"
+                  max="40"
+                  value="6"
+                  aria-label="演示样本总数"
+                />
+              </div>
+              <div class="count-control">
+                <label for="groups">演示分组数</label
+                ><select id="groups">
+                  <option value="1">1 组</option>
+                  <option value="2" selected>2 组</option>
+                  <option value="3">3 组</option>
+                  <option value="4">4 组</option>
+                </select>
+              </div>
+              <p class="small">
+                按尽量均衡分组演示最小重复数；这些阈值表示运行条件，不能代替真实实验设计与统计功效。
+              </p>
+              <div id="runtime-gates" aria-live="polite"></div>
+            </article>
+
+            <article class="lab-card">
+              <div class="terminal-header">
+                <h3>对应的启动命令</h3>
+                <label for="profile"
+                  >环境
+                  <select id="profile" aria-label="执行环境">
+                    <option>conda</option>
+                    <option>mamba</option>
+                    <option>docker</option>
+                    <option>singularity</option>
+                  </select></label
+                >
+              </div>
+              <pre
+                class="command"
+                id="command"
+                tabindex="0"
+                aria-label="示例 Nextflow 命令"
+              ></pre>
+              <div class="lab-header">
+                <span class="small">数据库和样本表路径需自行替换</span
+                ><button id="copy-command">复制示例</button>
+              </div>
+              <div class="runtime-path">
+                <span class="eyebrow">当前平台的数据路径</span>
+                <p id="runtime-path"></p>
+                <code id="platform-source"></code>
+              </div>
+              <details>
+                <summary>运行之前，哪些条件需要满足？</summary>
+                <ul>
+                  <li>
+                    样本 ID 唯一，输入字段符合平台要求；sample_id、group
+                    与文件对应。
+                  </li>
+                  <li>
+                    所选工具和 profile 可用，所需数据库参数已提供；Dorado 与
+                    OPERA-MS 需要单独安装。
+                  </li>
+                  <li>
+                    使用独立 outdir，记录软件 /
+                    数据库版本；示例不宣称实际环境已就绪。
+                  </li>
+                </ul>
+              </details>
+            </article>
+          </div>
+          <div class="mini-heading">INSIDE STAGE 04 / 共识规则</div>
+          <div class="two-col">
+            <article class="lab-card">
+              <div class="lab-header">
+                <h3>多个判定，怎样整合？</h3>
+                <button id="disagreement">载入检测器分歧</button>
+              </div>
+              <p>
+                修改参与工具、权重与模拟判定，查看加权、严格多数、交集或单工具规则。默认只有
+                geNomad。
+              </p>
+              <div class="detector head">
+                <span>参与检测器</span><span>权重 w</span><span>模拟判定</span>
+              </div>
+              <div id="detectors"></div>
+              <div class="count-control">
+                <label for="method">共识方法</label
+                ><select id="method">
+                  <option value="weighted_vote">加权投票</option>
+                  <option value="majority_vote">严格多数</option>
+                  <option value="intersection">交集</option>
+                  <option value="single_tool">仅 geNomad</option>
+                </select>
+              </div>
+            </article>
+            <article class="lab-card">
+              <span class="eyebrow">plasmid_consensus.R</span>
+              <div class="equation" id="equation"></div>
+              <div class="score-bar" aria-hidden="true">
+                <div class="score-fill" id="score-fill"></div>
+                <span class="score-label">0.5</span>
+              </div>
+              <div
+                class="result"
+                id="consensus-result"
+                aria-live="polite"
+              ></div>
+              <p class="small" id="consensus-note"></p>
+              <div class="lab-copy">
+                实现保留逐工具预测、共识 TSV 与候选
+                FASTA。支持权重比例是规则分数；四个工具沿用默认权重时，geNomad
+                的 0.6 权重已足以单独通过加权阈值。
+              </div>
+              <p class="small" style="margin-top: 20px">
+                这个实验解释判定机制；这里的阳性 / 阴性均为演示输入。
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="outputs">
+        <div class="wrap">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">04 / Files tell the story</div>
+              <h2>
+                稳定的目录，<span class="phrase">承载完整的分析过程。</span>
+              </h2>
+            </div>
+            <p>
+              各工具产物按阶段发布；合并表和报告独立存放。切换上方平台后，输入契约与示例命令同步变化。
+            </p>
+          </div>
+          <div class="outputs">
+            <div class="tree">
+              <b>results / &lt;run&gt; /</b><br />├─ 00_input_validation/
+              <span>输入转换</span><br />├─ 01_qc/ <span>reads 质量与汇总</span
+              ><br />├─ 02_assembly/ <span>组装与 coverage/</span><br />├─
+              03_assembly_qc/ <span>QUAST / 可选 polishing</span><br />├─
+              04_plasmid_detection/ <span>候选与共识</span><br />├─
+              05_plasmid_binning/ <span>可选分箱</span><br />├─
+              06_plasmid_typing/ <span>分型</span><br />├─ 07_host_prediction/
+              <span>profile / MAG / linking</span><br />├─ 08_annotation/
+              <span>基因与功能</span><br />├─ 09_comparative_genomics/
+              <span>catalog / 比较</span><br />├─ 10_abundance/
+              <span>质粒定量</span><br />├─ 11_diversity/
+              <span>多样性 / 差异</span><br />├─ 12_network/
+              <span>可选 FastSpar</span><br />├─ <b>tables/</b>
+              <span>contig / plasmid 丰度长表</span><br />├─ <b>report/</b>
+              <span>report.md / report.html / methods.md</span><br />└─
+              pipeline_info/ <span>Nextflow timeline / report</span>
+            </div>
+            <div>
+              <span class="output-label"
+                >INPUT CONTRACT / 样本身份先于分析</span
+              >
+              <h3 style="margin: 14px 0">一张 TSV，描述平台所需的材料。</h3>
+              <p class="schema">
+                sample_id · group · read1 · read2<br />long_reads · assembly ·
+                pod5 · bam<br />host_reference · notes
+              </p>
+              <p class="small">
+                按平台提供对应文件。sample_id 全表唯一，符合
+                [A-Za-z0-9][A-Za-z0-9_.-]*；显式元数据沿 tuple(meta, files)
+                通道传递，避免用文件名猜测样本身份。
+              </p>
+              <span class="output-label">OUTPUT CONTRACT / 核心中间产物</span>
+              <dl>
+                <div class="spec">
+                  <dt>识别</dt>
+                  <dd>逐工具预测、共识表、候选 FASTA、结构表。</dd>
+                </div>
+                <div class="spec">
+                  <dt>解释</dt>
+                  <dd>分型与功能注释、群落 profile；可选 MAG 与宿主关联表。</dd>
+                </div>
+                <div class="spec">
+                  <dt>比较</dt>
+                  <dd>cluster / 代表序列、丰度长表、条件统计与汇总报告。</dd>
+                </div>
+              </dl>
+              <p class="small">
+                目录是发布约定；未启用、无输入或未达门槛的分支可能不产出相应目录。
+              </p>
+            </div>
+          </div>
+          <div class="mini-heading">DSL2 ARCHITECTURE / 代码怎样组织</div>
+          <div class="architecture">
+            <article>
+              <h3>main.nf</h3>
+              <p>
+                校验参数、解析样本表、检查样本 ID，按 platform 选择平台，再接入
+                CROSS_SAMPLE。
+              </p>
+              <small>入口与路由</small>
+            </article>
+            <article>
+              <h3>subworkflows/</h3>
+              <p>
+                组织平台主干和共享分析，使用 join、mix、collect
+                等通道操作连接依赖。
+              </p>
+              <small>组合与数据流</small>
+            </article>
+            <article>
+              <h3>modules/ + bin/</h3>
+              <p>
+                vendored nf-core 工具模块，自研专用模块和 R 分析脚本；process
+                定义输入 / 输出契约。
+              </p>
+              <small>可执行分析单元</small>
+            </article>
+            <article>
+              <h3>nextflow.config + conf/</h3>
+              <p>
+                集中默认参数、资源 label、执行 profile
+                与按域配置的工具参数、发布路径。
+              </p>
+              <small>参数与运行策略</small>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="audit">
+        <div class="wrap">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">05 / Design notes & provenance</div>
+              <h2>设计说明，<span class="phrase">也保留实现边界。</span></h2>
+            </div>
+            <p>
+              主线展示通用平台；完整当前接线以平台路线文档为准。审查结论作为补充，帮助区分设计能力、实际接线与已验证结果。
+            </p>
+          </div>
+
+          <details>
+            <summary>跨样本统计对象与定量边界</summary>
+            <p>
+              当前 DIVERSITY、内部差异、DESeq2 / 网络读取共享 plasmid
+              表。通用入口以全组装精确/反向互补去重参考进行全部样本竞争重映射，
+              MMseqs2 比较目录保持独立。CoverM 请求 mean / TPM / RPKM / count，
+              raw_count 是 read 比对数，双端 mates 分开；protocol 则使用合格 paired fragments。
+              两种计数契约不能混用，coverage 取整也不能代替计数。
+            </p>
+          </details>
+
+          <details>
+            <summary>结构、MAG 与宿主关联的限制</summary>
+            <p>
+              ITR 单独出现时拓扑为未知；DTR/header 的 circular 仍是候选。
+              MAG 默认关闭，单 binner 或显式 DAS Tool 产生最终 bins；protocol 使用
+              PlasMAAG cellular bins。CRISPR 未实现。群落 profile、序列相似与共变
+              关联均不能升级为物理宿主或直接转移证据。
+            </p>
+          </details>
+
+          <details>
+            <summary>事实审查与验证记录</summary>
+            <p>
+              <a href="fact-reliability-audit.md">完整的 22 项事实可靠性审查</a
+              >保留早期源码依据和方法资料。历史43
+              项单元回归通过支持已有脚本行为；真实数据库端到端和生物学准确性需单独验收。早期
+              Computer Use 的视觉与交互验收见
+              <a href="visual-acceptance.md">页面验收记录</a>。
+            </p>
+          </details>
+
+          <details>
+            <summary>设计材料与源码索引</summary>
+            <p>
+              <a href="../README.md">README</a> ·
+              <a href="../main.nf">main.nf</a> ·
+              <a href="../nextflow.config">nextflow.config</a> ·
+              <a href="../subworkflows/plasmid_detection.nf">检测子工作流</a> ·
+              <a href="../subworkflows/cross_sample.nf">跨样本子工作流</a> ·
+              <a href="analysis-framework-plan.md">补充科学分析计划</a
+              >。本地源码链接需保留仓库结构；页面主体不依赖联网。
+            </p>
+          </details>
+          <div class="export">
+            <div>
+              <h3>把我们的流程，保存为一份说明。</h3>
+              <p>
+                导出包含当前平台、各阶段、可选开关与示例命令的
+                Markdown，或打印为 PDF。
+              </p>
+            </div>
+            <div class="actions" style="margin: 0">
+              <button class="primary" id="export">↓ 导出流程说明</button
+              ><button id="print">打印 / PDF</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <div class="wrap">
+        <span>AutoPlasm · NEXTFLOW PIPELINE DESIGN / 文档校订 2026-10-31</span
+        ><span>深色黑板 · 几何示意 · 逐步展开</span
+        ><span>概念图与交互数值均为演示</span>
+      </div>
+    </footer>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <noscript
+      ><p class="wrap">
+        启用 JavaScript
+        可查看平台路由与阶段交互。静态模块介绍与输出结构仍可阅读，完整流程见仓库
+        README。
+      </p></noscript
+    >
+    <script src="analysis-framework.js" defer></script>
+  </body>
+</html>
